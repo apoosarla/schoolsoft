@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: schoolsoft-api
+  datasource:
+    url: ${SCHOOLSOFT_DB_URL:jdbc:postgresql://localhost:5432/schoolsoft}
+    username: ${SCHOOLSOFT_DB_USER:schoolsoft}
+    password: ${SCHOOLSOFT_DB_PASSWORD:schoolsoft}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      pool-name: schoolsoft-hikari
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/platform
+    schemas: platform
+    default-schema: platform
+    create-schemas: true
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+  data:
+    redis:
+      host: ${SCHOOLSOFT_REDIS_HOST:localhost}
+      port: ${SCHOOLSOFT_REDIS_PORT:6379}
+
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-binding-errors: always
+
+schoolsoft:
+  jwt:
+    secret: ${SCHOOLSOFT_JWT_SECRET:dev-only-change-me-dev-only-change-me-dev-only}
+    access-ttl-minutes: 15
+    refresh-ttl-days: 30
+  tenant:
+    header: X-SCHOOLSOFT-Chain
+    default-platform-schema: platform
+  chain-migrations:
+    locations: classpath:db/migration/chain
+    auto-apply-on-startup: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,modulith
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    root: INFO
+    com.schoolsoft: DEBUG
+    org.springframework.modulith: INFO

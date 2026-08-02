@@ -1,0 +1,15 @@
+node_modules/
+.next/
+dist/
+build/
+target/
+.env
+.env.local
+.DS_Store
+*.log
+.idea/
+.vscode/
+.mvn/wrapper/maven-wrapper.jar
+.gradle/
+.expo/
+coverage/

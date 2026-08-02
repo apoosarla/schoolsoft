@@ -1,0 +1,33 @@
+{
+  "name": "mcb",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCB — Multi-tenant K-12 School OS (modular monolith). See MCB-design.md.",
+  "workspaces": [
+    "apps/admin-web",
+    "apps/hq-web",
+    "apps/public-site",
+    "apps/parent-app",
+    "apps/teacher-app",
+    "apps/driver-app",
+    "packages/*"
+  ],
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "api:dev": "cd apps/api && ./mvnw spring-boot:run",
+    "api:build": "cd apps/api && ./mvnw -DskipTests package",
+    "db:seed": "cd apps/api && ./mvnw -Pseed exec:java",
+    "admin:dev": "npm -w @mcb/admin-web run dev",
+    "hq:dev": "npm -w @mcb/hq-web run dev",
+    "public:dev": "npm -w @mcb/public-site run dev",
+    "dev:web": "concurrently -n admin,hq,public -c green,magenta,yellow \"npm run admin:dev\" \"npm run hq:dev\" \"npm run public:dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

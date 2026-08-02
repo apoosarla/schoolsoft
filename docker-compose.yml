@@ -1,0 +1,56 @@
+services:
+  # PostgreSQL runs on local machine, not containerized
+  # Ensure local postgres is running on localhost:5432 with user/password: schoolsoft/schoolsoft
+
+  redis:
+    image: redis:7-alpine
+    container_name: schoolsoft-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - schoolsoft_redis:/data
+
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
+    container_name: schoolsoft-opensearch
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=schoolsoftAdmin!123
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    ports:
+      - "9200:9200"
+    volumes:
+      - schoolsoft_os:/usr/share/opensearch/data
+
+  emqx:
+    image: emqx/emqx:5.6
+    container_name: schoolsoft-emqx
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "18083:18083"
+    volumes:
+      - schoolsoft_emqx:/opt/emqx/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: schoolsoft-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: schoolsoft
+      MINIO_ROOT_PASSWORD: schoolsoft_secret_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - schoolsoft_minio:/data
+
+volumes:
+  schoolsoft_redis:
+  schoolsoft_os:
+  schoolsoft_emqx:
+  schoolsoft_minio:
