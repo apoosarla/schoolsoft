@@ -34,12 +34,12 @@ public class JwtService {
     private final long refreshTtlDays;
 
     public JwtService(
-            @Value("${mcb.jwt.secret}") String secret,
-            @Value("${mcb.jwt.access-ttl-minutes:15}") long accessTtlMinutes,
-            @Value("${mcb.jwt.refresh-ttl-days:30}") long refreshTtlDays
+            @Value("${schoolsoft.jwt.secret}") String secret,
+            @Value("${schoolsoft.jwt.access-ttl-minutes:15}") long accessTtlMinutes,
+            @Value("${schoolsoft.jwt.refresh-ttl-days:30}") long refreshTtlDays
     ) {
         if (secret.length() < 32) {
-            throw new IllegalStateException("mcb.jwt.secret must be ≥ 32 chars");
+            throw new IllegalStateException("schoolsoft.jwt.secret must be ≥ 32 chars");
         }
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.accessTtlMinutes = accessTtlMinutes;

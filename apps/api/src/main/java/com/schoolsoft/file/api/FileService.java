@@ -25,8 +25,8 @@ public class FileService {
 
     public FileService(
         JdbcTemplate jdbc,
-        @Value("${mcb.file.bucket:mcb-dev}") String bucket,
-        @Value("${mcb.file.public-base:http://localhost:9000}") String publicBase
+        @Value("${schoolsoft.file.bucket:schoolsoft-dev}") String bucket,
+        @Value("${schoolsoft.file.public-base:http://localhost:9000}") String publicBase
     ) {
         this.jdbc = jdbc;
         this.defaultBucket = bucket;

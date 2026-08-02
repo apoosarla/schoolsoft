@@ -32,7 +32,7 @@ public class OutboxPublisher {
         this.platformJdbc = platformJdbc;
     }
 
-    @Scheduled(fixedDelayString = "${mcb.jobs.outbox.delay-ms:5000}")
+    @Scheduled(fixedDelayString = "${schoolsoft.jobs.outbox.delay-ms:5000}")
     public void drainAll() {
         List<ChainRow> chains = platformJdbc.query(
             "SELECT id, schema_name FROM platform.chain WHERE status='active'",

@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 
 /**
  * Stub. Real impl will use OpenSearch via spring-data-opensearch. Per-tenant
- * index aliases follow the pattern {@code mcb-{chain}-{entity}-{ay}}.
+ * index aliases follow the pattern {@code schoolsoft-{chain}-{entity}-{ay}}.
  */
 @Service
 public class SearchService {
@@ -17,7 +17,7 @@ public class SearchService {
 
     public void index(String entity, String id, Map<String, Object> doc) {
         var snap = TenantContext.get();
-        log.debug("[search/stub] index {} {}/{} → {}", aliasFor(entity, snap), id, doc);
+        log.debug("[search/stub] index {}/{} → {}", aliasFor(entity, snap), id, doc);
     }
 
     public List<Map<String, Object>> query(String entity, String q) {
@@ -26,6 +26,6 @@ public class SearchService {
 
     private String aliasFor(String entity, TenantContext.Snapshot snap) {
         String chain = snap == null ? "_" : (snap.chainSchema() == null ? "_" : snap.chainSchema());
-        return "mcb-" + chain + "-" + entity;
+        return "schoolsoft-" + chain + "-" + entity;
     }
 }

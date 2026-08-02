@@ -22,7 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
  *    applied independently. Per-schema version tracked in
  *    {@code platform.chain_schema_version}.
  *
- * Runs on application startup when {@code mcb.chain-migrations.auto-apply-on-startup}
+ * Runs on application startup when {@code schoolsoft.chain-migrations.auto-apply-on-startup}
  * is true. Production deployments should disable this and use the
  * {@link #migrateChain(UUID)} hook from the deploy pipeline so failures are
  * visible and retryable (Risk R11).
@@ -40,8 +40,8 @@ public class ChainSchemaMigrator {
     public ChainSchemaMigrator(
             DataSource dataSource,
             JdbcTemplate platformJdbc,
-            @Value("${mcb.chain-migrations.auto-apply-on-startup:true}") boolean autoApply,
-            @Value("${mcb.chain-migrations.locations:classpath:db/migration/chain}") String migrationsLocation
+            @Value("${schoolsoft.chain-migrations.auto-apply-on-startup:true}") boolean autoApply,
+            @Value("${schoolsoft.chain-migrations.locations:classpath:db/migration/chain}") String migrationsLocation
     ) {
         this.dataSource = dataSource;
         this.platformJdbc = platformJdbc;

@@ -151,5 +151,5 @@ CREATE TABLE IF NOT EXISTS platform.region_config (
 );
 
 INSERT INTO platform.region_config (region, object_store_bucket, primary_kms_arn) VALUES
-  ('ap-south-1', 'mcb-prod-ap-south-1', NULL)
+  ('ap-south-1', 'schoolsoft-prod-ap-south-1', NULL)
 ON CONFLICT (region) DO NOTHING;

@@ -2,6 +2,8 @@ package com.schoolsoft.tenancy.api;
 
 import com.schoolsoft.tenancy.internal.SchoolRepository;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
@@ -48,5 +50,105 @@ public class SchoolController {
     @GetMapping("/schools/{schoolId}/sections")
     public List<SectionDto> sections(@PathVariable UUID schoolId, @RequestParam(required = false) UUID academicYearId) {
         return repo.listSections(schoolId, academicYearId);
+    }
+
+    // -------------------------- Campus --------------------------
+
+    @GetMapping("/schools/{schoolId}/campuses")
+    public List<CampusDto> campuses(@PathVariable UUID schoolId) {
+        return repo.listCampuses(schoolId);
+    }
+
+    public record CreateCampusRequest(@NotBlank String name, boolean isPrimary) {}
+
+    @PostMapping("/schools/{schoolId}/campuses")
+    public CampusDto createCampus(@PathVariable UUID schoolId, @RequestBody CreateCampusRequest req) {
+        return repo.createCampus(schoolId, req.name(), req.isPrimary());
+    }
+
+    // -------------------------- Academic Year --------------------------
+
+    public record CreateAcademicYearRequest(
+        @NotBlank String code, @NotNull LocalDate startsOn, @NotNull LocalDate endsOn, boolean isCurrent
+    ) {}
+
+    @PostMapping("/schools/{schoolId}/academic-years")
+    public AcademicYearDto createAcademicYear(@PathVariable UUID schoolId, @RequestBody CreateAcademicYearRequest req) {
+        return repo.createAcademicYear(schoolId, req.code(), req.startsOn(), req.endsOn(), req.isCurrent());
+    }
+
+    // -------------------------- Term --------------------------
+
+    @GetMapping("/academic-years/{academicYearId}/terms")
+    public List<TermDto> terms(@PathVariable UUID academicYearId) {
+        return repo.listTerms(academicYearId);
+    }
+
+    public record CreateTermRequest(
+        @NotBlank String code, @NotBlank String name, @NotNull LocalDate startsOn, @NotNull LocalDate endsOn
+    ) {}
+
+    @PostMapping("/academic-years/{academicYearId}/terms")
+    public TermDto createTerm(@PathVariable UUID academicYearId, @RequestBody CreateTermRequest req) {
+        return repo.createTerm(academicYearId, req.code(), req.name(), req.startsOn(), req.endsOn());
+    }
+
+    // -------------------------- Grade --------------------------
+
+    public record CreateGradeRequest(@NotBlank String code, @NotBlank String name, int sortOrder) {}
+
+    @PostMapping("/schools/{schoolId}/grades")
+    public GradeDto createGrade(@PathVariable UUID schoolId, @RequestBody CreateGradeRequest req) {
+        return repo.createGrade(schoolId, req.code(), req.name(), req.sortOrder());
+    }
+
+    // -------------------------- Section --------------------------
+
+    public record CreateSectionRequest(
+        @NotNull UUID gradeId, @NotNull UUID academicYearId, @NotBlank String code, @NotBlank String name,
+        @NotBlank String strategyCode, Integer capacity
+    ) {}
+
+    @PostMapping("/schools/{schoolId}/sections")
+    public SectionDto createSection(@PathVariable UUID schoolId, @RequestBody CreateSectionRequest req) {
+        return repo.createSection(
+            schoolId, req.gradeId(), req.academicYearId(), req.code(), req.name(), req.strategyCode(), req.capacity()
+        );
+    }
+
+    public record BindCurriculumRequest(@NotNull UUID curriculumId, @NotBlank String strategyCode) {}
+
+    @PutMapping("/sections/{sectionId}/curriculum")
+    public ResponseEntity<Void> bindCurriculum(@PathVariable UUID sectionId, @RequestBody BindCurriculumRequest req) {
+        repo.bindSectionCurriculum(sectionId, req.curriculumId(), req.strategyCode());
+        return ResponseEntity.noContent().build();
+    }
+
+    // -------------------------- Subject --------------------------
+
+    @GetMapping("/schools/{schoolId}/subjects")
+    public List<SubjectDto> subjects(@PathVariable UUID schoolId) {
+        return repo.listSubjects(schoolId);
+    }
+
+    public record CreateSubjectRequest(@NotBlank String code, @NotBlank String name, String boardCode) {}
+
+    @PostMapping("/schools/{schoolId}/subjects")
+    public SubjectDto createSubject(@PathVariable UUID schoolId, @RequestBody CreateSubjectRequest req) {
+        return repo.createSubject(schoolId, req.code(), req.name(), req.boardCode());
+    }
+
+    // -------------------------- Section-Subject-Teacher --------------------------
+
+    @GetMapping("/sections/{sectionId}/teachers")
+    public List<SectionSubjectTeacherDto> sectionTeachers(@PathVariable UUID sectionId) {
+        return repo.listSectionSubjectTeachers(sectionId);
+    }
+
+    public record AssignTeacherRequest(@NotNull UUID subjectId, @NotNull UUID teacherStaffId, boolean isPrimary) {}
+
+    @PostMapping("/sections/{sectionId}/teachers")
+    public SectionSubjectTeacherDto assignTeacher(@PathVariable UUID sectionId, @RequestBody AssignTeacherRequest req) {
+        return repo.assignSectionSubjectTeacher(sectionId, req.subjectId(), req.teacherStaffId(), req.isPrimary());
     }
 }

@@ -67,7 +67,7 @@ public class NotificationRepository {
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 id, schoolId, recipientType, recipientId, channel, templateCode, language, varsJson, relatedType, relatedId
             );
-        } catch (JsonProcessingException e) {
+        } catch (JsonProcessingException | java.sql.SQLException e) {
             throw new IllegalStateException(e);
         }
         return id;

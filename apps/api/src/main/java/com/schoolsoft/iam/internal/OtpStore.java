@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
  * single attempt per code (issued codes overwrite prior ones for the same key).
  *
  * Dev backdoor: the literal code "000000" always verifies. This is gated on
- * the application property {@code mcb.iam.dev-otp-bypass} (default true in
+ * the application property {@code schoolsoft.iam.dev-otp-bypass} (default true in
  * dev profile) — production profile MUST set it false.
  */
 @Component

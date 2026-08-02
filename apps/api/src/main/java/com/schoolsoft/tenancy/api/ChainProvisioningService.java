@@ -6,7 +6,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Provisions a new chain (tenant). Per design §5a:
@@ -16,6 +15,11 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * Idempotent on slug — re-running with the same slug returns the existing
  * chain id and re-attempts any missing migrations (Flyway's job).
+ *
+ * Deliberately NOT wrapped in a single Spring-managed transaction:
+ * {@link ChainSchemaMigrator#migrateChain} runs with
+ * {@code propagation = NEVER} (Flyway owns its own transactions per
+ * migration), so an outer transaction here would conflict with it.
  */
 @Service
 public class ChainProvisioningService {
@@ -32,7 +36,6 @@ public class ChainProvisioningService {
 
     public record NewChain(UUID id, String schemaName, boolean created) {}
 
-    @Transactional
     public NewChain provision(String slug, String name, String planCode) {
         if (!slug.matches("[a-z][a-z0-9_]{2,40}")) {
             throw new IllegalArgumentException("Chain slug must be lower_snake, 3-40 chars");

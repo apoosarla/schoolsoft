@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Primary;
 public class DataSourceConfig {
 
     @Bean
+    @Primary
     @ConfigurationProperties("spring.datasource")
     public DataSourceProperties dataSourceProperties() {
         return new DataSourceProperties();
@@ -36,7 +37,7 @@ public class DataSourceConfig {
     @Primary
     public DataSource dataSource(
             HikariDataSource raw,
-            @Value("${mcb.tenant.default-platform-schema:platform}") String defaultSchema
+            @Value("${schoolsoft.tenant.default-platform-schema:platform}") String defaultSchema
     ) {
         return new TenantAwareDataSource(raw, defaultSchema);
     }
