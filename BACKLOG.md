@@ -1,4 +1,4 @@
-# MCB — Backlog
+# Schoolsoft — Backlog
 
 Running list of things identified as needed but not yet built. Not sequenced —
 check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority context.
@@ -14,36 +14,137 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   `ForbiddenException` → 403 otherwise). 2026-08-02.
 
 - ~~Chain HQ Console app — tenant/school onboarding UI.~~ Scaffolded
-  `apps/hq-web` (Next.js App Router + TS, matches the `@mcb/hq-web` workspace
-  already in root `package.json`). `/chains` page lists chains and provisions
-  new ones against the endpoint above. Dashboard/KPI views from design doc
-  §15 are still just the landing page stub. 2026-08-02.
+  `apps/hq-web` (Next.js App Router + TS). `/chains` page lists chains and
+  provisions new ones against the endpoint above. 2026-08-02.
+
+- ~~Build verification gap.~~ Both apps now actually compile/build/boot in
+  this environment (Java 25 + Maven locally; Node 24 + npm for hq-web).
+  `./mvnw -DskipTests package` produces a working jar; `npm install && npm
+  run build` produces a working Next.js build. All of the below was verified
+  against a live local Postgres instance, not just compiled. 2026-08-03.
+
+- ~~Rename mcb → schoolsoft.~~ Folder, git repo, Java packages
+  (`com.mcb` → `com.schoolsoft`), config keys (`mcb.*` → `schoolsoft.*` in
+  both `application.yml` and every `@Value`), npm workspace package names
+  (`@mcb/*` → `@schoolsoft/*` in root and `hq-web` `package.json` — these
+  were missed by the first rename pass since nothing had `npm install`ed
+  against them until the HQ Console work below), `MCB-design.md` →
+  `schoolsoft-design.md`. 2026-08-02/03.
+
+- ~~Stack upgrade.~~ Java 21 → 25, Spring Boot 3.3.4 → 3.5.16, Spring
+  Modulith 1.2.4 → 1.4.12. 2026-08-02.
+
+- ~~Academic Setup CRUD.~~ Campus, Term, Subject, Section-Subject-Teacher
+  assignment, plus create endpoints for Academic Year/Grade/Section
+  (previously read-only) and section→curriculum binding — all in
+  `tenancy.api.SchoolController` / `tenancy.internal.SchoolRepository`.
+  2026-08-02.
+
+- ~~Curriculum Engine.~~ New `curriculum` module: platform-level templates
+  (seeded CBSE Class 10 Maths + Cambridge IGCSE Maths 0580, migration V003),
+  clone-from-template with recursive tree materialisation (path/depth),
+  manual node/learning-outcome authoring, publish. 2026-08-02.
+
+- ~~Academic Core + Operations + LMS + Comms + Hardware backend surface.~~
+  New modules, each with DTOs/repository/controller and smoke-tested
+  end-to-end against live Postgres: `enrolment`, `admissions` (full funnel +
+  convert-to-student), `attendance` (day-level + period-level marking,
+  leave), `timetable` (teacher clash detection), `assessment` (components,
+  marks, report cards), `fees` (invoices, idempotent payments, double-entry
+  ledger), `lms` (content, lesson plans, homework, quiz engine), `comms`
+  (announcements, 1:1 messaging), `transport` (routes/stops/GPS/trips +
+  geofence check), `library` (catalogue, issue/return with late fees),
+  `device` (biometric/RFID registry + attendance bridge), `boardintegration`
+  (CIE Direct/UDISE+ export job framework — adapter itself is a stub, no
+  sandbox credentials available), `dashboard` (single-school operational
+  overview). 2026-08-02/03.
+
+- ~~Feature Flags / Theming / Audit / File admin surfaces.~~ These
+  Layer-0 modules had working internal logic but no way to actually use them
+  — `FeatureFlags` had no write endpoint, `ThemeController` had no update
+  endpoint, `AuditService` had no query endpoint, `FileService` had no
+  controller at all (completely unreachable over HTTP). All four now have
+  full read/write REST surfaces. 2026-08-03.
+
+- ~~HQ Console per-chain stats.~~ `GET
+  /v1/platform-admin/chains/{id}/stats` (school count, active enrolments,
+  active staff, fees collected) using the Risk R12-sanctioned fan-out
+  pattern; wired into the `/chains` page as a per-row "Stats" toggle.
+  Verified in-browser. 2026-08-03.
+
+## Bugs found and fixed along the way
+
+Worth keeping a record of these since none were caught until something
+actually exercised the code path — a reminder that "compiles" and "correct"
+are different claims:
+
+- `NotificationRepository`: uncaught `SQLException` from `PGobject.setValue`
+  — the whole module had never compiled before.
+- `DataSourceConfig`: bean name collision on `DataSourceProperties` surfaced
+  by the Spring Boot 3.5 upgrade.
+- `ChainProvisioningService`: outer `@Transactional` conflicted with
+  `ChainSchemaMigrator`'s `propagation = NEVER` — chain provisioning was
+  completely broken (500 on every call) until this session.
+- `attendance_record`'s `UNIQUE(student_id, on_date, period_no)` doesn't
+  dedupe day-level rows under Postgres NULL semantics — added a partial
+  unique index (V010).
+- Nine call sites doing `(Double) rs.getObject(col)` on `NUMERIC` columns —
+  Postgres returns `BigDecimal` there, not `Double`; every one threw
+  `ClassCastException` on first real read. Added `platform.db.Jdbc#nullableDouble`.
+- `Enrolment`/`Timetable`'s business-rule guards threw `IllegalStateException`,
+  which `GlobalExceptionHandler` doesn't map — surfaced as raw 500 instead
+  of 400.
+- `transport_stop.school_id` is `NOT NULL` but `addStop()` never populated
+  it — every stop insert failed until fixed.
+- `ThemeController`'s original upsert used `INSERT..ON CONFLICT` with
+  `COALESCE` on the `VALUES` side, so a partial update (e.g. accent color
+  only) would silently reset the primary color to the schema default.
+- `ChainSchemaMigrator` computed the tracked `schema_version` from Flyway's
+  `result.targetSchemaVersion`, which is only populated when `migrate()`
+  actually applies something — every restart after the first (a no-op
+  migrate call) silently zeroed `platform.chain.schema_version` and
+  `platform.chain_schema_version`. Found via the new HQ Console stats UI.
 
 ## Open items
 
-- **Platform-admin login flow.** The HQ Console's `/chains` page currently
+- **Platform-admin login flow.** The HQ Console's `/chains` page still
   requires pasting in a bearer token by hand — `AuthController` /
   `UserLookupService` only resolve identities that live inside a chain schema
   (staff/guardian/student); nothing resolves against `platform.platform_user`
   or issues a `platform_admin` JWT. Needs an OTP-or-password flow scoped to
   the platform schema before the HQ Console is usable by anyone but a dev
-  with direct DB/token access. Surfaced while building the chain onboarding
-  endpoint above.
+  with direct DB/token access.
 
-- **Build verification gap.** The new backend controller and `hq-web` app
-  were written and reviewed against existing code patterns but not actually
-  compiled/built — this sandbox has no Maven (only JDK 11, pom requires 21)
-  and the npm/Maven registries are blocked by the network allowlist. Run
-  `./mvnw -DskipTests compile` in `apps/api` and `npm install && npm run
-  build` in `apps/hq-web` in an environment with registry access before
-  treating either as verified.
+- **School Admin Web, Parent app, Teacher app, Driver app, Public/Admissions
+  microsite.** None of these surfaces exist yet — only `hq-web` (chain-level)
+  has any frontend. The backend now has working endpoints for essentially
+  everything a School Admin Web console would need (academic setup,
+  admissions, attendance, timetable, assessment, fees, LMS, comms,
+  transport, library, dashboards) — that's the natural next frontend to
+  scaffold, since it's the primary consumer of nearly all of the above.
 
-- **Chain HQ Console — dashboards.** Multi-school KPIs, policy/template
-  push-down, centralised reporting, identity governance (design doc §15) are
-  unbuilt — only tenant onboarding exists so far.
+- **Real external integrations.** GST e-Invoice (NIC IRP), Tally/Zoho Books
+  sync, LTI 1.3 / OneRoster 1.2 (real OAuth/OIDC flows), CIE Direct / UDISE+
+  actual HTTP adapters (the job-queue framework exists — `boardintegration`
+  module — but `process()` is a stub with a canned result; no sandbox
+  credentials available in this environment to build/test a real client
+  against), WhatsApp Business API. All need real credentials/sandboxes this
+  environment doesn't have.
+
+- **Cross-module audit trail.** `AuditService.record(...)` exists and has a
+  query endpoint now, but none of the ~15 new modules built this session
+  call it on their mutations — attendance marks, fee payments, mark entry,
+  etc. are not yet audit-logged. Retrofitting it across every controller is
+  a real but mechanical chunk of work.
+
+- **Chain HQ multi-chain warehouse dashboards.** The per-chain stats
+  endpoint added this session is deliberately the Risk-R12-sanctioned
+  "small fan-out, hard tenant cap" MVP posture — a real cross-chain
+  analytics warehouse is explicitly Phase 2 per design doc §19.
 
 ---
 
 _Added 2026-08-02, from a conversation reviewing SSO/RBAC plans and noticing
-tenant onboarding had no admin surface. Updated same day once the endpoint +
-console scaffold landed._
+tenant onboarding had no admin surface. Rewritten 2026-08-03 after a session
+that built out nearly the entire MVP backend module surface — see git log
+for the full sequence of commits._
