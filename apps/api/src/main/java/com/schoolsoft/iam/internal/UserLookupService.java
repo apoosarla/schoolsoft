@@ -7,7 +7,6 @@ import java.util.UUID;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Resolves an account identifier (email or phone) to a chain + school by
@@ -16,6 +15,18 @@ import org.springframework.transaction.annotation.Transactional;
  * by an account-created event, so lookup is O(1).
  *
  * The chain_slug hint, if supplied, narrows the scan to a single schema.
+ *
+ * Deliberately NOT {@code @Transactional}: {@link TenantAwareDataSource}
+ * only re-evaluates {@code search_path} when a connection is freshly
+ * acquired from the pool. A surrounding Spring transaction binds one
+ * connection for the whole method up front — before this class gets a
+ * chance to set {@link TenantContext} per chain — so every query inside
+ * would run against whatever schema was current at method entry (the
+ * public {@code /v1/auth/*} endpoints that call this have no
+ * {@link TenantContext} set at all, so that's the {@code platform}
+ * fallback schema, which has no {@code user_account} table). This silently
+ * broke every staff/guardian OTP login and refresh-token call until an
+ * end-to-end browser test caught it.
  */
 @Service
 public class UserLookupService {
@@ -36,7 +47,6 @@ public class UserLookupService {
         String subjectType
     ) {}
 
-    @Transactional(readOnly = true)
     public Optional<Resolved> resolve(String identifier, String chainSlug) {
         List<ChainRow> chains;
         if (chainSlug != null && !chainSlug.isBlank()) {
@@ -58,7 +68,6 @@ public class UserLookupService {
         return Optional.empty();
     }
 
-    @Transactional(readOnly = true)
     public Optional<Resolved> resolveById(UUID userAccountId, String chainSchema) {
         TenantContext.set(TenantContext.trustedJob(chainSchema, null));
         try {
