@@ -149,3 +149,68 @@ export function listStudents(schoolId: string, q?: string): Promise<StudentDto[]
   if (q) params.set("q", q);
   return apiFetch<StudentDto[]>(`/v1/people/students?${params.toString()}`);
 }
+
+export type SectionDto = {
+  id: string;
+  schoolId: string;
+  gradeId: string;
+  gradeName: string;
+  academicYearId: string;
+  code: string;
+  name: string;
+  curriculumId: string | null;
+  strategyCode: string;
+  capacity: number | null;
+};
+
+export function listSections(schoolId: string): Promise<SectionDto[]> {
+  return apiFetch<SectionDto[]>(`/v1/tenancy/schools/${schoolId}/sections`);
+}
+
+export type EnrolmentDto = {
+  id: string;
+  schoolId: string;
+  studentId: string;
+  sectionId: string;
+  sectionLabel: string;
+  academicYearId: string;
+  startsOn: string;
+  endsOn: string | null;
+  status: string;
+  rollNo: string | null;
+};
+
+export function rosterForSection(sectionId: string): Promise<EnrolmentDto[]> {
+  return apiFetch<EnrolmentDto[]>(`/v1/enrolment/sections/${sectionId}`);
+}
+
+export type AttendanceRecordDto = {
+  id: string;
+  schoolId: string;
+  studentId: string;
+  sectionId: string;
+  onDate: string;
+  periodNo: number | null;
+  status: string;
+  source: string;
+  notes: string | null;
+};
+
+export function attendanceForSectionOnDate(sectionId: string, onDate: string): Promise<AttendanceRecordDto[]> {
+  const params = new URLSearchParams({ sectionId, onDate });
+  return apiFetch<AttendanceRecordDto[]>(`/v1/attendance?${params.toString()}`);
+}
+
+export type MarkAttendanceEntry = { studentId: string; status: string; notes?: string };
+
+export function markAttendanceBulk(
+  schoolId: string,
+  sectionId: string,
+  onDate: string,
+  entries: MarkAttendanceEntry[]
+): Promise<AttendanceRecordDto[]> {
+  return apiFetch<AttendanceRecordDto[]>("/v1/attendance/mark/bulk", {
+    method: "POST",
+    body: JSON.stringify({ schoolId, sectionId, onDate, source: "manual", entries }),
+  });
+}
