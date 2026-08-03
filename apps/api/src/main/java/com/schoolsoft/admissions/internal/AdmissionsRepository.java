@@ -33,7 +33,7 @@ public class AdmissionsRepository {
         rs.getString("guardian_email"),
         rs.getString("source"),
         rs.getString("state"),
-        (Double) rs.getObject("test_score"),
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "test_score"),
         rs.getString("interview_notes"),
         rs.getDate("offer_expires_on") == null ? null : rs.getDate("offer_expires_on").toLocalDate(),
         rs.getString("converted_student_id") == null ? null : UUID.fromString(rs.getString("converted_student_id")),

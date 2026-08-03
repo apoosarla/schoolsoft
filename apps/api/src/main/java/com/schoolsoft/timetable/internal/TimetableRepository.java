@@ -45,7 +45,7 @@ public class TimetableRepository {
         return jdbc.query(SELECT + "WHERE t.teacher_staff_id = ? ORDER BY t.day_of_week, t.period_no", MAPPER, teacherStaffId);
     }
 
-    /** Throws {@link IllegalStateException} if the teacher already has an overlapping slot. */
+    /** Throws {@link IllegalArgumentException} (mapped to 400 by GlobalExceptionHandler) if the teacher already has an overlapping slot. */
     public TimetableSlotDto createSlot(
         UUID sectionId, UUID subjectId, UUID teacherStaffId, int dayOfWeek, int periodNo,
         LocalTime startsAt, LocalTime endsAt, String room, LocalDate effectiveFrom, LocalDate effectiveTo
@@ -59,7 +59,7 @@ public class TimetableRepository {
             effectiveTo == null ? null : Date.valueOf(effectiveTo), Date.valueOf(effectiveFrom)
         );
         if (clashCount != null && clashCount > 0) {
-            throw new IllegalStateException("Teacher already has an overlapping timetable slot on day " + dayOfWeek);
+            throw new IllegalArgumentException("Teacher already has an overlapping timetable slot on day " + dayOfWeek);
         }
         UUID id = UUID.randomUUID();
         jdbc.update(

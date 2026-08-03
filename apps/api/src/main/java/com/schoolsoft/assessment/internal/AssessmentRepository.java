@@ -39,8 +39,8 @@ public class AssessmentRepository {
         rs.getString("strategy_code"),
         rs.getString("name"),
         rs.getString("assessment_type"),
-        (Double) rs.getObject("max_marks"),
-        (Double) rs.getObject("weight_pct"),
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "max_marks"),
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "weight_pct"),
         rs.getDate("scheduled_on") == null ? null : rs.getDate("scheduled_on").toLocalDate(),
         rs.getString("status")
     );
@@ -90,7 +90,7 @@ public class AssessmentRepository {
         rs.getString("code"),
         rs.getString("name"),
         rs.getDouble("max_marks"),
-        (Double) rs.getObject("weight_pct"),
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "weight_pct"),
         rs.getInt("sort_order")
     );
 
@@ -123,7 +123,7 @@ public class AssessmentRepository {
         UUID.fromString(rs.getString("id")),
         UUID.fromString(rs.getString("assessment_component_id")),
         UUID.fromString(rs.getString("student_id")),
-        (Double) rs.getObject("raw_marks"),
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "raw_marks"),
         rs.getString("grade_letter"),
         rs.getString("remarks"),
         rs.getBoolean("is_absent")

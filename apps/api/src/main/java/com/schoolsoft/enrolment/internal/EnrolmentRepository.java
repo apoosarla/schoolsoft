@@ -56,7 +56,7 @@ public class EnrolmentRepository {
 
     public EnrolmentDto enrol(UUID schoolId, UUID studentId, UUID sectionId, UUID academicYearId, LocalDate startsOn, String rollNo) {
         if (findActiveByStudent(studentId).isPresent()) {
-            throw new IllegalStateException("Student already has an active enrolment; withdraw or transfer first");
+            throw new IllegalArgumentException("Student already has an active enrolment; withdraw or transfer first");
         }
         UUID id = UUID.randomUUID();
         jdbc.update(

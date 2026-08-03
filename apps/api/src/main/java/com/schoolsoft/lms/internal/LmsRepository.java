@@ -133,7 +133,7 @@ public class LmsRepository {
         rs.getString("instructions"),
         rs.getString("submission_type"),
         rs.getTimestamp("due_at") == null ? null : rs.getTimestamp("due_at").toInstant(),
-        (Double) rs.getObject("max_marks"),
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "max_marks"),
         rs.getString("status"),
         rs.getString("created_by_staff_id") == null ? null : UUID.fromString(rs.getString("created_by_staff_id"))
     );
@@ -168,7 +168,7 @@ public class LmsRepository {
         UUID.fromString(rs.getString("student_id")),
         rs.getString("body"),
         rs.getTimestamp("submitted_at").toInstant(),
-        (Double) rs.getObject("marks"),
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "marks"),
         rs.getString("feedback"),
         rs.getTimestamp("graded_at") == null ? null : rs.getTimestamp("graded_at").toInstant()
     );
@@ -274,7 +274,7 @@ public class LmsRepository {
         UUID.fromString(rs.getString("student_id")),
         rs.getTimestamp("started_at").toInstant(),
         rs.getTimestamp("submitted_at") == null ? null : rs.getTimestamp("submitted_at").toInstant(),
-        (Double) rs.getObject("score")
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "score")
     );
 
     public QuizAttemptDto startAttempt(UUID quizId, UUID studentId) {

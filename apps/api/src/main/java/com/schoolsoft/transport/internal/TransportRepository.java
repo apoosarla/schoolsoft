@@ -101,7 +101,8 @@ public class TransportRepository {
 
     private static final RowMapper<TransportStopDto> STOP_MAPPER = (rs, i) -> new TransportStopDto(
         UUID.fromString(rs.getString("id")), UUID.fromString(rs.getString("route_id")), rs.getString("name"),
-        rs.getInt("sort_order"), (Double) rs.getObject("lat"), (Double) rs.getObject("lng"), (Double) rs.getObject("fee")
+        rs.getInt("sort_order"), com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "lat"),
+        com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "lng"), com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "fee")
     );
 
     public List<TransportStopDto> listStops(UUID routeId) {
@@ -112,10 +113,13 @@ public class TransportRepository {
     }
 
     public TransportStopDto addStop(UUID routeId, String name, int sortOrder, Double lat, Double lng, Double fee) {
+        UUID schoolId = jdbc.queryForObject(
+            "SELECT school_id FROM transport_route WHERE id = ?", (rs, i) -> UUID.fromString(rs.getString("school_id")), routeId
+        );
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO transport_stop (id, route_id, name, sort_order, lat, lng, fee) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            id, routeId, name, sortOrder, lat, lng, fee
+            "INSERT INTO transport_stop (id, school_id, route_id, name, sort_order, lat, lng, fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            id, schoolId, routeId, name, sortOrder, lat, lng, fee
         );
         return jdbc.queryForObject(
             "SELECT id, route_id, name, sort_order, lat, lng, fee FROM transport_stop WHERE id = ?", STOP_MAPPER, id
@@ -169,7 +173,8 @@ public class TransportRepository {
             "ORDER BY occurred_at DESC LIMIT ?",
             (rs, i) -> new GpsPingDto(
                 UUID.fromString(rs.getString("vehicle_id")), rs.getTimestamp("occurred_at").toInstant(),
-                rs.getDouble("lat"), rs.getDouble("lng"), (Double) rs.getObject("speed_kmh"), (Double) rs.getObject("heading")
+                rs.getDouble("lat"), rs.getDouble("lng"), com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "speed_kmh"),
+                com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "heading")
             ),
             vehicleId, limit
         );
