@@ -1,6 +1,6 @@
 # Cambridge-School Stack Survey — India
 
-> Companion to `MCB-design.md` §2 (Reference Landscape).
+> Companion to `schoolsoft-design.md` §2 (Reference Landscape).
 > Question this answers: *What SIS / LMS / ERP do top Cambridge-affiliated schools in India actually run, and what does that tell us about where MCB has to win?*
 > Method: public-source only — school websites, parent-portal subdomains, vendor case studies, vendor customer pages. Mappings flagged as **Confirmed** (school or vendor publicly states it) or **Inferred** (subdomain pattern, login page branding, or strong circumstantial signal). No private/insider data.
 > Date: May 2026.

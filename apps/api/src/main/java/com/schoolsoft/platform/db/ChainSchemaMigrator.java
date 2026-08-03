@@ -93,8 +93,14 @@ public class ChainSchemaMigrator {
                     .createSchemas(true)
                     .baselineOnMigrate(true)
                     .load();
-            var result = flyway.migrate();
-            int version = (result.targetSchemaVersion == null) ? 0 : Integer.parseInt(result.targetSchemaVersion);
+            flyway.migrate();
+            // Not result.targetSchemaVersion — Flyway only populates that when migrate()
+            // actually applied something. On a no-op run (schema already current, which is
+            // every restart after the first) it's null/empty, and treating that as "reset
+            // to 0" was overwriting the real tracked version. flyway.info().current() reports
+            // the schema's actual current version regardless of whether this call did anything.
+            var current = flyway.info().current();
+            int version = (current == null) ? 0 : Integer.parseInt(current.getVersion().getVersion());
             platformJdbc.update(
                 "INSERT INTO platform.chain_schema_version (chain_id, schema_version, last_migrated_at, last_error) " +
                 "VALUES (?, ?, now(), NULL) " +

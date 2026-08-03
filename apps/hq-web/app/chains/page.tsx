@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   ApiError,
   ChainDto,
+  ChainStatsDto,
   clearToken,
+  getChainStats,
   getToken,
   listChains,
   provisionChain,
@@ -27,6 +29,25 @@ export default function ChainsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
+
+  const [expandedChainId, setExpandedChainId] = useState<string | null>(null);
+  const [stats, setStats] = useState<Record<string, ChainStatsDto | "loading" | "error">>({});
+
+  async function toggleStats(chainId: string) {
+    if (expandedChainId === chainId) {
+      setExpandedChainId(null);
+      return;
+    }
+    setExpandedChainId(chainId);
+    if (stats[chainId] && stats[chainId] !== "error") return;
+    setStats((s) => ({ ...s, [chainId]: "loading" }));
+    try {
+      const result = await getChainStats(chainId);
+      setStats((s) => ({ ...s, [chainId]: result }));
+    } catch {
+      setStats((s) => ({ ...s, [chainId]: "error" }));
+    }
+  }
 
   useEffect(() => {
     setHasToken(!!getToken());
@@ -186,25 +207,69 @@ export default function ChainsPage() {
                 <th>Status</th>
                 <th>Schema v.</th>
                 <th>Created</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {chains.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.name}</td>
-                  <td>{c.slug}</td>
-                  <td>{c.schemaName}</td>
-                  <td>{c.planCode}</td>
-                  <td>{c.region}</td>
-                  <td>
-                    <span className={`badge ${c.status === "active" ? "badge-active" : "badge-suspended"}`}>
-                      {c.status}
-                    </span>
-                  </td>
-                  <td>{c.schemaVersion}</td>
-                  <td>{new Date(c.createdAt).toLocaleDateString()}</td>
-                </tr>
-              ))}
+              {chains.map((c) => {
+                const rowStats = stats[c.id];
+                return (
+                  <Fragment key={c.id}>
+                    <tr>
+                      <td>{c.name}</td>
+                      <td>{c.slug}</td>
+                      <td>{c.schemaName}</td>
+                      <td>{c.planCode}</td>
+                      <td>{c.region}</td>
+                      <td>
+                        <span className={`badge ${c.status === "active" ? "badge-active" : "badge-suspended"}`}>
+                          {c.status}
+                        </span>
+                      </td>
+                      <td>{c.schemaVersion}</td>
+                      <td>{new Date(c.createdAt).toLocaleDateString()}</td>
+                      <td>
+                        <button type="button" onClick={() => toggleStats(c.id)}>
+                          {expandedChainId === c.id ? "Hide stats" : "Stats"}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedChainId === c.id && (
+                      <tr>
+                        <td colSpan={9}>
+                          {rowStats === "loading" && <span className="hint">Loading stats…</span>}
+                          {rowStats === "error" && (
+                            <span className="hint">Failed to load stats for this chain.</span>
+                          )}
+                          {rowStats && rowStats !== "loading" && rowStats !== "error" && (
+                            <div className="form-row" style={{ gap: "2rem" }}>
+                              <span>
+                                <strong>{rowStats.schoolCount}</strong> schools
+                              </span>
+                              <span>
+                                <strong>{rowStats.activeEnrolments}</strong> active enrolments
+                              </span>
+                              <span>
+                                <strong>{rowStats.staffCount}</strong> active staff
+                              </span>
+                              <span>
+                                <strong>
+                                  {rowStats.feeCollectedTotal.toLocaleString(undefined, {
+                                    style: "currency",
+                                    currency: "INR",
+                                    maximumFractionDigits: 0,
+                                  })}
+                                </strong>{" "}
+                                fees collected
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         )}

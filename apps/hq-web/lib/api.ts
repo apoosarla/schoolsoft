@@ -100,3 +100,15 @@ export function provisionChain(req: ProvisionChainRequest): Promise<ProvisionCha
     body: JSON.stringify(req),
   });
 }
+
+export type ChainStatsDto = {
+  chainId: string;
+  schoolCount: number;
+  activeEnrolments: number;
+  staffCount: number;
+  feeCollectedTotal: number;
+};
+
+export function getChainStats(chainId: string): Promise<ChainStatsDto> {
+  return apiFetch<ChainStatsDto>(`/v1/platform-admin/chains/${chainId}/stats`);
+}

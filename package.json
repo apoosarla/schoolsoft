@@ -1,8 +1,8 @@
 {
-  "name": "mcb",
+  "name": "schoolsoft",
   "version": "0.1.0",
   "private": true,
-  "description": "MCB — Multi-tenant K-12 School OS (modular monolith). See MCB-design.md.",
+  "description": "Schoolsoft — Multi-tenant K-12 School OS (modular monolith). See schoolsoft-design.md.",
   "workspaces": [
     "apps/admin-web",
     "apps/hq-web",
@@ -19,9 +19,9 @@
     "api:dev": "cd apps/api && ./mvnw spring-boot:run",
     "api:build": "cd apps/api && ./mvnw -DskipTests package",
     "db:seed": "cd apps/api && ./mvnw -Pseed exec:java",
-    "admin:dev": "npm -w @mcb/admin-web run dev",
-    "hq:dev": "npm -w @mcb/hq-web run dev",
-    "public:dev": "npm -w @mcb/public-site run dev",
+    "admin:dev": "npm -w @schoolsoft/admin-web run dev",
+    "hq:dev": "npm -w @schoolsoft/hq-web run dev",
+    "public:dev": "npm -w @schoolsoft/public-site run dev",
     "dev:web": "concurrently -n admin,hq,public -c green,magenta,yellow \"npm run admin:dev\" \"npm run hq:dev\" \"npm run public:dev\""
   },
   "devDependencies": {

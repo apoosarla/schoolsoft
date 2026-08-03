@@ -1,7 +1,7 @@
 # MCB — Backlog
 
 Running list of things identified as needed but not yet built. Not sequenced —
-check `MCB-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority context.
+check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority context.
 
 ---
 

@@ -1,8 +1,8 @@
 {
-  "name": "@mcb/hq-web",
+  "name": "@schoolsoft/hq-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Chain HQ Console — tenant/school onboarding, cross-school dashboards (MCB-design.md §15).",
+  "description": "Chain HQ Console — tenant/school onboarding, cross-school dashboards (schoolsoft-design.md §15).",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
