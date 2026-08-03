@@ -3,6 +3,8 @@ package com.schoolsoft.audit.api;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolsoft.platform.tenancy.TenantContext;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -50,5 +52,29 @@ public class AuditService {
         p.setType("jsonb");
         p.setValue(s);
         return p;
+    }
+
+    public List<AuditLogEntryDto> query(String targetType, UUID targetId, UUID actorUserId, int limit) {
+        StringBuilder sql = new StringBuilder(
+            "SELECT id, school_id, actor_user_id, action, target_type, target_id, occurred_at FROM audit_log WHERE 1=1 "
+        );
+        List<Object> args = new ArrayList<>();
+        if (targetType != null) { sql.append("AND target_type = ? "); args.add(targetType); }
+        if (targetId != null) { sql.append("AND target_id = ? "); args.add(targetId); }
+        if (actorUserId != null) { sql.append("AND actor_user_id = ? "); args.add(actorUserId); }
+        sql.append("ORDER BY occurred_at DESC LIMIT ?");
+        args.add(limit);
+        return jdbc.query(sql.toString(),
+            (rs, i) -> new AuditLogEntryDto(
+                rs.getLong("id"),
+                rs.getString("school_id") == null ? null : UUID.fromString(rs.getString("school_id")),
+                rs.getString("actor_user_id") == null ? null : UUID.fromString(rs.getString("actor_user_id")),
+                rs.getString("action"),
+                rs.getString("target_type"),
+                rs.getString("target_id") == null ? null : UUID.fromString(rs.getString("target_id")),
+                rs.getTimestamp("occurred_at").toInstant()
+            ),
+            args.toArray()
+        );
     }
 }
