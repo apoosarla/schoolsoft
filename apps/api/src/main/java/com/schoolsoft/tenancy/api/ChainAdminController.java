@@ -2,12 +2,15 @@ package com.schoolsoft.tenancy.api;
 
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ForbiddenException;
+import com.schoolsoft.platform.web.NotFoundException;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,10 +32,12 @@ public class ChainAdminController {
 
     private final ChainProvisioningService provisioningService;
     private final JdbcTemplate platformJdbc;
+    private final DataSource dataSource;
 
-    public ChainAdminController(ChainProvisioningService provisioningService, JdbcTemplate platformJdbc) {
+    public ChainAdminController(ChainProvisioningService provisioningService, JdbcTemplate platformJdbc, DataSource dataSource) {
         this.provisioningService = provisioningService;
         this.platformJdbc = platformJdbc;
+        this.dataSource = dataSource;
     }
 
     private void requirePlatformAdmin() {
@@ -80,5 +85,34 @@ public class ChainAdminController {
         requirePlatformAdmin();
         var result = provisioningService.provision(req.slug(), req.name(), req.planCode());
         return ResponseEntity.ok(new ProvisionChainResponse(result.id(), result.schemaName(), result.created()));
+    }
+
+    /**
+     * Cross-chain platform-admin view. Per Risk R12 ("Cross-chain analytics
+     * rebuilt out of OLTP") — the sanctioned MVP posture is a small fan-out
+     * query helper against a single chain schema, not a warehouse (that's
+     * Phase 2). Uses {@link TenantContext#trustedJob} the same way
+     * {@code UserLookupService} and {@code ChainSchemaMigrator} already do
+     * to step outside the requesting platform-admin's own search_path.
+     */
+    @GetMapping("/{id}/stats")
+    public ChainStatsDto stats(@PathVariable UUID id) {
+        requirePlatformAdmin();
+        String schemaName = platformJdbc.query(
+            "SELECT schema_name FROM platform.chain WHERE id = ?",
+            (rs, i) -> rs.getString("schema_name"), id
+        ).stream().findFirst().orElseThrow(() -> new NotFoundException("Chain not found: " + id));
+
+        TenantContext.set(TenantContext.trustedJob(schemaName, id));
+        try {
+            var chainJdbc = new JdbcTemplate(dataSource);
+            long schoolCount = chainJdbc.queryForObject("SELECT count(*) FROM school", Long.class);
+            long activeEnrolments = chainJdbc.queryForObject("SELECT count(*) FROM enrolment WHERE status = 'active'", Long.class);
+            long staffCount = chainJdbc.queryForObject("SELECT count(*) FROM staff WHERE is_active", Long.class);
+            double feeCollectedTotal = chainJdbc.queryForObject("SELECT COALESCE(sum(paid), 0) FROM fee_invoice", Double.class);
+            return new ChainStatsDto(id, schoolCount, activeEnrolments, staffCount, feeCollectedTotal);
+        } finally {
+            TenantContext.clear();
+        }
     }
 }
