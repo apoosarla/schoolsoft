@@ -2,6 +2,7 @@ package com.schoolsoft.transport.internal;
 
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.transport.api.DriverDto;
+import com.schoolsoft.transport.api.GeofenceStatusDto;
 import com.schoolsoft.transport.api.GpsPingDto;
 import com.schoolsoft.transport.api.StudentTransportDto;
 import com.schoolsoft.transport.api.TransportRouteDto;
@@ -206,5 +207,59 @@ public class TransportRepository {
             "SELECT id, school_id, route_id, vehicle_id, driver_id, direction, started_at, ended_at FROM trip WHERE id = ?",
             TRIP_MAPPER, id
         );
+    }
+
+    // -------------------------- Geofencing --------------------------
+
+    private static final double EARTH_RADIUS_M = 6_371_000.0;
+
+    /**
+     * Compares the vehicle's most recent GPS ping against a stop's geofence
+     * (per §5.5). Distance via the Haversine formula — accurate enough at
+     * stop-radius scale (tens to low-hundreds of metres) without a PostGIS
+     * dependency this schema doesn't otherwise need.
+     */
+    public GeofenceStatusDto checkGeofence(UUID vehicleId, UUID stopId) {
+        var pingRows = jdbc.query(
+            "SELECT lat, lng, occurred_at FROM gps_ping WHERE vehicle_id = ? ORDER BY occurred_at DESC LIMIT 1",
+            (rs, i) -> new double[]{rs.getDouble("lat"), rs.getDouble("lng")},
+            vehicleId
+        );
+        if (pingRows.isEmpty()) throw new NotFoundException("No GPS pings recorded for vehicle: " + vehicleId);
+        double[] ping = pingRows.get(0);
+        Instant asOf = jdbc.queryForObject(
+            "SELECT occurred_at FROM gps_ping WHERE vehicle_id = ? ORDER BY occurred_at DESC LIMIT 1",
+            (rs, i) -> rs.getTimestamp("occurred_at").toInstant(), vehicleId
+        );
+
+        var stopRows = jdbc.query(
+            "SELECT lat, lng, geofence_radius_m FROM transport_stop WHERE id = ?",
+            (rs, i) -> new Object[]{
+                com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "lat"),
+                com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "lng"),
+                rs.getInt("geofence_radius_m")
+            },
+            stopId
+        );
+        if (stopRows.isEmpty()) throw new NotFoundException("Stop not found: " + stopId);
+        Object[] stop = stopRows.get(0);
+        if (stop[0] == null || stop[1] == null) {
+            throw new IllegalArgumentException("Stop has no coordinates configured: " + stopId);
+        }
+        double stopLat = (double) stop[0];
+        double stopLng = (double) stop[1];
+        int radiusM = (int) stop[2];
+
+        double distance = haversineMeters(ping[0], ping[1], stopLat, stopLng);
+        return new GeofenceStatusDto(vehicleId, stopId, distance <= radiusM, distance, radiusM, asOf);
+    }
+
+    private static double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+            + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return EARTH_RADIUS_M * c;
     }
 }

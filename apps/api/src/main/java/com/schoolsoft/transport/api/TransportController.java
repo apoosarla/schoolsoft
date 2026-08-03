@@ -115,4 +115,11 @@ public class TransportController {
     public TripDto endTrip(@PathVariable UUID id) {
         return repo.endTrip(id);
     }
+
+    // -------------------------- Geofencing --------------------------
+
+    @GetMapping("/geofence-status")
+    public GeofenceStatusDto geofenceStatus(@RequestParam UUID vehicleId, @RequestParam UUID stopId) {
+        return repo.checkGeofence(vehicleId, stopId);
+    }
 }
