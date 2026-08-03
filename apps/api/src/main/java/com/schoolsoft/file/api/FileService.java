@@ -1,8 +1,10 @@
 package com.schoolsoft.file.api;
 
 import com.schoolsoft.platform.tenancy.TenantContext;
+import com.schoolsoft.platform.web.NotFoundException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,9 +52,11 @@ public class FileService {
     }
 
     public DownloadTicket issueDownload(UUID fileId) {
-        Map<String, Object> row = jdbc.queryForMap(
+        List<Map<String, Object>> rows = jdbc.queryForList(
             "SELECT bucket, object_key FROM file_object WHERE id = ?", fileId
         );
+        if (rows.isEmpty()) throw new NotFoundException("File not found: " + fileId);
+        Map<String, Object> row = rows.get(0);
         Instant exp = Instant.now().plus(Duration.ofMinutes(15));
         return new DownloadTicket(
             fileId,
