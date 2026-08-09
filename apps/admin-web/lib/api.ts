@@ -734,6 +734,33 @@ export function listThreads(userAccountId: string): Promise<MessageThreadDto[]> 
   return apiFetch<MessageThreadDto[]>(`/v1/comms/threads?userAccountId=${userAccountId}`);
 }
 
+export function createThread(req: {
+  schoolId: string;
+  subjectStudentId?: string;
+  participants: string[];
+}): Promise<MessageThreadDto> {
+  return apiFetch<MessageThreadDto>("/v1/comms/threads", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type UserDirectoryEntryDto = {
+  userAccountId: string;
+  subjectType: string;
+  subjectId: string | null;
+  displayName: string;
+  email: string | null;
+  phone: string | null;
+};
+
+export function listDirectory(schoolId: string, q?: string, subjectType?: string): Promise<UserDirectoryEntryDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (q) params.set("q", q);
+  if (subjectType) params.set("subjectType", subjectType);
+  return apiFetch<UserDirectoryEntryDto[]>(`/v1/people/directory?${params.toString()}`);
+}
+
 export type MessageDto = { id: string; threadId: string; senderUserId: string; body: string; sentAt: string };
 
 export function listMessages(threadId: string): Promise<MessageDto[]> {

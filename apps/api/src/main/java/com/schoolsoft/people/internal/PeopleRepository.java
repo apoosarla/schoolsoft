@@ -4,6 +4,7 @@ import com.schoolsoft.people.api.GuardianDto;
 import com.schoolsoft.people.api.PeopleController;
 import com.schoolsoft.people.api.StaffDto;
 import com.schoolsoft.people.api.StudentDto;
+import com.schoolsoft.people.api.UserDirectoryEntryDto;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -142,6 +143,59 @@ public class PeopleRepository {
         if (q == null || q.isBlank()) return jdbc.query(sql, mapper, schoolId);
         String like = "%" + q + "%";
         return jdbc.query(sql, mapper, schoolId, like, like, q);
+    }
+
+    /**
+     * Resolves {@code user_account} rows to a display name by joining the
+     * table its {@code subject_type} points at (staff | guardian | student —
+     * {@code chain_admin} accounts are school-less and excluded). Backs
+     * participant pickers (e.g. comms thread creation) that otherwise have
+     * no way to turn a login identity into a human name.
+     */
+    public List<UserDirectoryEntryDto> listDirectory(UUID schoolId, String q, String subjectType) {
+        StringBuilder sql = new StringBuilder(
+            "SELECT ua.id AS user_account_id, ua.subject_type, ua.subject_id, ua.email, ua.phone, " +
+            "       COALESCE(st.first_name, g.first_name, stu.first_name) AS first_name, " +
+            "       COALESCE(st.last_name, g.last_name, stu.last_name) AS last_name " +
+            "FROM user_account ua " +
+            "LEFT JOIN staff    st  ON ua.subject_type = 'staff'    AND st.id  = ua.subject_id " +
+            "LEFT JOIN guardian g   ON ua.subject_type = 'guardian' AND g.id   = ua.subject_id " +
+            "LEFT JOIN student  stu ON ua.subject_type = 'student'  AND stu.id = ua.subject_id " +
+            "WHERE ua.school_id = ? AND ua.is_active AND ua.subject_type != 'chain_admin' "
+        );
+        List<Object> args = new ArrayList<>();
+        args.add(schoolId);
+        if (subjectType != null && !subjectType.isBlank()) {
+            sql.append("AND ua.subject_type = ? ");
+            args.add(subjectType);
+        }
+        if (q != null && !q.isBlank()) {
+            sql.append(
+                "AND (COALESCE(st.first_name, g.first_name, stu.first_name) ILIKE ? " +
+                " OR COALESCE(st.last_name, g.last_name, stu.last_name) ILIKE ? " +
+                " OR ua.email ILIKE ? OR ua.phone ILIKE ?) "
+            );
+            String like = "%" + q + "%";
+            args.add(like); args.add(like); args.add(like); args.add(like);
+        }
+        sql.append("ORDER BY first_name, last_name");
+        return jdbc.query(
+            sql.toString(),
+            (rs, i) -> {
+                String first = rs.getString("first_name");
+                String last = rs.getString("last_name");
+                String name = first == null ? rs.getString("subject_type") : (last == null ? first : first + " " + last);
+                return new UserDirectoryEntryDto(
+                    UUID.fromString(rs.getString("user_account_id")),
+                    rs.getString("subject_type"),
+                    rs.getString("subject_id") == null ? null : UUID.fromString(rs.getString("subject_id")),
+                    name,
+                    rs.getString("email"),
+                    rs.getString("phone")
+                );
+            },
+            args.toArray()
+        );
     }
 
     private RowMapper<GuardianDto> guardianMapper() {

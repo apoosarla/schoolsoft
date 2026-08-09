@@ -113,10 +113,9 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
     issue-to-student (with student search), active-loans-by-student panel
     with return.
   - `/comms` — announcements (create, scope/channel picker, publish) and a
-    messaging panel (thread list for the signed-in account, view/reply).
-    Thread *creation* is intentionally out of scope — there's no
-    user-account directory endpoint to build a participant picker against;
-    noted as a follow-up.
+    messaging panel (thread list for the signed-in account, view/reply, and
+    thread *creation* via a directory-backed participant picker — see
+    below).
   - `/lms` — per-section lesson plans (create + status workflow) and
     assignments (create + view/grade submissions). Content items and the
     quiz engine (authoring + attempts) intentionally left out — quiz
@@ -129,6 +128,15 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   the test account); created a lesson plan and drove its status, and
   re-graded an existing assignment submission, confirming persistence on
   reselect. 2026-08-09.
+
+- ~~User-directory endpoint.~~ `GET /v1/people/directory` (schoolId, +
+  optional `q` / `subjectType`) resolves `user_account` rows to display
+  names by joining whichever table `subject_type` points at
+  (staff/guardian/student — `chain_admin` excluded, school-less).
+  `PeopleRepository.listDirectory`. Closes the gap noted above: wired into
+  `/comms`'s "New thread" flow as a search-and-add participant picker.
+  Verified live: searched, added a second staff member as a participant,
+  created the thread, and sent/received a message in it. 2026-08-09.
 
 ## Bugs found and fixed along the way
 

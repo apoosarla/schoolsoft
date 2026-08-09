@@ -61,4 +61,14 @@ public class PeopleController {
     public List<StaffDto> staff(@RequestParam UUID schoolId, @RequestParam(required = false) String q) {
         return repo.listStaff(schoolId, q);
     }
+
+    // -------------------------- Directory --------------------------
+    @GetMapping("/directory")
+    public List<UserDirectoryEntryDto> directory(
+        @RequestParam UUID schoolId,
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String subjectType
+    ) {
+        return repo.listDirectory(schoolId, q, subjectType);
+    }
 }

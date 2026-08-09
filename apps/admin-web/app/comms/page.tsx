@@ -7,8 +7,10 @@ import {
   AnnouncementDto,
   ApiError,
   createAnnouncement,
+  createThread,
   getSession,
   listAnnouncements,
+  listDirectory,
   listMessages,
   listThreads,
   MessageDto,
@@ -16,6 +18,7 @@ import {
   publishAnnouncement,
   sendMessage,
   Session,
+  UserDirectoryEntryDto,
 } from "@/lib/api";
 
 const emptyForm = { scopeType: "school", title: "", body: "", channels: ["push", "email"] as string[] };
@@ -37,6 +40,12 @@ export default function CommsPage() {
   const [messages, setMessages] = useState<MessageDto[] | null>(null);
   const [replyBody, setReplyBody] = useState("");
   const [sending, setSending] = useState(false);
+
+  const [showNewThread, setShowNewThread] = useState(false);
+  const [directoryQ, setDirectoryQ] = useState("");
+  const [directoryResults, setDirectoryResults] = useState<UserDirectoryEntryDto[] | null>(null);
+  const [participants, setParticipants] = useState<UserDirectoryEntryDto[]>([]);
+  const [creatingThread, setCreatingThread] = useState(false);
 
   useEffect(() => {
     const s = getSession();
@@ -98,6 +107,48 @@ export default function CommsPage() {
       ...f,
       channels: f.channels.includes(ch) ? f.channels.filter((c) => c !== ch) : [...f.channels, ch],
     }));
+  }
+
+  useEffect(() => {
+    if (!session || !directoryQ) {
+      setDirectoryResults(null);
+      return;
+    }
+    listDirectory(session.schoolId, directoryQ)
+      .then(setDirectoryResults)
+      .catch((err) => setError(describeError(err)));
+  }, [session, directoryQ]);
+
+  function addParticipant(u: UserDirectoryEntryDto) {
+    if (!participants.some((p) => p.userAccountId === u.userAccountId)) {
+      setParticipants((p) => [...p, u]);
+    }
+    setDirectoryQ("");
+    setDirectoryResults(null);
+  }
+
+  function removeParticipant(userAccountId: string) {
+    setParticipants((p) => p.filter((x) => x.userAccountId !== userAccountId));
+  }
+
+  async function onCreateThread() {
+    if (!session || participants.length === 0) return;
+    setCreatingThread(true);
+    setError(null);
+    try {
+      const thread = await createThread({
+        schoolId: session.schoolId,
+        participants: [session.userAccountId, ...participants.map((p) => p.userAccountId)],
+      });
+      setParticipants([]);
+      setShowNewThread(false);
+      setThreads(await listThreads(session.userAccountId));
+      selectThread(thread);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setCreatingThread(false);
+    }
   }
 
   function selectThread(t: MessageThreadDto) {
@@ -214,7 +265,54 @@ export default function CommsPage() {
       </div>
 
       <div className="panel">
-        <h2>Messages</h2>
+        <div className="form-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h2>Messages</h2>
+          <button type="button" onClick={() => setShowNewThread((v) => !v)}>
+            {showNewThread ? "Cancel" : "New thread"}
+          </button>
+        </div>
+
+        {showNewThread && (
+          <div className="form-row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+            <div>
+              <input
+                placeholder="Search staff or guardians"
+                value={directoryQ}
+                onChange={(e) => setDirectoryQ(e.target.value)}
+                style={{ minWidth: 240 }}
+              />
+              {directoryResults && directoryResults.length > 0 && (
+                <table>
+                  <tbody>
+                    {directoryResults.map((u) => (
+                      <tr key={u.userAccountId} style={{ cursor: "pointer" }} onClick={() => addParticipant(u)}>
+                        <td>{u.displayName}</td>
+                        <td className="hint">{u.subjectType}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div>
+              {participants.length === 0 && <p className="hint">No participants added yet.</p>}
+              {participants.map((p) => (
+                <div key={p.userAccountId} className="form-row" style={{ alignItems: "center", gap: 4 }}>
+                  <span>
+                    {p.displayName} <span className="hint">({p.subjectType})</span>
+                  </span>
+                  <button type="button" onClick={() => removeParticipant(p.userAccountId)}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={onCreateThread} disabled={creatingThread || participants.length === 0}>
+                {creatingThread ? "Creating…" : "Start thread"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {threads && threads.length === 0 && <p className="hint">No message threads for this account yet.</p>}
         {threads && threads.length > 0 && (
           <div className="form-row" style={{ alignItems: "flex-start", gap: 16 }}>
