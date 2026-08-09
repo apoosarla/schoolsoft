@@ -46,6 +46,8 @@ public class AuthController {
     public record OtpVerifyRequest(@NotBlank String identifier, String chainSlug, @NotBlank String code) {}
     public record AuthResponse(String accessToken, String refreshToken, Map<String, Object> profile) {}
 
+    private static final String PLATFORM_OTP_NAMESPACE = "platform";
+
     @PostMapping("/otp/start")
     public ResponseEntity<Map<String, Object>> start(@RequestBody OtpStartRequest req) {
         String code = otpStore.issue(req.identifier(), req.chainSlug());
@@ -80,6 +82,38 @@ public class AuthController {
             "subjectType",   resolved.subjectType(),
             "schoolId",      resolved.schoolId() == null ? "" : resolved.schoolId().toString(),
             "chainSchema",   resolved.chainSchema()
+        )));
+    }
+
+    // -------------------------- Platform-admin OTP --------------------------
+    // Separate from the chain OTP flow above: platform_admin accounts live in
+    // platform.platform_user, not any chain's user_account, and there's no
+    // chain to scan — resolution goes straight to UserLookupService.resolvePlatformAdmin.
+    // See BACKLOG.md — this replaces the HQ Console's paste-a-bearer-token workaround.
+
+    public record PlatformOtpStartRequest(@NotBlank String email) {}
+    public record PlatformOtpVerifyRequest(@NotBlank String email, @NotBlank String code) {}
+
+    @PostMapping("/platform-admin/otp/start")
+    public ResponseEntity<Map<String, Object>> platformStart(@RequestBody PlatformOtpStartRequest req) {
+        String code = otpStore.issue(req.email(), PLATFORM_OTP_NAMESPACE);
+        log.info("[dev] Platform-admin OTP for {}: {}", req.email(), code);
+        return ResponseEntity.ok(Map.of("status", "sent"));
+    }
+
+    @PostMapping("/platform-admin/otp/verify")
+    public ResponseEntity<AuthResponse> platformVerify(@RequestBody PlatformOtpVerifyRequest req) {
+        if (!otpStore.verify(req.email(), PLATFORM_OTP_NAMESPACE, req.code())) {
+            return ResponseEntity.status(401).build();
+        }
+        var resolved = lookup.resolvePlatformAdmin(req.email())
+            .orElseThrow(() -> new NotFoundException("No platform-admin account for " + req.email()));
+
+        String access = jwt.issueAccess(resolved.userAccountId(), "platform", "platform", null, "platform_admin");
+        String refresh = jwt.issueRefresh(resolved.userAccountId(), "platform", "platform");
+        return ResponseEntity.ok(new AuthResponse(access, refresh, Map.of(
+            "userAccountId", resolved.userAccountId(),
+            "subjectType",   "platform_admin"
         )));
     }
 

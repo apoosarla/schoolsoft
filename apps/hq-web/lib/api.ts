@@ -2,14 +2,11 @@
  * Thin client for the Schoolsoft API's platform-admin endpoints
  * (apps/api/.../tenancy/api/ChainAdminController.java).
  *
- * Auth note: there is no platform-admin login flow wired up yet — see
- * BACKLOG.md. `AuthController`/`UserLookupService` only resolve identities
- * that live inside a chain schema (staff/guardian/student), never
- * `platform.platform_user`. Until that exists, the HQ Console asks for a
- * bearer token pasted in directly (e.g. minted by hand against the platform
- * schema, or via a future `/v1/auth/platform-admin/*` flow) and stores it in
- * localStorage. Swap `getToken`/`setToken` for a real session once that
- * login flow lands — nothing else here should need to change.
+ * Auth: OTP against `platform.platform_user` via
+ * POST /v1/auth/platform-admin/otp/{start,verify} (AuthController). Dev
+ * builds accept the literal code "000000" (OtpStore's dev bypass). The
+ * resulting access token is stored in localStorage; `getToken`/`setToken`
+ * below are unchanged from before this flow existed.
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
@@ -26,6 +23,10 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   window.localStorage.removeItem(TOKEN_KEY);
+}
+
+export function isLoggedIn(): boolean {
+  return !!getToken();
 }
 
 export class ApiError extends Error {
@@ -64,6 +65,21 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+export async function startPlatformOtp(email: string): Promise<void> {
+  await apiFetch<{ status: string }>("/v1/auth/platform-admin/otp/start", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function verifyPlatformOtp(email: string, code: string): Promise<void> {
+  const res = await apiFetch<{ accessToken: string }>("/v1/auth/platform-admin/otp/verify", {
+    method: "POST",
+    body: JSON.stringify({ email, code }),
+  });
+  setToken(res.accessToken);
 }
 
 export type ChainDto = {

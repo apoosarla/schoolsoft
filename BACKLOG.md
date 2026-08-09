@@ -228,8 +228,33 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   (no login flow exists yet — see the open item below) to drive the
   `/chains` page with real data — token-set badge, chain table, and
   confirmed via computed `scrollWidth`/`clientWidth` that the wide table
-  scrolls inside its card rather than pushing the page wider.
+  scrolls inside its card rather than pushing the page wider. (The
+  hand-crafted JWT was a stopgap — a real login flow landed right after,
+  see below.)
   2026-08-10.
+
+- ~~Platform-admin login flow.~~ hq-web's paste-a-bearer-token workaround is
+  gone. New OTP flow parallel to the existing chain one, but resolving
+  against `platform.platform_user` instead of scanning chain schemas (that
+  table existed since the original platform migration but nothing had ever
+  queried it): `UserLookupService.resolvePlatformAdmin`/
+  `resolvePlatformAdminById`, and `AuthController`'s
+  `POST /v1/auth/platform-admin/otp/{start,verify}` — same dev OTP bypass
+  (`000000`) as the chain flow. `resolveById` (used by the shared
+  `/v1/auth/refresh` endpoint) now branches on `chainSchema == "platform"`
+  so refresh works for platform admins too, not just chain accounts. Added
+  a seed platform-admin row (`platform/V004`) since there was previously no
+  way to create the first one short of a manual `INSERT` — a real
+  chicken-and-egg gap, same shape as the curriculum-template seed in
+  `platform/V003`. hq-web: new `/login` page (mirrors admin-web's OTP login
+  UI, minus the chain-slug field platform admins don't have), `/chains` now
+  guards on `isLoggedIn()` instead of exposing a raw token paste-box.
+  Verified live end-to-end against local Postgres: start → verify with the
+  dev bypass code → token issued → chains list loads with real data → sign
+  out → redirected to `/login`; also verified via curl that `/v1/auth/refresh`
+  correctly re-issues a platform-admin access token, and that an unknown
+  email 404s at verify time without leaking existence at start time (same
+  behavior as the chain OTP flow). 2026-08-10.
 
 ## Bugs found and fixed along the way
 
@@ -265,14 +290,6 @@ are different claims:
   `platform.chain_schema_version`. Found via the new HQ Console stats UI.
 
 ## Open items
-
-- **Platform-admin login flow.** The HQ Console's `/chains` page still
-  requires pasting in a bearer token by hand — `AuthController` /
-  `UserLookupService` only resolve identities that live inside a chain schema
-  (staff/guardian/student); nothing resolves against `platform.platform_user`
-  or issues a `platform_admin` JWT. Needs an OTP-or-password flow scoped to
-  the platform schema before the HQ Console is usable by anyone but a dev
-  with direct DB/token access.
 
 - **School Admin Web, Parent app, Teacher app, Driver app, Public/Admissions
   microsite.** None of these surfaces exist yet — only `hq-web` (chain-level)

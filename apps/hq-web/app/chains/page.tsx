@@ -1,22 +1,22 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ApiError,
   ChainDto,
   ChainStatsDto,
   clearToken,
   getChainStats,
-  getToken,
+  isLoggedIn,
   listChains,
   provisionChain,
-  setToken,
 } from "@/lib/api";
 
 const PLAN_CODES = ["starter", "growth", "enterprise"];
 
 export default function ChainsPage() {
-  const [tokenInput, setTokenInput] = useState("");
+  const router = useRouter();
   const [hasToken, setHasToken] = useState(false);
 
   const [chains, setChains] = useState<ChainDto[] | null>(null);
@@ -50,8 +50,12 @@ export default function ChainsPage() {
   }
 
   useEffect(() => {
-    setHasToken(!!getToken());
-  }, []);
+    if (!isLoggedIn()) {
+      router.replace("/login");
+      return;
+    }
+    setHasToken(true);
+  }, [router]);
 
   async function refresh() {
     setLoading(true);
@@ -72,17 +76,9 @@ export default function ChainsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasToken]);
 
-  function saveToken() {
-    if (!tokenInput.trim()) return;
-    setToken(tokenInput.trim());
-    setTokenInput("");
-    setHasToken(true);
-  }
-
   function signOut() {
     clearToken();
-    setHasToken(false);
-    setChains(null);
+    router.replace("/login");
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -107,38 +103,20 @@ export default function ChainsPage() {
     }
   }
 
+  if (!hasToken) return null;
+
   return (
     <main className="shell">
       <div className="panel">
-        <h2>Platform-admin session</h2>
-        {hasToken ? (
-          <div className="form-row" style={{ alignItems: "center" }}>
-            <span className="badge badge-active">token set</span>
+        <div className="form-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h2>Platform-admin session</h2>
+          <div className="form-row" style={{ alignItems: "center", marginBottom: 0 }}>
+            <span className="badge badge-active">signed in</span>
             <button onClick={signOut} type="button">
-              Clear token
+              Sign out
             </button>
           </div>
-        ) : (
-          <>
-            <p className="hint">
-              No platform-admin login flow exists yet (see BACKLOG.md) —
-              paste a bearer token for a <code>platform_admin</code> account
-              to use this console.
-            </p>
-            <div className="form-row">
-              <input
-                type="password"
-                placeholder="Bearer token"
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                style={{ minWidth: 360 }}
-              />
-              <button onClick={saveToken} type="button">
-                Save token
-              </button>
-            </div>
-          </>
-        )}
+        </div>
       </div>
 
       <div className="panel">

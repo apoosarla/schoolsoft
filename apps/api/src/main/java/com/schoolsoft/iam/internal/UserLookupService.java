@@ -68,7 +68,27 @@ public class UserLookupService {
         return Optional.empty();
     }
 
+    /** Platform admins live in {@code platform.platform_user}, not any chain's {@code user_account}. */
+    public Optional<Resolved> resolvePlatformAdmin(String email) {
+        var rows = platformJdbc.query(
+            "SELECT id FROM platform.platform_user WHERE is_active AND email = ?",
+            (rs, i) -> new Resolved(UUID.fromString(rs.getString("id")), null, "platform", null, "platform_admin"),
+            email
+        );
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+    }
+
+    public Optional<Resolved> resolvePlatformAdminById(UUID id) {
+        var rows = platformJdbc.query(
+            "SELECT id FROM platform.platform_user WHERE is_active AND id = ?",
+            (rs, i) -> new Resolved(UUID.fromString(rs.getString("id")), null, "platform", null, "platform_admin"),
+            id
+        );
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+    }
+
     public Optional<Resolved> resolveById(UUID userAccountId, String chainSchema) {
+        if ("platform".equals(chainSchema)) return resolvePlatformAdminById(userAccountId);
         TenantContext.set(TenantContext.trustedJob(chainSchema, null));
         try {
             var jdbc = new JdbcTemplate(dataSource);
