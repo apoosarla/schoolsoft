@@ -214,3 +214,216 @@ export function markAttendanceBulk(
     body: JSON.stringify({ schoolId, sectionId, onDate, source: "manual", entries }),
   });
 }
+
+export type AcademicYearDto = {
+  id: string;
+  code: string;
+  startsOn: string;
+  endsOn: string;
+  isCurrent: boolean;
+};
+
+export function listAcademicYears(schoolId: string): Promise<AcademicYearDto[]> {
+  return apiFetch<AcademicYearDto[]>(`/v1/tenancy/schools/${schoolId}/academic-years`);
+}
+
+export type GradeDto = { id: string; code: string; name: string; sortOrder: number };
+
+export function listGrades(schoolId: string): Promise<GradeDto[]> {
+  return apiFetch<GradeDto[]>(`/v1/tenancy/schools/${schoolId}/grades`);
+}
+
+export const ADMISSION_STATES = [
+  "lead",
+  "application_started",
+  "document_pending",
+  "fee_pending",
+  "review",
+  "test_scheduled",
+  "test_done",
+  "offered",
+  "accepted",
+  "waitlist",
+  "rejected",
+  "enrolled",
+  "lapsed",
+] as const;
+
+export type AdmissionApplicationDto = {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  gradeId: string;
+  applicationNo: string;
+  applicantFirstName: string;
+  applicantLastName: string | null;
+  applicantDob: string | null;
+  applicantGender: string | null;
+  guardianName: string;
+  guardianPhone: string;
+  guardianEmail: string | null;
+  source: string | null;
+  state: string;
+  testScore: number | null;
+  interviewNotes: string | null;
+  offerExpiresOn: string | null;
+  convertedStudentId: string | null;
+  createdAt: string;
+};
+
+export function listAdmissionApplications(schoolId: string, state?: string): Promise<AdmissionApplicationDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (state) params.set("state", state);
+  return apiFetch<AdmissionApplicationDto[]>(`/v1/admissions/applications?${params.toString()}`);
+}
+
+export type CreateAdmissionApplicationRequest = {
+  schoolId: string;
+  academicYearId: string;
+  gradeId: string;
+  applicationNo: string;
+  applicantFirstName: string;
+  applicantLastName?: string;
+  applicantDob?: string;
+  applicantGender?: string;
+  guardianName: string;
+  guardianPhone: string;
+  guardianEmail?: string;
+  source?: string;
+};
+
+export function createAdmissionApplication(
+  req: CreateAdmissionApplicationRequest
+): Promise<AdmissionApplicationDto> {
+  return apiFetch<AdmissionApplicationDto>("/v1/admissions/applications", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function transitionAdmissionApplication(id: string, toState: string): Promise<AdmissionApplicationDto> {
+  return apiFetch<AdmissionApplicationDto>(`/v1/admissions/applications/${id}/transition`, {
+    method: "POST",
+    body: JSON.stringify({ toState }),
+  });
+}
+
+export function enrolAdmissionApplication(
+  id: string,
+  sectionId: string,
+  rollNo?: string
+): Promise<{ studentId: string }> {
+  return apiFetch<{ studentId: string }>(`/v1/admissions/applications/${id}/enrol`, {
+    method: "POST",
+    body: JSON.stringify({ sectionId, rollNo }),
+  });
+}
+
+export type FeeHeadDto = {
+  id: string;
+  schoolId: string;
+  code: string;
+  name: string;
+  isRecurring: boolean;
+  gstRatePct: number;
+  hsnSac: string | null;
+};
+
+export function listFeeHeads(schoolId: string): Promise<FeeHeadDto[]> {
+  return apiFetch<FeeHeadDto[]>(`/v1/fees/heads?schoolId=${schoolId}`);
+}
+
+export function createFeeHead(
+  schoolId: string,
+  req: { code: string; name: string; isRecurring: boolean; gstRatePct: number; hsnSac?: string }
+): Promise<FeeHeadDto> {
+  return apiFetch<FeeHeadDto>(`/v1/fees/heads?schoolId=${schoolId}`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type FeeInvoiceDto = {
+  id: string;
+  schoolId: string;
+  studentId: string;
+  invoiceNo: string;
+  cycleLabel: string;
+  issuedOn: string;
+  dueOn: string;
+  subtotal: number;
+  gst: number;
+  total: number;
+  paid: number;
+  status: string;
+};
+
+export function listInvoicesForStudent(studentId: string): Promise<FeeInvoiceDto[]> {
+  return apiFetch<FeeInvoiceDto[]>(`/v1/fees/invoices?studentId=${studentId}`);
+}
+
+export type FeeInvoiceLineDto = {
+  id: string;
+  feeInvoiceId: string;
+  feeHeadId: string;
+  description: string | null;
+  amount: number;
+  discount: number;
+  gst: number;
+};
+
+export function listInvoiceLines(invoiceId: string): Promise<FeeInvoiceLineDto[]> {
+  return apiFetch<FeeInvoiceLineDto[]>(`/v1/fees/invoices/${invoiceId}/lines`);
+}
+
+export type InvoiceLineInput = {
+  feeHeadId: string;
+  description?: string;
+  amount: number;
+  discount: number;
+  gst: number;
+};
+
+export function createInvoice(req: {
+  schoolId: string;
+  studentId: string;
+  invoiceNo: string;
+  cycleLabel: string;
+  dueOn: string;
+  lines: InvoiceLineInput[];
+}): Promise<FeeInvoiceDto> {
+  return apiFetch<FeeInvoiceDto>("/v1/fees/invoices", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type PaymentDto = {
+  id: string;
+  schoolId: string;
+  feeInvoiceId: string;
+  amount: number;
+  gateway: string;
+  method: string | null;
+  status: string;
+  idempotencyKey: string;
+  capturedAt: string | null;
+};
+
+export function listPaymentsForInvoice(invoiceId: string): Promise<PaymentDto[]> {
+  return apiFetch<PaymentDto[]>(`/v1/fees/invoices/${invoiceId}/payments`);
+}
+
+export function recordPayment(req: {
+  schoolId: string;
+  feeInvoiceId: string;
+  amount: number;
+  gateway: string;
+  method?: string;
+  idempotencyKey: string;
+}): Promise<PaymentDto> {
+  return apiFetch<PaymentDto>("/v1/fees/payments", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}

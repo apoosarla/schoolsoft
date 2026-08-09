@@ -72,6 +72,24 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   pattern; wired into the `/chains` page as a per-row "Stats" toggle.
   Verified in-browser. 2026-08-03.
 
+- ~~School Admin Web — Admissions page.~~ New `/admissions` route: create
+  application, filter by state, per-row state transition, and enrol-to-
+  student (`AdmissionsController`'s `/enrol`) with section picker scoped to
+  the applicant's grade. `lib/api.ts` gained the admissions + academic-years
+  + grades clients. Verified live end-to-end against local Postgres (chain
+  `smoketest`, staff OTP login) — created an application, moved it through
+  `accepted`, enrolled it, and confirmed the resulting row in `/students`.
+  2026-08-09.
+
+- ~~School Admin Web — Fees page.~~ New `/fees` route: student search,
+  fee-head management (create/list), invoice creation with dynamic
+  multi-line items and live subtotal/GST/total, per-invoice drill-down
+  (lines + payment history), and payment recording against `FeesController`.
+  `lib/api.ts` gained the fees clients. Verified live end-to-end against
+  local Postgres — created a fee head, raised a ₹5,250 invoice with GST,
+  recorded a ₹2,000 UPI payment, watched status flip `open` → `partial`
+  with the correct paid amount. 2026-08-09.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
