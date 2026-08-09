@@ -427,3 +427,69 @@ export function recordPayment(req: {
     body: JSON.stringify(req),
   });
 }
+
+export type SubjectDto = { id: string; schoolId: string; code: string; name: string; boardCode: string | null };
+
+export function listSubjects(schoolId: string): Promise<SubjectDto[]> {
+  return apiFetch<SubjectDto[]>(`/v1/tenancy/schools/${schoolId}/subjects`);
+}
+
+export type StaffDto = {
+  id: string;
+  schoolId: string;
+  employeeNo: string;
+  firstName: string;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+  employmentType: string | null;
+  joinedOn: string | null;
+  isActive: boolean;
+};
+
+export function listStaff(schoolId: string, q?: string): Promise<StaffDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (q) params.set("q", q);
+  return apiFetch<StaffDto[]>(`/v1/people/staff?${params.toString()}`);
+}
+
+export type TimetableSlotDto = {
+  id: string;
+  sectionId: string;
+  subjectId: string;
+  subjectName: string;
+  teacherStaffId: string;
+  dayOfWeek: number;
+  periodNo: number;
+  startsAt: string;
+  endsAt: string;
+  room: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+export function timetableForSection(sectionId: string): Promise<TimetableSlotDto[]> {
+  return apiFetch<TimetableSlotDto[]>(`/v1/timetable/sections/${sectionId}`);
+}
+
+export function createTimetableSlot(req: {
+  sectionId: string;
+  subjectId: string;
+  teacherStaffId: string;
+  dayOfWeek: number;
+  periodNo: number;
+  startsAt: string;
+  endsAt: string;
+  room?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+}): Promise<TimetableSlotDto> {
+  return apiFetch<TimetableSlotDto>("/v1/timetable/slots", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function deleteTimetableSlot(id: string): Promise<void> {
+  return apiFetch<void>(`/v1/timetable/slots/${id}`, { method: "DELETE" });
+}

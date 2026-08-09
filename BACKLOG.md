@@ -90,6 +90,13 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   recorded a ₹2,000 UPI payment, watched status flip `open` → `partial`
   with the correct paid amount. 2026-08-09.
 
+- ~~School Admin Web — Timetable page.~~ New `/timetable` route: per-section
+  weekly grid, add-slot form (subject/teacher/day/period/time/room), delete.
+  `lib/api.ts` gained the subjects, staff, and timetable clients. Verified
+  live end-to-end — confirmed `TimetableRepository`'s teacher-overlap clash
+  guard surfaces as a readable error in the form, then added and deleted a
+  non-conflicting slot successfully. 2026-08-09.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
