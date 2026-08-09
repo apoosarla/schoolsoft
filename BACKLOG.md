@@ -215,6 +215,22 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   themes, plus the real app's Dashboard/Students/Fees/Roles pages rendering
   actual backend data through the new design. 2026-08-10.
 
+- ~~Same design system ported into hq-web.~~ hq-web (`/`, `/chains`) used
+  the exact same original bare-bones dark CSS and class contract as
+  admin-web pre-redesign, so the same zero-page-edit trick applied:
+  swapped `globals.css` for the same token system (scoped down — no
+  sidebar/gold-accent/serif-in-cards machinery this 2-page app doesn't
+  need), added active-link state to the topbar nav via a small `nav.tsx`
+  client component (the only structural change; `chains/page.tsx`
+  untouched). `.panel` got the same `overflow-x: auto` treatment
+  preemptively since the chains table has 9 columns. Verified live against
+  the real API: hand-crafted a dev-secret-signed `platform_admin` JWT
+  (no login flow exists yet — see the open item below) to drive the
+  `/chains` page with real data — token-set badge, chain table, and
+  confirmed via computed `scrollWidth`/`clientWidth` that the wide table
+  scrolls inside its card rather than pushing the page wider.
+  2026-08-10.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
