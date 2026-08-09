@@ -144,9 +144,10 @@ export type StudentDto = {
   rollNo: string | null;
 };
 
-export function listStudents(schoolId: string, q?: string): Promise<StudentDto[]> {
+export function listStudents(schoolId: string, q?: string, sectionId?: string): Promise<StudentDto[]> {
   const params = new URLSearchParams({ schoolId });
   if (q) params.set("q", q);
+  if (sectionId) params.set("sectionId", sectionId);
   return apiFetch<StudentDto[]>(`/v1/people/students?${params.toString()}`);
 }
 
@@ -492,4 +493,115 @@ export function createTimetableSlot(req: {
 
 export function deleteTimetableSlot(id: string): Promise<void> {
   return apiFetch<void>(`/v1/timetable/slots/${id}`, { method: "DELETE" });
+}
+
+export const ASSESSMENT_STATUSES = [
+  "draft",
+  "scheduled",
+  "in_progress",
+  "marking",
+  "locked",
+  "published",
+] as const;
+
+export const ASSESSMENT_TYPES = ["PT", "HY", "Annual", "CoScholastic", "Component", "Coursework"];
+
+export type AssessmentDto = {
+  id: string;
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  termId: string | null;
+  strategyCode: string;
+  name: string;
+  assessmentType: string;
+  maxMarks: number | null;
+  weightPct: number | null;
+  scheduledOn: string | null;
+  status: string;
+};
+
+export function listAssessmentsForSection(sectionId: string): Promise<AssessmentDto[]> {
+  return apiFetch<AssessmentDto[]>(`/v1/assessment?sectionId=${sectionId}`);
+}
+
+export function createAssessment(req: {
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  termId?: string;
+  strategyCode: string;
+  name: string;
+  assessmentType: string;
+  maxMarks?: number;
+  weightPct?: number;
+  scheduledOn?: string;
+}): Promise<AssessmentDto> {
+  return apiFetch<AssessmentDto>("/v1/assessment", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function setAssessmentStatus(id: string, status: string): Promise<AssessmentDto> {
+  return apiFetch<AssessmentDto>(`/v1/assessment/${id}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export type AssessmentComponentDto = {
+  id: string;
+  assessmentId: string;
+  code: string;
+  name: string;
+  maxMarks: number;
+  weightPct: number | null;
+  sortOrder: number;
+};
+
+export function listAssessmentComponents(assessmentId: string): Promise<AssessmentComponentDto[]> {
+  return apiFetch<AssessmentComponentDto[]>(`/v1/assessment/${assessmentId}/components`);
+}
+
+export function addAssessmentComponent(
+  assessmentId: string,
+  req: { code: string; name: string; maxMarks: number; weightPct?: number; sortOrder: number }
+): Promise<AssessmentComponentDto> {
+  return apiFetch<AssessmentComponentDto>(`/v1/assessment/${assessmentId}/components`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type MarkDto = {
+  id: string;
+  assessmentComponentId: string;
+  studentId: string;
+  rawMarks: number | null;
+  gradeLetter: string | null;
+  remarks: string | null;
+  isAbsent: boolean;
+};
+
+export function listMarksForComponent(componentId: string): Promise<MarkDto[]> {
+  return apiFetch<MarkDto[]>(`/v1/assessment/components/${componentId}/marks`);
+}
+
+export function enterMark(
+  componentId: string,
+  req: {
+    schoolId: string;
+    studentId: string;
+    rawMarks?: number;
+    gradeLetter?: string;
+    remarks?: string;
+    isAbsent: boolean;
+    enteredByStaffId?: string;
+  }
+): Promise<MarkDto> {
+  return apiFetch<MarkDto>(`/v1/assessment/components/${componentId}/marks`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }

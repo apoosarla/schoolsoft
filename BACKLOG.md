@@ -97,6 +97,17 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   guard surfaces as a readable error in the form, then added and deleted a
   non-conflicting slot successfully. 2026-08-09.
 
+- ~~School Admin Web — Assessment page.~~ New `/assessment` route:
+  per-section assessment list/create, status transitions (draft → …→
+  published), component authoring, and roster-based mark entry (pre-filled
+  from existing marks, bulk "Save all"). `lib/api.ts` gained the assessment
+  + components + marks clients, plus `sectionId` support on `listStudents`.
+  Report cards (`ReportCardDto`, generate/lock) intentionally left out —
+  next slice if needed. Verified live end-to-end: entered/persisted marks
+  for a 3-student roster, created a new assessment + component from
+  scratch, and drove a status transition (`draft` → `scheduled`).
+  2026-08-09.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
