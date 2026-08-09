@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Nav from "./nav";
+import AppShell from "./app-shell";
 
 export const metadata: Metadata = {
   title: "Schoolsoft — School Admin",
@@ -11,11 +11,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <div className="topbar">
-          <div className="topbar-brand">Schoolsoft · School Admin</div>
-          <Nav />
-        </div>
-        {children}
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

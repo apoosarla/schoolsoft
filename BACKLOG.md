@@ -182,6 +182,39 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   that navigating directly to `/fees` or `/roles` by URL redirected to
   `/dashboard`. 2026-08-09.
 
+- ~~Modern responsive design for admin-web.~~ Prototyped a redesign first as
+  a standalone artifact (four persona dashboards — Principal, Class Teacher,
+  Accountant, Librarian — demonstrating the RBAC nav filtering visually)
+  before touching the real app; design plan: cool "paper" neutral (not the
+  cliché warm-cream/terracotta AI look), Oxford-indigo accent with brass/gold
+  used sparingly, semantic status colors kept separate from the accent,
+  Georgia serif for titles/headings paired with system-sans for
+  everything operational, tabular numerals throughout.
+
+  Ported into `apps/admin-web` as a **CSS-and-shell-only** change — zero
+  edits to any of the 11 page components. This worked because every page
+  already funneled its markup through a small, consistent class contract
+  (`.panel`, `.stat-grid`/`.stat-tile`, `.badge`/`.badge-active`/
+  `.badge-suspended`, `.error-banner`, `.hint`, `table`, `input`/`select`/
+  `button`) — rewriting `globals.css` against that same contract restyled
+  every page for free. The only new files: `app-shell.tsx` (replaces the old
+  `nav.tsx`) — a persistent sidebar with icons + active-state, an
+  icon-rail collapse under 1024px, a slide-over drawer with scrim under
+  640px, and a footer showing the signed-in user's role(s) (humanized from
+  `session.roleCodes`) with sign-out; `layout.tsx` now just wraps
+  `{children}` in `<AppShell>`.
+
+  Caught one real bug during redesign QA that predates this session: the
+  Roles & Users table's badge-chip rows (up to 11 per role) had no
+  overflow container and would blow out the card at tablet width. Fixed by
+  giving `.panel` `overflow-x: auto; max-width: 100%` globally — the classic
+  wide-content-needs-its-own-scroll-container pattern, verified via computed
+  `scrollWidth`/`clientWidth` (the panel clips to its parent while its
+  content stays independently scrollable). Verified live end-to-end:
+  full desktop sidebar, tablet icon-rail, mobile drawer, and both prototype
+  themes, plus the real app's Dashboard/Students/Fees/Roles pages rendering
+  actual backend data through the new design. 2026-08-10.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
