@@ -9,6 +9,7 @@ import {
   createAnnouncement,
   createThread,
   getSession,
+  hasScreen,
   listAnnouncements,
   listDirectory,
   listMessages,
@@ -51,6 +52,10 @@ export default function CommsPage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "comms")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);

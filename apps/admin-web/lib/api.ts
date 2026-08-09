@@ -19,6 +19,9 @@ export type Session = {
   subjectType: string;
   schoolId: string;
   chainSchema: string;
+  /** Screen keys unlocked by the caller's role grants — see /v1/iam/me/screens. "dashboard" is always implicitly allowed. */
+  screens: string[];
+  roleCodes: string[];
 };
 
 export function getSession(): Session | null {
@@ -101,16 +104,35 @@ export async function verifyOtp(identifier: string, chainSlug: string, code: str
     method: "POST",
     body: JSON.stringify({ identifier, chainSlug, code }),
   });
-  const session: Session = {
+  let session: Session = {
     accessToken: res.accessToken,
     refreshToken: res.refreshToken,
     userAccountId: res.profile.userAccountId,
     subjectType: res.profile.subjectType,
     schoolId: res.profile.schoolId,
     chainSchema: res.profile.chainSchema,
+    screens: [],
+    roleCodes: [],
   };
   setSession(session);
+  try {
+    const my = await getMyScreens();
+    session = { ...session, screens: my.screenKeys, roleCodes: my.roleCodes };
+    setSession(session);
+  } catch {
+    // Non-staff principals (guardian/student) have no role grants — leave screens empty.
+  }
   return session;
+}
+
+export function getMyScreens(): Promise<{ screenKeys: string[]; roleCodes: string[] }> {
+  return apiFetch<{ screenKeys: string[]; roleCodes: string[] }>("/v1/iam/me/screens");
+}
+
+export function hasScreen(session: Session | null, screenKey: string): boolean {
+  if (!session) return false;
+  if (screenKey === "dashboard") return true;
+  return (session.screens ?? []).includes(screenKey);
 }
 
 export type SchoolOverviewDto = {
@@ -870,5 +892,83 @@ export function gradeSubmission(id: string, marks: number, feedback?: string): P
   return apiFetch<AssignmentSubmissionDto>(`/v1/lms/submissions/${id}/grade`, {
     method: "POST",
     body: JSON.stringify({ marks, feedback }),
+  });
+}
+
+// -------------------------- Roles & access --------------------------
+
+/** Every admin-web route that's gated by a role's screen_keys, plus "admin" for this Roles & Users screen itself. */
+export const SCREEN_DEFS = [
+  { key: "dashboard", label: "Dashboard", path: "/dashboard" },
+  { key: "students", label: "Students", path: "/students" },
+  { key: "admissions", label: "Admissions", path: "/admissions" },
+  { key: "attendance", label: "Attendance", path: "/attendance" },
+  { key: "fees", label: "Fees", path: "/fees" },
+  { key: "timetable", label: "Timetable", path: "/timetable" },
+  { key: "assessment", label: "Assessment", path: "/assessment" },
+  { key: "lms", label: "LMS", path: "/lms" },
+  { key: "comms", label: "Comms", path: "/comms" },
+  { key: "library", label: "Library", path: "/library" },
+  { key: "admin", label: "Roles & Users", path: "/roles" },
+] as const;
+
+export type RoleDto = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  screenKeys: string[];
+  isSystem: boolean;
+  createdAt: string;
+};
+
+export function listRoles(): Promise<RoleDto[]> {
+  return apiFetch<RoleDto[]>("/v1/iam/roles");
+}
+
+export function createRole(req: {
+  code: string;
+  name: string;
+  description?: string;
+  screenKeys: string[];
+}): Promise<RoleDto> {
+  return apiFetch<RoleDto>("/v1/iam/roles", { method: "POST", body: JSON.stringify(req) });
+}
+
+export function updateRole(
+  id: string,
+  req: { name: string; description?: string; screenKeys: string[] }
+): Promise<RoleDto> {
+  return apiFetch<RoleDto>(`/v1/iam/roles/${id}`, { method: "PUT", body: JSON.stringify(req) });
+}
+
+export function deleteRole(id: string): Promise<void> {
+  return apiFetch<void>(`/v1/iam/roles/${id}`, { method: "DELETE" });
+}
+
+export type StaffWithRolesDto = {
+  staffId: string;
+  userAccountId: string | null;
+  firstName: string;
+  lastName: string | null;
+  email: string | null;
+  roleCodes: string[];
+};
+
+export function listStaffRoles(schoolId: string): Promise<StaffWithRolesDto[]> {
+  return apiFetch<StaffWithRolesDto[]>(`/v1/iam/staff-roles?schoolId=${schoolId}`);
+}
+
+export function assignStaffRole(staffId: string, schoolId: string, roleCode: string): Promise<void> {
+  return apiFetch<void>("/v1/iam/staff-roles/assign", {
+    method: "POST",
+    body: JSON.stringify({ staffId, schoolId, roleCode }),
+  });
+}
+
+export function unassignStaffRole(staffId: string, schoolId: string, roleCode: string): Promise<void> {
+  return apiFetch<void>("/v1/iam/staff-roles/unassign", {
+    method: "POST",
+    body: JSON.stringify({ staffId, schoolId, roleCode }),
   });
 }

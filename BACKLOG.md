@@ -138,6 +138,50 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   Verified live: searched, added a second staff member as a participant,
   created the thread, and sent/received a message in it. 2026-08-09.
 
+- ~~Role-based screen access (RBAC) for admin-web.~~ Seeded 11 personas for
+  a Cambridge-curriculum international school in India — Principal, Vice
+  Principal, IT Administrator, Cambridge Coordinator, Exams Officer,
+  Registrar, Class Teacher, Subject Teacher, Accountant, Librarian, Front
+  Office — plus support for arbitrary custom roles (e.g. "Sports
+  Coordinator"). Built on the `staff_role` grant table that was already in
+  the schema (§5) but unused until now, rather than inventing a parallel
+  system: new `role` catalog table (code, name, description, `screen_keys`
+  text[], is_system) with an FK from `staff_role.role_code → role.code`
+  (V013). New `iam` endpoints — `RoleController`: `GET/POST /v1/iam/roles`,
+  `PUT/DELETE /v1/iam/roles/{id}` (system roles can't be deleted),
+  `GET /v1/iam/staff-roles`, `POST /v1/iam/staff-roles/{assign,unassign}`,
+  `GET /v1/iam/me/screens` (union of `screen_keys` across the caller's role
+  grants, via `Authz.rolesOfCurrentUser()`). admin-web: `Session` gained
+  `screens`/`roleCodes`, fetched right after OTP verify; `Nav` is now a
+  client component that only renders links the session has access to; every
+  page gained a `hasScreen(s, "...")` redirect-to-`/dashboard` guard;
+  `dashboard` is always implicitly allowed so nobody lands on a blank page.
+  New `/roles` page (itself gated behind the `admin` screen key, held only
+  by Principal/Vice Principal/IT Administrator): role catalog with
+  create/edit-screens/delete, and a staff roster for assigning/unassigning
+  roles (multi-role per staff member).
+
+  Deliberately decoupled from *how* the caller authenticated — role
+  resolution keys off `staff_id` reached via `user_account`, not off OTP
+  specifics — so a future school-SSO integration only replaces the
+  identity-verification step in `AuthController`; the role catalog, grants,
+  and every screen-gating check on the frontend stay untouched. When that
+  lands, Keycloak (or whatever brokers to the school's real IdP) is the
+  natural fit *in front of* this model, not a replacement for it — group→role
+  mapping is a small addition, not a rewrite.
+
+  Verified live end-to-end: seeded roles came back correctly from
+  `/v1/iam/roles` (including the apostrophe in "section's" surviving the
+  seed SQL); assigned `principal` to one staff member and confirmed
+  `/me/screens` returned the full union; created a custom `sports_coordinator`
+  role via the API, confirmed system-role deletion is rejected (400); in the
+  browser, logged in as the Principal (full nav incl. Roles & Users),
+  created/assigned/removed roles through the `/roles` UI; logged in as a
+  second staff member holding only `subject_teacher` + the custom role and
+  confirmed the nav showed exactly the union of both roles' screens, and
+  that navigating directly to `/fees` or `/roles` by URL redirected to
+  `/dashboard`. 2026-08-09.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
@@ -207,6 +251,18 @@ are different claims:
   endpoint added this session is deliberately the Risk-R12-sanctioned
   "small fan-out, hard tenant cap" MVP posture — a real cross-chain
   analytics warehouse is explicitly Phase 2 per design doc §19.
+
+- **School SSO / Keycloak.** Auth is still custom JWT + OTP
+  (`AuthController`, `OtpStore`, `JwtService`) — deliberately, so the new
+  role/screen-access model (see RBAC entry above) stays decoupled from
+  identity. When the school's real SSO is ready to wire up: add a new
+  `AuthController` path that validates an externally-issued token (via
+  Keycloak as broker, or directly against the IdP), resolves it to a
+  `user_account` by email, and issues our existing JWT shape — the `role`,
+  `staff_role`, and every frontend screen-gating check are untouched by
+  this. Worth designing then, not now: a small lookup table mapping IdP
+  groups → our role `code`s, so group membership can auto-assign roles
+  instead of the manual assignment `/roles` does today.
 
 ---
 

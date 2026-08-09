@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ApiError, getSession, listStudents, Session, StudentDto } from "@/lib/api";
+import { ApiError, getSession, hasScreen, listStudents, Session, StudentDto } from "@/lib/api";
 
 export default function StudentsPage() {
   const router = useRouter();
@@ -16,6 +16,10 @@ export default function StudentsPage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "students")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);

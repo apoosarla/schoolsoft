@@ -11,6 +11,7 @@ import {
   enrolAdmissionApplication,
   GradeDto,
   getSession,
+  hasScreen,
   listAcademicYears,
   listAdmissionApplications,
   listGrades,
@@ -57,6 +58,10 @@ export default function AdmissionsPage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "admissions")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);

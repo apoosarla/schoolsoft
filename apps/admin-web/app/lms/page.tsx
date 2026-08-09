@@ -11,6 +11,7 @@ import {
   createLessonPlan,
   getSession,
   gradeSubmission,
+  hasScreen,
   LESSON_PLAN_STATUSES,
   LessonPlanDto,
   listAssignments,
@@ -62,6 +63,10 @@ export default function LmsPage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "lms")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);

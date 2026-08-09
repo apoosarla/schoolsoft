@@ -54,6 +54,10 @@ a {
   color: var(--text);
 }
 
+.topbar-nav a.active {
+  color: var(--accent);
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);

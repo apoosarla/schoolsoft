@@ -10,6 +10,7 @@ import {
   FeeInvoiceDto,
   FeeInvoiceLineDto,
   getSession,
+  hasScreen,
   InvoiceLineInput,
   listFeeHeads,
   listInvoiceLines,
@@ -67,6 +68,10 @@ export default function FeesPage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "fees")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);

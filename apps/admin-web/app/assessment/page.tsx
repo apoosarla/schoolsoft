@@ -12,6 +12,7 @@ import {
   createAssessment,
   enterMark,
   getSession,
+  hasScreen,
   listAssessmentComponents,
   listAssessmentsForSection,
   listMarksForComponent,
@@ -66,6 +67,10 @@ export default function AssessmentPage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "assessment")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);

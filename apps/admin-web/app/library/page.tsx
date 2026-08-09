@@ -8,6 +8,7 @@ import {
   ApiError,
   createLibraryTitle,
   getSession,
+  hasScreen,
   issueLibraryCopy,
   LibraryCopyDto,
   LibraryIssueDto,
@@ -65,6 +66,10 @@ export default function LibraryPage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "library")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);

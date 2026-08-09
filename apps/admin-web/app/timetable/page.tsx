@@ -7,6 +7,7 @@ import {
   createTimetableSlot,
   deleteTimetableSlot,
   getSession,
+  hasScreen,
   listSections,
   listStaff,
   listSubjects,
@@ -56,6 +57,10 @@ export default function TimetablePage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "timetable")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);

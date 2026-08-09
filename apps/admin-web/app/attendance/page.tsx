@@ -7,6 +7,7 @@ import {
   attendanceForSectionOnDate,
   EnrolmentDto,
   getSession,
+  hasScreen,
   listSections,
   markAttendanceBulk,
   rosterForSection,
@@ -37,6 +38,10 @@ export default function AttendancePage() {
     const s = getSession();
     if (!s) {
       router.replace("/login");
+      return;
+    }
+    if (!hasScreen(s, "attendance")) {
+      router.replace("/dashboard");
       return;
     }
     setSessionState(s);
