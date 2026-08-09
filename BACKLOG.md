@@ -108,6 +108,28 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   scratch, and drove a status transition (`draft` → `scheduled`).
   2026-08-09.
 
+- ~~School Admin Web — Library, Comms, LMS pages.~~ Three more routes:
+  - `/library` — catalogue search/create, per-title copy list + add-copy,
+    issue-to-student (with student search), active-loans-by-student panel
+    with return.
+  - `/comms` — announcements (create, scope/channel picker, publish) and a
+    messaging panel (thread list for the signed-in account, view/reply).
+    Thread *creation* is intentionally out of scope — there's no
+    user-account directory endpoint to build a participant picker against;
+    noted as a follow-up.
+  - `/lms` — per-section lesson plans (create + status workflow) and
+    assignments (create + view/grade submissions). Content items and the
+    quiz engine (authoring + attempts) intentionally left out — quiz
+    question/option/answer authoring is a distinct enough UI investment to
+    warrant its own pass.
+  `lib/api.ts` gained the library, comms, and lms clients. Verified live
+  end-to-end: added a library copy and ran it through issue → active-loan →
+  return; created and published an announcement, then sent/received a
+  message in a thread (seeded directly in Postgres since none existed for
+  the test account); created a lesson plan and drove its status, and
+  re-graded an existing assignment submission, confirming persistence on
+  reselect. 2026-08-09.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something

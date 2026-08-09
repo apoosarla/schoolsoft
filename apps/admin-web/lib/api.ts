@@ -605,3 +605,243 @@ export function enterMark(
     body: JSON.stringify(req),
   });
 }
+
+// -------------------------- Library --------------------------
+
+export type LibraryTitleDto = {
+  id: string;
+  schoolId: string;
+  isbn: string | null;
+  title: string;
+  author: string | null;
+  publisher: string | null;
+  year: number | null;
+  subjectTags: string[] | null;
+};
+
+export function listLibraryTitles(schoolId: string, q?: string): Promise<LibraryTitleDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (q) params.set("q", q);
+  return apiFetch<LibraryTitleDto[]>(`/v1/library/titles?${params.toString()}`);
+}
+
+export function createLibraryTitle(
+  schoolId: string,
+  req: { isbn?: string; title: string; author?: string; publisher?: string; year?: number }
+): Promise<LibraryTitleDto> {
+  return apiFetch<LibraryTitleDto>(`/v1/library/titles?schoolId=${schoolId}`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type LibraryCopyDto = { id: string; titleId: string; barcode: string; status: string };
+
+export function listLibraryCopies(titleId: string): Promise<LibraryCopyDto[]> {
+  return apiFetch<LibraryCopyDto[]>(`/v1/library/titles/${titleId}/copies`);
+}
+
+export function addLibraryCopy(titleId: string, barcode: string): Promise<LibraryCopyDto> {
+  return apiFetch<LibraryCopyDto>(`/v1/library/titles/${titleId}/copies`, {
+    method: "POST",
+    body: JSON.stringify({ barcode }),
+  });
+}
+
+export type LibraryIssueDto = {
+  id: string;
+  copyId: string;
+  memberType: string;
+  memberId: string;
+  issuedOn: string;
+  dueOn: string;
+  returnedOn: string | null;
+  fine: number;
+  finePaid: boolean;
+};
+
+export function issueLibraryCopy(req: {
+  schoolId: string;
+  copyId: string;
+  memberType: string;
+  memberId: string;
+  dueOn: string;
+}): Promise<LibraryIssueDto> {
+  return apiFetch<LibraryIssueDto>("/v1/library/issues", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function returnLibraryCopy(issueId: string): Promise<LibraryIssueDto> {
+  return apiFetch<LibraryIssueDto>(`/v1/library/issues/${issueId}/return`, { method: "POST" });
+}
+
+export function activeLibraryIssuesForMember(memberType: string, memberId: string): Promise<LibraryIssueDto[]> {
+  return apiFetch<LibraryIssueDto[]>(`/v1/library/issues/active?memberType=${memberType}&memberId=${memberId}`);
+}
+
+// -------------------------- Comms --------------------------
+
+export const ANNOUNCEMENT_SCOPES = ["school", "grade", "section", "custom"] as const;
+
+export type AnnouncementDto = {
+  id: string;
+  schoolId: string;
+  scopeType: string;
+  scopeIds: string[] | null;
+  title: string;
+  body: string;
+  channels: string[];
+  publishedAt: string | null;
+  expiresAt: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+};
+
+export function listAnnouncements(schoolId: string): Promise<AnnouncementDto[]> {
+  return apiFetch<AnnouncementDto[]>(`/v1/comms/announcements?schoolId=${schoolId}`);
+}
+
+export function createAnnouncement(req: {
+  schoolId: string;
+  scopeType: string;
+  scopeIds?: string[];
+  title: string;
+  body: string;
+  channels?: string[];
+  createdByUserId?: string;
+}): Promise<AnnouncementDto> {
+  return apiFetch<AnnouncementDto>("/v1/comms/announcements", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function publishAnnouncement(id: string): Promise<AnnouncementDto> {
+  return apiFetch<AnnouncementDto>(`/v1/comms/announcements/${id}/publish`, { method: "POST" });
+}
+
+export type MessageThreadDto = {
+  id: string;
+  schoolId: string;
+  subjectStudentId: string | null;
+  participants: string[];
+  lastMessageAt: string | null;
+};
+
+export function listThreads(userAccountId: string): Promise<MessageThreadDto[]> {
+  return apiFetch<MessageThreadDto[]>(`/v1/comms/threads?userAccountId=${userAccountId}`);
+}
+
+export type MessageDto = { id: string; threadId: string; senderUserId: string; body: string; sentAt: string };
+
+export function listMessages(threadId: string): Promise<MessageDto[]> {
+  return apiFetch<MessageDto[]>(`/v1/comms/threads/${threadId}/messages`);
+}
+
+export function sendMessage(threadId: string, senderUserId: string, body: string): Promise<MessageDto> {
+  return apiFetch<MessageDto>(`/v1/comms/threads/${threadId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ senderUserId, body }),
+  });
+}
+
+// -------------------------- LMS --------------------------
+
+export const LESSON_PLAN_STATUSES = ["draft", "approved", "delivered", "archived"] as const;
+export const ASSIGNMENT_SUBMISSION_TYPES = ["file", "text", "quiz", "offline", "lti"];
+
+export type LessonPlanDto = {
+  id: string;
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  curriculumNodeId: string | null;
+  title: string;
+  plannedFor: string | null;
+  durationMinutes: number | null;
+  status: string;
+  createdByStaffId: string | null;
+};
+
+export function listLessonPlans(sectionId: string): Promise<LessonPlanDto[]> {
+  return apiFetch<LessonPlanDto[]>(`/v1/lms/lesson-plans?sectionId=${sectionId}`);
+}
+
+export function createLessonPlan(req: {
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  title: string;
+  plannedFor?: string;
+  durationMinutes?: number;
+}): Promise<LessonPlanDto> {
+  return apiFetch<LessonPlanDto>("/v1/lms/lesson-plans", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function setLessonPlanStatus(id: string, status: string): Promise<LessonPlanDto> {
+  return apiFetch<LessonPlanDto>(`/v1/lms/lesson-plans/${id}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export type AssignmentDto = {
+  id: string;
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  title: string;
+  instructions: string | null;
+  submissionType: string;
+  dueAt: string | null;
+  maxMarks: number | null;
+  status: string;
+  createdByStaffId: string | null;
+};
+
+export function listAssignments(sectionId: string): Promise<AssignmentDto[]> {
+  return apiFetch<AssignmentDto[]>(`/v1/lms/assignments?sectionId=${sectionId}`);
+}
+
+export function createAssignment(req: {
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  title: string;
+  instructions?: string;
+  submissionType: string;
+  dueAt?: string;
+  maxMarks?: number;
+}): Promise<AssignmentDto> {
+  return apiFetch<AssignmentDto>("/v1/lms/assignments", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type AssignmentSubmissionDto = {
+  id: string;
+  assignmentId: string;
+  studentId: string;
+  body: string | null;
+  submittedAt: string;
+  marks: number | null;
+  feedback: string | null;
+  gradedAt: string | null;
+};
+
+export function listSubmissions(assignmentId: string): Promise<AssignmentSubmissionDto[]> {
+  return apiFetch<AssignmentSubmissionDto[]>(`/v1/lms/assignments/${assignmentId}/submissions`);
+}
+
+export function gradeSubmission(id: string, marks: number, feedback?: string): Promise<AssignmentSubmissionDto> {
+  return apiFetch<AssignmentSubmissionDto>(`/v1/lms/submissions/${id}/grade`, {
+    method: "POST",
+    body: JSON.stringify({ marks, feedback }),
+  });
+}
