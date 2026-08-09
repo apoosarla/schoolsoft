@@ -21,6 +21,7 @@
     "db:seed": "cd apps/api && ./mvnw -Pseed exec:java",
     "admin:dev": "npm -w @schoolsoft/admin-web run dev",
     "hq:dev": "npm -w @schoolsoft/hq-web run dev",
+    "teacher:dev": "npm -w @schoolsoft/teacher-app run dev",
     "public:dev": "npm -w @schoolsoft/public-site run dev",
     "dev:web": "concurrently -n admin,hq,public -c green,magenta,yellow \"npm run admin:dev\" \"npm run hq:dev\" \"npm run public:dev\""
   },

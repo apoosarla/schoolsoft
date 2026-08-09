@@ -129,4 +129,19 @@ public class RoleRepository {
             staffId, roleCode, schoolId
         );
     }
+
+    /**
+     * user_account.subject_id → staff.id | guardian.id | student.id, depending
+     * on subject_type. The JWT only carries user_account.id (see JwtService);
+     * callers that need the underlying person record (e.g. teacher-app looking
+     * up "my timetable" by staff id) resolve it here.
+     */
+    public Optional<UUID> subjectIdForUserAccount(UUID userAccountId) {
+        var rows = jdbc.query(
+            "SELECT subject_id FROM user_account WHERE id = ?",
+            (rs, i) -> rs.getString("subject_id") == null ? null : UUID.fromString(rs.getString("subject_id")),
+            userAccountId
+        );
+        return rows.isEmpty() ? Optional.empty() : Optional.ofNullable(rows.get(0));
+    }
 }

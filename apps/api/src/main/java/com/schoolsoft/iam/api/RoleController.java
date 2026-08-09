@@ -1,6 +1,7 @@
 package com.schoolsoft.iam.api;
 
 import com.schoolsoft.iam.internal.RoleRepository;
+import com.schoolsoft.platform.tenancy.TenantContext;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.util.List;
@@ -78,5 +79,23 @@ public class RoleController {
     public Map<String, Object> myScreens() {
         List<String> roleCodes = authz.rolesOfCurrentUser();
         return Map.of("roleCodes", roleCodes, "screenKeys", repo.screensForRoleCodes(roleCodes));
+    }
+
+    /**
+     * Resolves the caller's underlying person record. The JWT only carries
+     * user_account.id — apps that need the staff/guardian/student row itself
+     * (e.g. teacher-app looking up "my timetable" by staff id) call this once
+     * after login rather than threading a lookup through every endpoint.
+     */
+    @GetMapping("/me")
+    public Map<String, Object> me() {
+        var snap = TenantContext.require();
+        var subjectId = repo.subjectIdForUserAccount(snap.userAccountId());
+        return Map.of(
+            "userAccountId", snap.userAccountId(),
+            "subjectType", snap.subjectType(),
+            "subjectId", subjectId.map(Object::toString).orElse(""),
+            "schoolId", snap.schoolId() == null ? "" : snap.schoolId().toString()
+        );
     }
 }

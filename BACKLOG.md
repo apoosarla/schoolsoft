@@ -256,6 +256,48 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   email 404s at verify time without leaking existence at start time (same
   behavior as the chain OTP flow). 2026-08-10.
 
+- ~~Teacher app — Login, Today, Attendance.~~ New `apps/teacher-app`
+  (`@schoolsoft/teacher-app`, `next dev -p 3003`; added to root
+  `package.json`'s workspaces — the slot already existed — and a
+  `teacher:dev` script). Mobile-first, not admin-web's sidebar shell:
+  single scrolling column under a fixed bottom tab bar (Today, Attendance —
+  written so a third tab drops in without restructuring), 44px+ touch
+  targets, same design tokens as admin-web/hq-web (Oxford-indigo,
+  Georgia/system-sans, light-default with a dark media-query override).
+  Reuses the existing chain OTP login flow. New backend endpoint
+  `GET /v1/iam/me` (`RoleController` + `RoleRepository.subjectIdForUserAccount`)
+  resolves the caller's `staff.id` from `user_account.subject_id` — the JWT
+  only carries `user_account.id`, and "my timetable" needs the staff row.
+  Today pulls `GET /v1/timetable/teachers/{staffId}`, filters to
+  `dayOfWeek === new Date().getDay()`, and links each period into
+  Attendance with the section pre-selected via a `?section=` query param;
+  Attendance itself is the same roster/mark-bulk flow as admin-web's page,
+  scoped to the distinct sections the teacher's timetable actually covers.
+
+  Found and fixed a real bug during live verification, present in
+  **both** teacher-app and admin-web's attendance pages: the existing-marks
+  matching logic checked `e.periodNo === null`, but Jackson's
+  `non_null` property inclusion (`application.yml`) *omits* a null field
+  from the JSON entirely rather than serializing it as `null` — so
+  `periodNo` arrives client-side as `undefined`, and the strict-equality
+  check never matched. Attendance saved correctly every time, but reloading
+  the page always showed everyone back at the "present" default instead of
+  what was actually saved. Fixed in both apps with a loose-equality check
+  (`e.periodNo == null`, catching both `null` and `undefined`) and verified
+  the fix live: marked a student absent, saved, hard-reloaded the page, and
+  confirmed the roster now shows the real persisted status.
+
+  Verified live end-to-end against local Postgres and a real API instance:
+  full OTP login as a real seeded teacher (`priya.menon@oakridge-hyd.test`,
+  who has real `timetable_slot` rows), Today correctly showing only the
+  slot matching today's day-of-week (a slot was inserted for today
+  specifically to exercise this — her only other slots are Monday, and
+  those correctly did *not* appear), tapping through to Attendance with
+  the section pre-filled, marking and saving a real roster, and confirming
+  persistence survived a hard reload after the bug fix above. Assessment,
+  LMS, and Comms for the teacher app are intentionally out of scope for
+  this pass — see the open item below. 2026-08-10.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
@@ -291,13 +333,26 @@ are different claims:
 
 ## Open items
 
-- **School Admin Web, Parent app, Teacher app, Driver app, Public/Admissions
-  microsite.** None of these surfaces exist yet — only `hq-web` (chain-level)
-  has any frontend. The backend now has working endpoints for essentially
-  everything a School Admin Web console would need (academic setup,
-  admissions, attendance, timetable, assessment, fees, LMS, comms,
-  transport, library, dashboards) — that's the natural next frontend to
-  scaffold, since it's the primary consumer of nearly all of the above.
+- **Remaining frontend surfaces.** School Admin Web (`admin-web`) and Chain
+  HQ Console (`hq-web`) are both built out and design-refreshed; Teacher
+  app (`teacher-app`) has its first slice (Login, Today, Attendance — see
+  Done above). Still open:
+  - **Teacher app — Assessment, LMS, Comms.** Same backend endpoints
+    admin-web already uses, scoped to the teacher's own sections/subjects
+    the way Attendance is. Natural next slice for `teacher-app`.
+  - **Parent app.** Doesn't exist yet. Single-child view: attendance
+    history, fee invoices/payment, report cards, homework, announcements,
+    messaging with teachers. Backend ready (attendance, fees, assessment,
+    lms, comms) but the guardian↔student linkage and auth flow (guardians
+    OTP-login the same way staff do, per `AuthController`, but haven't
+    been exercised end-to-end from a real frontend yet) need checking.
+  - **Driver app.** Doesn't exist yet. Transport module backend exists
+    (routes/stops/trips/geofence) but is the least fleshed out and lowest
+    user-facing priority of the four.
+  - **Public/Admissions microsite.** Doesn't exist yet. External-facing,
+    no auth — school info pages plus a public inquiry form feeding the
+    existing admissions funnel. Different shape from the other three (
+    content site, not an authenticated app).
 
 - **Real external integrations.** GST e-Invoice (NIC IRP), Tally/Zoho Books
   sync, LTI 1.3 / OneRoster 1.2 (real OAuth/OIDC flows), CIE Direct / UDISE+
