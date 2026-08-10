@@ -365,6 +365,41 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   history, report cards, homework, and messaging are intentionally out of
   scope for this pass — see the open item below. 2026-08-10.
 
+- ~~Public/Admissions microsite — school info page, public inquiry form.~~
+  New `apps/public-site` (`@schoolsoft/public-site`, `next dev -p 3006`) —
+  no login anywhere in this app, unlike every other frontend in the repo.
+  Home shows the real school name/board and a few highlight cards; `/apply`
+  is a public admissions form (child + guardian details) that posts into
+  the existing admissions funnel and shows a real `applicationNo` on
+  success.
+
+  New backend module `publicsite` (`PublicController` /
+  `PublicLookupRepository`) exposes `GET /v1/public/schools/{chainSlug}/
+  {schoolSlug}`, `GET .../grades`, and `POST .../admissions/apply` with
+  **no JWT/auth at all** — genuinely new infrastructure, since every other
+  endpoint in the codebase resolves `TenantContext` from a JWT via
+  `TenantResolverFilter`. This is the second caller (after
+  `UserLookupService`'s OTP-login lookup) of the
+  `TenantContext.trustedJob(schemaName, chainId)` pattern for manually
+  setting tenant context outside the request-filter flow, wrapped in
+  try/finally with `TenantContext.clear()`. `apply()` resolves the current
+  academic year via `is_current`, generates `applicationNo` as
+  `"WEB-" + <8 random hex chars>`, and reuses the existing
+  `AdmissionsRepository.create(...)` so applications land in the same
+  funnel admin-web's Admissions screen already reads.
+
+  Verified live against local Postgres and a real API instance: curled
+  both GET endpoints with zero auth headers (200s, correct data for the
+  real seeded school/grades), submitted the `/apply` form end-to-end
+  through a real browser (child "Aarav Bhat", guardian "Sunita Bhat"),
+  confirmed the confirmation screen rendered a real `applicationNo`
+  (`WEB-6FD86721`), and confirmed the row landed correctly in
+  `admission_application` via `psql`. Also explicitly re-tested tenant
+  isolation: after hitting the public endpoint (which sets
+  `TenantContext` manually), a normal authenticated staff request still
+  resolved the correct tenant afterward — no leakage between requests.
+  2026-08-10.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
@@ -402,9 +437,9 @@ are different claims:
 
 - **Remaining frontend surfaces.** School Admin Web (`admin-web`) and Chain
   HQ Console (`hq-web`) are both built out and design-refreshed; Teacher
-  app (`teacher-app`), Driver app (`driver-app`), and Parent app
-  (`parent-app`) each have their first slice — see Done above for all
-  three. Still open:
+  app (`teacher-app`), Driver app (`driver-app`), Parent app
+  (`parent-app`), and the Public/Admissions microsite (`public-site`) each
+  have their first slice — see Done above for all four. Still open:
   - **Teacher app — Assessment, LMS, Comms.** Same backend endpoints
     admin-web already uses, scoped to the teacher's own sections/subjects
     the way Attendance is. Natural next slice for `teacher-app`.
@@ -413,10 +448,10 @@ are different claims:
     and a historical trip log are the natural next slice.
   - **Parent app — attendance history, report cards, homework, messaging.**
     Login/Home/Fees are done; the rest of a full parent experience.
-  - **Public/Admissions microsite.** Doesn't exist yet. External-facing,
-    no auth — school info pages plus a public inquiry form feeding the
-    existing admissions funnel. Different shape from the other three (
-    content site, not an authenticated app).
+  - **Public/Admissions microsite — application tracking, richer content.**
+    Home/Apply are done; a "check my application status" lookup and
+    fuller school-info content (staff, facilities, calendar) are the
+    natural next slice.
 
 - **Real external integrations.** GST e-Invoice (NIC IRP), Tally/Zoho Books
   sync, LTI 1.3 / OneRoster 1.2 (real OAuth/OIDC flows), CIE Direct / UDISE+
