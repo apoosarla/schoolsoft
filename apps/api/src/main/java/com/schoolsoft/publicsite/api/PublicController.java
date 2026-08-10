@@ -50,4 +50,13 @@ public class PublicController {
         ));
         return Map.of("applicationNo", created.applicationNo());
     }
+
+    @GetMapping("/admissions/track")
+    public AdmissionApplicationDto track(
+        @PathVariable String chainSlug, @PathVariable String schoolSlug,
+        @RequestParam String applicationNo, @RequestParam String guardianPhone
+    ) {
+        return repo.track(chainSlug, applicationNo, guardianPhone)
+            .orElseThrow(() -> new NotFoundException("No application found for that number and phone"));
+    }
 }

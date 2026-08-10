@@ -102,6 +102,10 @@ public class PublicLookupRepository {
         UUID gradeId, String guardianName, String guardianPhone, String guardianEmail
     ) {}
 
+    public Optional<AdmissionApplicationDto> track(String chainSlug, String applicationNo, String guardianPhone) {
+        return withTenant(chainSlug, jdbc -> admissionsRepo.findByApplicationNoAndPhone(applicationNo, guardianPhone));
+    }
+
     public AdmissionApplicationDto apply(String chainSlug, String schoolSlug, ApplyRequest req) {
         return withTenant(chainSlug, jdbc -> {
             UUID schoolId = schoolIdForSlug(jdbc, schoolSlug)

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { apply, ApiError, GradeDto, listGrades } from "@/lib/api";
 
@@ -63,6 +64,9 @@ export default function ApplyPage() {
           <p>We&apos;ll be in touch by phone or email to schedule next steps.</p>
           <div className="app-no">{applicationNo}</div>
           <p className="hint">Keep this reference number for your records.</p>
+          <p className="hint" style={{ marginTop: 12 }}>
+            <Link href="/track">Track this application&apos;s status</Link>
+          </p>
         </div>
       </main>
     );

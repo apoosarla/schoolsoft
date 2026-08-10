@@ -28,11 +28,42 @@ const TABS = [
       </svg>
     ),
   },
+  {
+    href: "/assessment",
+    label: "Assessment",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 18 18" fill="none">
+        <path d="M9 2.3L15.7 5.8V11.2C15.7 14.3 12.9 16.6 9 17.7C5.1 16.6 2.3 14.3 2.3 11.2V5.8L9 2.3Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        <path d="M6.3 9.4L8.2 11.3L11.7 7.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    href: "/classwork",
+    label: "Classwork",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 18 18" fill="none">
+        <path d="M3 5.3C3 4.4 3.7 3.7 4.6 3.7H13.4C14.3 3.7 15 4.4 15 5.3V14.3L9 12L3 14.3V5.3Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    href: "/comms",
+    label: "Comms",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 18 18" fill="none">
+        <path d="M2.5 4.8C2.5 3.8 3.3 3 4.3 3H13.7C14.7 3 15.5 3.8 15.5 4.8V10.4C15.5 11.4 14.7 12.2 13.7 12.2H7.3L4 15V12.2H4.3C3.3 12.2 2.5 11.4 2.5 10.4V4.8Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
 ];
 
 const TITLES: Record<string, string> = {
   "/": "Today",
   "/attendance": "Attendance",
+  "/assessment": "Assessment",
+  "/classwork": "Classwork",
+  "/comms": "Comms",
 };
 
 export default function AppShell({ children }: { children: React.ReactNode }) {

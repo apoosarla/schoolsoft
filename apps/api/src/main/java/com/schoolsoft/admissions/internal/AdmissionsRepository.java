@@ -56,6 +56,15 @@ public class AdmissionsRepository {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
+    /** Used by the unauthenticated public tracking endpoint — both fields must match, so a guessed application number alone isn't enough to read another family's record. */
+    public Optional<AdmissionApplicationDto> findByApplicationNoAndPhone(String applicationNo, String guardianPhone) {
+        var rows = jdbc.query(
+            "SELECT " + COLS + " FROM admission_application WHERE application_no = ? AND guardian_phone = ?",
+            MAPPER, applicationNo, guardianPhone
+        );
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+    }
+
     public AdmissionApplicationDto create(
         UUID schoolId, UUID academicYearId, UUID gradeId, String applicationNo,
         String firstName, String lastName, LocalDate dob, String gender,

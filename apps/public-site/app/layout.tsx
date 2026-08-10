@@ -27,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="brand-name serif">Oakridge Hyderabad</span>
           </Link>
           <nav className="site-nav">
+            <Link href="/track">Track application</Link>
             <Link href="/apply">Apply now</Link>
           </nav>
         </header>

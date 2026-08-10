@@ -201,3 +201,178 @@ export function markAttendanceBulk(
     body: JSON.stringify({ schoolId, sectionId, onDate, source: "manual", entries }),
   });
 }
+
+// -------------------------- Assessment --------------------------
+
+export type AssessmentDto = {
+  id: string;
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  termId: string | null;
+  strategyCode: string;
+  name: string;
+  assessmentType: string;
+  maxMarks: number | null;
+  weightPct: number | null;
+  scheduledOn: string | null;
+  status: string;
+};
+
+export function assessmentsForSection(sectionId: string): Promise<AssessmentDto[]> {
+  return apiFetch<AssessmentDto[]>(`/v1/assessment?sectionId=${sectionId}`);
+}
+
+export function createAssessment(req: {
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  strategyCode: string;
+  name: string;
+  assessmentType: string;
+  maxMarks?: number;
+}): Promise<AssessmentDto> {
+  return apiFetch<AssessmentDto>("/v1/assessment", { method: "POST", body: JSON.stringify(req) });
+}
+
+export type AssessmentComponentDto = {
+  id: string;
+  assessmentId: string;
+  code: string;
+  name: string;
+  maxMarks: number;
+  weightPct: number | null;
+  sortOrder: number;
+};
+
+export function componentsForAssessment(assessmentId: string): Promise<AssessmentComponentDto[]> {
+  return apiFetch<AssessmentComponentDto[]>(`/v1/assessment/${assessmentId}/components`);
+}
+
+export function addAssessmentComponent(
+  assessmentId: string,
+  req: { code: string; name: string; maxMarks: number; sortOrder: number }
+): Promise<AssessmentComponentDto> {
+  return apiFetch<AssessmentComponentDto>(`/v1/assessment/${assessmentId}/components`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type MarkDto = {
+  id: string;
+  assessmentComponentId: string;
+  studentId: string;
+  rawMarks: number | null;
+  gradeLetter: string | null;
+  remarks: string | null;
+  isAbsent: boolean;
+};
+
+export function marksForComponent(componentId: string): Promise<MarkDto[]> {
+  return apiFetch<MarkDto[]>(`/v1/assessment/components/${componentId}/marks`);
+}
+
+export function enterMark(
+  componentId: string,
+  req: { schoolId: string; studentId: string; rawMarks?: number; isAbsent: boolean }
+): Promise<MarkDto> {
+  return apiFetch<MarkDto>(`/v1/assessment/components/${componentId}/marks`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+// -------------------------- LMS: assignments --------------------------
+
+export type AssignmentDto = {
+  id: string;
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  title: string;
+  instructions: string | null;
+  submissionType: string | null;
+  dueAt: string | null;
+  maxMarks: number | null;
+  status: string;
+  createdByStaffId: string | null;
+};
+
+export function assignmentsForSection(sectionId: string): Promise<AssignmentDto[]> {
+  return apiFetch<AssignmentDto[]>(`/v1/lms/assignments?sectionId=${sectionId}`);
+}
+
+export function createAssignment(req: {
+  schoolId: string;
+  sectionId: string;
+  subjectId: string;
+  title: string;
+  instructions?: string;
+  dueAt?: string;
+  maxMarks?: number;
+  createdByStaffId?: string;
+}): Promise<AssignmentDto> {
+  return apiFetch<AssignmentDto>("/v1/lms/assignments", { method: "POST", body: JSON.stringify(req) });
+}
+
+export type AssignmentSubmissionDto = {
+  id: string;
+  assignmentId: string;
+  studentId: string;
+  body: string | null;
+  submittedAt: string | null;
+  marks: number | null;
+  feedback: string | null;
+  gradedAt: string | null;
+};
+
+export function submissionsForAssignment(assignmentId: string): Promise<AssignmentSubmissionDto[]> {
+  return apiFetch<AssignmentSubmissionDto[]>(`/v1/lms/assignments/${assignmentId}/submissions`);
+}
+
+export function gradeSubmission(
+  submissionId: string,
+  req: { marks: number; feedback?: string; gradedByStaffId?: string }
+): Promise<AssignmentSubmissionDto> {
+  return apiFetch<AssignmentSubmissionDto>(`/v1/lms/submissions/${submissionId}/grade`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+// -------------------------- Comms: announcements --------------------------
+
+export type AnnouncementDto = {
+  id: string;
+  schoolId: string;
+  scopeType: string;
+  scopeIds: string[] | null;
+  title: string;
+  body: string;
+  channels: string[];
+  publishedAt: string | null;
+  expiresAt: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+};
+
+export function announcementsForSchool(schoolId: string): Promise<AnnouncementDto[]> {
+  return apiFetch<AnnouncementDto[]>(`/v1/comms/announcements?schoolId=${schoolId}`);
+}
+
+export function createAnnouncement(req: {
+  schoolId: string;
+  scopeType: string;
+  scopeIds?: string[];
+  title: string;
+  body: string;
+  channels?: string[];
+  createdByUserId?: string;
+}): Promise<AnnouncementDto> {
+  return apiFetch<AnnouncementDto>("/v1/comms/announcements", { method: "POST", body: JSON.stringify(req) });
+}
+
+export function publishAnnouncement(id: string): Promise<AnnouncementDto> {
+  return apiFetch<AnnouncementDto>(`/v1/comms/announcements/${id}/publish`, { method: "POST" });
+}
