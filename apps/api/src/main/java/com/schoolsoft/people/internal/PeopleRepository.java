@@ -86,6 +86,22 @@ public class PeopleRepository {
         return findStudent(id).orElseThrow();
     }
 
+    public List<StudentDto> studentsOfGuardian(UUID guardianId) {
+        return jdbc.query(
+            "SELECT s.id, s.school_id, s.admission_no, s.first_name, s.middle_name, s.last_name, " +
+            "       s.dob, s.gender, s.status, " +
+            "       e.section_id, (g.code || '-' || sec.code) AS section_label, e.roll_no " +
+            "FROM student s " +
+            "JOIN guardian_student gs ON gs.student_id = s.id " +
+            "LEFT JOIN enrolment e ON e.student_id = s.id AND e.status = 'active' " +
+            "LEFT JOIN section sec ON sec.id = e.section_id " +
+            "LEFT JOIN grade   g   ON g.id = sec.grade_id " +
+            "WHERE gs.guardian_id = ? " +
+            "ORDER BY s.first_name",
+            STUDENT, guardianId
+        );
+    }
+
     public List<GuardianDto> guardiansOfStudent(UUID studentId) {
         return jdbc.query(
             "SELECT g.id, g.school_id, g.first_name, g.last_name, g.phone, g.email, " +

@@ -335,6 +335,36 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   intentionally out of scope for this pass — see the open item below.
   2026-08-10.
 
+- ~~Parent app — Login, Home (child snapshot), Fees (view-only).~~ New
+  `apps/parent-app` (`@schoolsoft/parent-app`, `next dev -p 3004`),
+  bottom-tab shell (Home, Fees) same as teacher-app/driver-app's family.
+  Backend: `PeopleController`/`PeopleRepository` gained
+  `GET /v1/people/guardians/{id}/students` (`studentsOfGuardian`) — the
+  reverse of the existing `guardiansOfStudent` — since a guardian's JWT
+  only resolves to `guardian.id` via `/v1/iam/me`, and there was no way to
+  go from there to "which children." Home: a chip picker if the guardian
+  has more than one child, then a snapshot card (today's attendance status
+  if marked, enrolment status) plus the latest 3 published announcements.
+  Fees: per-child invoice list with status pills, tap-to-expand showing
+  real line items and payment history — read-only, no payment gateway
+  integration (that's real scope, not this pass).
+
+  Confirmed the guardian↔student linkage and OTP auth flow actually work
+  end-to-end from a real frontend (previously unverified, per this same
+  open item) — created a real `guardian` row, linked it to the existing
+  seeded student Ananya Rao (ADM-0001) via `guardian_student`, and gave it
+  a `user_account` so it could log in like any staff/guardian identity.
+  Verified live against local Postgres and a real API instance: OTP login
+  as that guardian, Home correctly showing Ananya Rao's real enrolment/
+  section and the two real announcements seeded earlier this session, Fees
+  showing the exact two real invoices from this session's fees-page work
+  (`INV-0002` partial ₹5,250, `INV-0001` paid ₹5,000) — drilling into
+  `INV-0002` showed the real ₹5,000+₹250 GST line and the real ₹2,000 UPI
+  payment recorded earlier, confirming the whole chain (guardian →
+  student → invoice → line → payment) resolves correctly. Attendance
+  history, report cards, homework, and messaging are intentionally out of
+  scope for this pass — see the open item below. 2026-08-10.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
@@ -372,21 +402,17 @@ are different claims:
 
 - **Remaining frontend surfaces.** School Admin Web (`admin-web`) and Chain
   HQ Console (`hq-web`) are both built out and design-refreshed; Teacher
-  app (`teacher-app`) has its first slice (Login, Today, Attendance) and
-  Driver app (`driver-app`) has its first slice (Login, Home/trip-tracking)
-  — see Done above for both. Still open:
+  app (`teacher-app`), Driver app (`driver-app`), and Parent app
+  (`parent-app`) each have their first slice — see Done above for all
+  three. Still open:
   - **Teacher app — Assessment, LMS, Comms.** Same backend endpoints
     admin-web already uses, scoped to the teacher's own sections/subjects
     the way Attendance is. Natural next slice for `teacher-app`.
   - **Driver app — stop-by-stop check-in, trip history.** The live-tracking
     slice (start/end trip, GPS ping) is done; per-stop manifest/check-in
     and a historical trip log are the natural next slice.
-  - **Parent app.** Doesn't exist yet. Single-child view: attendance
-    history, fee invoices/payment, report cards, homework, announcements,
-    messaging with teachers. Backend ready (attendance, fees, assessment,
-    lms, comms) but the guardian↔student linkage and auth flow (guardians
-    OTP-login the same way staff do, per `AuthController`, but haven't
-    been exercised end-to-end from a real frontend yet) need checking.
+  - **Parent app — attendance history, report cards, homework, messaging.**
+    Login/Home/Fees are done; the rest of a full parent experience.
   - **Public/Admissions microsite.** Doesn't exist yet. External-facing,
     no auth — school info pages plus a public inquiry form feeding the
     existing admissions funnel. Different shape from the other three (

@@ -56,6 +56,11 @@ public class PeopleController {
         return repo.listGuardians(schoolId, q);
     }
 
+    @GetMapping("/guardians/{id}/students")
+    public List<StudentDto> studentsOf(@PathVariable UUID id) {
+        return repo.studentsOfGuardian(id);
+    }
+
     // -------------------------- Staff --------------------------
     @GetMapping("/staff")
     public List<StaffDto> staff(@RequestParam UUID schoolId, @RequestParam(required = false) String q) {
