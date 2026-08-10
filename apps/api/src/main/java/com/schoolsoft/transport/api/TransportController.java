@@ -34,8 +34,8 @@ public class TransportController {
     // -------------------------- Drivers --------------------------
 
     @GetMapping("/drivers")
-    public List<DriverDto> drivers(@RequestParam UUID schoolId) {
-        return repo.listDrivers(schoolId);
+    public List<DriverDto> drivers(@RequestParam UUID schoolId, @RequestParam(required = false) UUID staffId) {
+        return repo.listDrivers(schoolId, staffId);
     }
 
     public record CreateDriverRequest(@NotBlank String name, String phone, String licenseNo) {}

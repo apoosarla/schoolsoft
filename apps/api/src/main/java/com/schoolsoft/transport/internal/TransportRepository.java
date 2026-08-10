@@ -57,7 +57,14 @@ public class TransportRepository {
         rs.getString("name"), rs.getString("phone"), rs.getString("license_no"), rs.getBoolean("is_active")
     );
 
-    public List<DriverDto> listDrivers(UUID schoolId) {
+    public List<DriverDto> listDrivers(UUID schoolId, UUID staffId) {
+        if (staffId != null) {
+            return jdbc.query(
+                "SELECT id, school_id, name, phone, license_no, is_active FROM driver " +
+                "WHERE school_id = ? AND staff_id = ? ORDER BY name",
+                DRIVER_MAPPER, schoolId, staffId
+            );
+        }
         return jdbc.query(
             "SELECT id, school_id, name, phone, license_no, is_active FROM driver WHERE school_id = ? ORDER BY name",
             DRIVER_MAPPER, schoolId

@@ -298,6 +298,43 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   LMS, and Comms for the teacher app are intentionally out of scope for
   this pass — see the open item below. 2026-08-10.
 
+- ~~Driver app — Login, Home (route/vehicle select, trip start/end, live
+  GPS tracking).~~ New `apps/driver-app` (`@schoolsoft/driver-app`,
+  `next dev -p 3005`), same scaffolding/design-token/OTP-login pattern as
+  teacher-app, single-screen shell (topbar + one Home panel — no bottom
+  tabs needed for a one-screen app). Backend: `TransportController`'s
+  `GET /v1/transport/drivers` gained an optional `staffId` filter
+  (`TransportRepository.listDrivers`) so the app can resolve "which
+  `driver` row am I" from the logged-in staff's id via `/v1/iam/me` — the
+  `driver` table's `staff_id` FK is optional (drivers don't have to have a
+  login), this is the case where they do. Home: pick a route + vehicle +
+  direction (`pickup`/`drop`), Start trip calls
+  `POST /v1/transport/trips/start`; while a trip is active, a 20s interval
+  calls `navigator.geolocation.getCurrentPosition` and posts each fix to
+  `POST /v1/transport/gps-pings` (`speed`/`heading` converted from the
+  Geolocation API's m/s to km/h), with a pulsing "tracking" badge and last-
+  fix timestamp/coords shown live; End trip calls
+  `POST /v1/transport/trips/{id}/end`. Permission-denied and no-fix cases
+  show a real error instead of failing silently.
+
+  Verified live against local Postgres and a real API instance using a
+  real seeded driver (`ramesh.kumar@oakridge-hyd.test`, linked `driver`/
+  `vehicle`/`transport_route` rows): OTP login, route/vehicle pre-filled
+  from real data, Start trip created a real `trip` row (confirmed via
+  psql), End trip stamped it with `ended_at`. One thing couldn't be driven
+  through the UI in this automation environment: Chrome's native
+  geolocation permission prompt is a browser-chrome dialog, not a page
+  element, and the available browser-automation tooling can't grant it —
+  `getCurrentPosition` never resolved (neither success nor error callback
+  fired) while waiting on that prompt. Verified the actual ping pipeline
+  instead by calling the same `recordGpsPing` codepath directly against
+  the live API with the session's real access token and confirming the row
+  landed in `gps_ping` with the right vehicle/lat/lng/speed/heading — the
+  only untested piece is the browser's own permission UI, which is outside
+  the app's control. Stop-by-stop check-in and trip history are
+  intentionally out of scope for this pass — see the open item below.
+  2026-08-10.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
@@ -335,20 +372,21 @@ are different claims:
 
 - **Remaining frontend surfaces.** School Admin Web (`admin-web`) and Chain
   HQ Console (`hq-web`) are both built out and design-refreshed; Teacher
-  app (`teacher-app`) has its first slice (Login, Today, Attendance — see
-  Done above). Still open:
+  app (`teacher-app`) has its first slice (Login, Today, Attendance) and
+  Driver app (`driver-app`) has its first slice (Login, Home/trip-tracking)
+  — see Done above for both. Still open:
   - **Teacher app — Assessment, LMS, Comms.** Same backend endpoints
     admin-web already uses, scoped to the teacher's own sections/subjects
     the way Attendance is. Natural next slice for `teacher-app`.
+  - **Driver app — stop-by-stop check-in, trip history.** The live-tracking
+    slice (start/end trip, GPS ping) is done; per-stop manifest/check-in
+    and a historical trip log are the natural next slice.
   - **Parent app.** Doesn't exist yet. Single-child view: attendance
     history, fee invoices/payment, report cards, homework, announcements,
     messaging with teachers. Backend ready (attendance, fees, assessment,
     lms, comms) but the guardian↔student linkage and auth flow (guardians
     OTP-login the same way staff do, per `AuthController`, but haven't
     been exercised end-to-end from a real frontend yet) need checking.
-  - **Driver app.** Doesn't exist yet. Transport module backend exists
-    (routes/stops/trips/geofence) but is the least fleshed out and lowest
-    user-facing priority of the four.
   - **Public/Admissions microsite.** Doesn't exist yet. External-facing,
     no auth — school info pages plus a public inquiry form feeding the
     existing admissions funnel. Different shape from the other three (
