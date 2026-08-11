@@ -549,6 +549,61 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   and confirmed both screens correctly fall back to single-column with no
   regression. Console clean throughout. 2026-08-11.
 
+- ~~Parent Mobile App — Phase 2 backend (device push tokens + FCM
+  adapter).~~ Also executed by a fresh subagent, independently re-verified
+  by the orchestrating session with its own curl/psql calls (not just a
+  re-read of the agent's report) before commit — see verification below.
+
+  New table `notification_device` (migration V015) keyed by
+  `user_account_id` rather than `(recipient_type, recipient_id)` — every
+  app session already holds its own `user_account.id` directly (e.g.
+  `parent-app`'s `Session.userAccountId`), and the existing notification
+  pipeline's `(recipient_type, recipient_id)` resolves back to it via
+  `user_account(subject_type, subject_id)`, a join `NotificationDeviceRepository
+  .tokensForRecipient` does rather than duplicating the recipient-typing
+  scheme onto every device row. `UNIQUE(token)` with upsert-on-conflict —
+  an FCM token is unique per app install, so re-registering (app reinstall,
+  token rotation) moves it rather than duplicating. New
+  `PushDeviceController`: `POST /v1/notifications/devices` (register/
+  upsert — the owning account comes from the bearer token via
+  `TenantContext.require().userAccountId()`, never the request body, so a
+  session can only manage its own devices) and `DELETE
+  /v1/notifications/devices/{id}` (unregister, e.g. on sign-out).
+
+  `ChannelRouter.send()`'s push branch now actually resolves registered
+  device tokens and calls a new `FcmSender` (`com.google.firebase:
+  firebase-admin`, added to `pom.xml`) — but only if
+  `schoolsoft.notifications.fcm.credentials-path` (new config property,
+  env-overridable via `SCHOOLSOFT_FCM_CREDENTIALS_PATH`) is set to a real
+  service-account JSON path. No Firebase project exists in this
+  environment, so the property is unset by default, and `FcmSender
+  .isEnabled()` gates `FirebaseApp` initialization entirely — with it
+  unset, push falls back to exactly the pre-existing log-and-mark-sent stub
+  (now per-device, logging device id/platform but never the raw token).
+  Zero devices registered for a recipient is handled separately (marks the
+  dispatch `failed` with a reason, doesn't throw) from "recipient doesn't
+  resolve at all" (the pre-existing `NotificationService` guard, untouched).
+
+  Verified live, independently, end-to-end against local Postgres and a
+  real API instance — re-ran everything myself rather than trusting the
+  subagent's report at face value: `mvn compile` clean; killed and
+  restarted the API with **no** FCM credentials configured and confirmed
+  via the boot log it starts cleanly with zero Firebase initialization
+  attempted; confirmed migration V015 applied
+  (`flyway_schema_history` → `015 notification device`) and the table
+  shape matches; logged in as `sunil.rao@test.dev` via curl OTP, registered
+  a real device token, confirmed the row in `psql`. Added a temporary
+  debug endpoint (removed before commit, recompiled clean afterward) to
+  directly exercise `NotificationService.notify(...)` with `channels:
+  ["push"]` and confirmed all three real paths from the server log: (1)
+  a resolvable recipient with registered devices → stubbed FCM send logged
+  with device ids only, dispatch marked sent; (2) a recipient that doesn't
+  resolve at all → the pre-existing guard skips cleanly, unaffected by
+  this change; (3) a resolvable recipient (real staff member) with zero
+  registered devices → the new empty-tokens branch skips cleanly with a
+  `failed`/reason dispatch row, no exception. Re-confirmed the real
+  register endpoint still works after removing the debug code. 2026-08-11.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something

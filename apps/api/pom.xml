@@ -21,6 +21,7 @@
     <java.version>25</java.version>
     <spring-modulith.version>1.4.12</spring-modulith.version>
     <jjwt.version>0.12.6</jjwt.version>
+    <firebase-admin.version>9.5.0</firebase-admin.version>
   </properties>
 
   <dependencyManagement>
@@ -105,6 +106,12 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.google.firebase</groupId>
+      <artifactId>firebase-admin</artifactId>
+      <version>${firebase-admin.version}</version>
     </dependency>
 
     <dependency>

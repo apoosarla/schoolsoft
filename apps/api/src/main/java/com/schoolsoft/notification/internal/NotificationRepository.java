@@ -79,4 +79,11 @@ public class NotificationRepository {
             providerMsgId, dispatchId
         );
     }
+
+    public void markFailed(UUID dispatchId, String reason) {
+        jdbc.update(
+            "UPDATE notification_dispatch SET status='failed', failure_reason=? WHERE id = ?",
+            reason, dispatchId
+        );
+    }
 }

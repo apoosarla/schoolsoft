@@ -41,6 +41,11 @@ schoolsoft:
   chain-migrations:
     locations: classpath:db/migration/chain
     auto-apply-on-startup: true
+  notifications:
+    fcm:
+      # Path to a Firebase service-account JSON. Unset = no Firebase project
+      # provisioned; the push channel falls back to a log-only stub.
+      credentials-path: ${SCHOOLSOFT_FCM_CREDENTIALS_PATH:}
 
 management:
   endpoints:
