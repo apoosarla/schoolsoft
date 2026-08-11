@@ -3,19 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  checkIn,
   DriverDto,
   endTrip,
   getSession,
+  getStudent,
   listRoutes,
   listVehicles,
   myDriverProfile,
   recordGpsPing,
   Session,
   startTrip,
+  StudentTransportDto,
+  studentsOnRoute,
   TransportRouteDto,
   TripDto,
   VehicleDto,
 } from "@/lib/api";
+
+type RosterEntry = { studentId: string; name: string };
 
 const PING_INTERVAL_MS = 20000;
 
@@ -37,6 +43,9 @@ export default function HomePage() {
   const [elapsed, setElapsed] = useState("00:00");
   const [lastPing, setLastPing] = useState<{ lat: number; lng: number; at: string } | null>(null);
   const [pingError, setPingError] = useState<string | null>(null);
+
+  const [roster, setRoster] = useState<RosterEntry[] | null>(null);
+  const [checkingInId, setCheckingInId] = useState<string | null>(null);
 
   const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -119,10 +128,36 @@ export default function HomePage() {
       clockTimer.current = setInterval(() => {
         setTripStartedAt((started) => started);
       }, 1000);
+
+      studentsOnRoute(routeId)
+        .then(async (assignments: StudentTransportDto[]) => {
+          const withNames = await Promise.all(
+            assignments.map(async (a) => {
+              const s = await getStudent(a.studentId);
+              return { studentId: a.studentId, name: `${s.firstName} ${s.lastName ?? ""}`.trim() };
+            })
+          );
+          setRoster(withNames);
+        })
+        .catch((err) => setError(describeError(err)));
     } catch (err) {
       setError(describeError(err));
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function onCheckIn(studentId: string, status: string) {
+    if (!trip) return;
+    setCheckingInId(studentId);
+    setError(null);
+    try {
+      const updated = await checkIn(trip.id, studentId, status);
+      setTrip(updated);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setCheckingInId(null);
     }
   }
 
@@ -149,6 +184,7 @@ export default function HomePage() {
       setTripStartedAt(null);
       setLastPing(null);
       setElapsed("00:00");
+      setRoster(null);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -223,6 +259,46 @@ export default function HomePage() {
           <button type="button" className="btn-block btn-large btn-danger" onClick={onEnd} disabled={ending} style={{ marginTop: 12 }}>
             {ending ? "Ending…" : "End trip"}
           </button>
+        </div>
+      )}
+
+      {trip && (
+        <div className="panel">
+          <h2>{direction === "pickup" ? "Boarding" : "Drop-off"} check-in</h2>
+          {!roster && <p className="hint">Loading roster…</p>}
+          {roster && roster.length === 0 && <p className="empty-note">No students assigned to this route.</p>}
+          {roster?.map((r) => {
+            const state = trip.manifest[r.studentId]?.status;
+            return (
+              <div
+                key={r.studentId}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)" }}
+              >
+                <div>
+                  <div>{r.name}</div>
+                  {state && <div className="list-row-sub">{state}</div>}
+                </div>
+                <div className="form-row" style={{ marginBottom: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => onCheckIn(r.studentId, direction === "pickup" ? "boarded" : "dropped")}
+                    disabled={checkingInId === r.studentId}
+                    style={state === (direction === "pickup" ? "boarded" : "dropped") ? undefined : { background: "var(--surface-2)", color: "var(--text)", boxShadow: "none", border: "1px solid var(--border-strong)" }}
+                  >
+                    {direction === "pickup" ? "Board" : "Drop"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCheckIn(r.studentId, "absent")}
+                    disabled={checkingInId === r.studentId}
+                    style={state === "absent" ? { background: "var(--critical)" } : { background: "var(--surface-2)", color: "var(--text)", boxShadow: "none", border: "1px solid var(--border-strong)" }}
+                  >
+                    Absent
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </main>

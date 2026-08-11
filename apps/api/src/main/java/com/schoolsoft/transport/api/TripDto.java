@@ -1,9 +1,10 @@
 package com.schoolsoft.transport.api;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 public record TripDto(
     UUID id, UUID schoolId, UUID routeId, UUID vehicleId, UUID driverId,
-    String direction, Instant startedAt, Instant endedAt
+    String direction, Instant startedAt, Instant endedAt, Map<String, Object> manifest
 ) {}

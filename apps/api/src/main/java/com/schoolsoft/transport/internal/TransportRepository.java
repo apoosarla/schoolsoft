@@ -1,5 +1,6 @@
 package com.schoolsoft.transport.internal;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.transport.api.DriverDto;
 import com.schoolsoft.transport.api.GeofenceStatusDto;
@@ -13,8 +14,11 @@ import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -23,7 +27,33 @@ import org.springframework.stereotype.Repository;
 public class TransportRepository {
 
     private final JdbcTemplate jdbc;
-    public TransportRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final ObjectMapper json;
+
+    public TransportRepository(JdbcTemplate jdbc, ObjectMapper json) {
+        this.jdbc = jdbc;
+        this.json = json;
+    }
+
+    private PGobject jsonb(Object value) {
+        try {
+            PGobject o = new PGobject();
+            o.setType("jsonb");
+            o.setValue(json.writeValueAsString(value == null ? Map.of() : value));
+            return o;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readManifest(String raw) {
+        if (raw == null) return Map.of();
+        try {
+            return json.readValue(raw, Map.class);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
 
     // -------------------------- Vehicles --------------------------
 
@@ -188,32 +218,57 @@ public class TransportRepository {
         );
     }
 
-    private static final RowMapper<TripDto> TRIP_MAPPER = (rs, i) -> new TripDto(
+    private static final String TRIP_COLS =
+        "id, school_id, route_id, vehicle_id, driver_id, direction, started_at, ended_at, manifest";
+
+    private final RowMapper<TripDto> tripMapper = (rs, i) -> new TripDto(
         UUID.fromString(rs.getString("id")), UUID.fromString(rs.getString("school_id")),
         UUID.fromString(rs.getString("route_id")), UUID.fromString(rs.getString("vehicle_id")),
         UUID.fromString(rs.getString("driver_id")), rs.getString("direction"),
-        rs.getTimestamp("started_at").toInstant(), rs.getTimestamp("ended_at") == null ? null : rs.getTimestamp("ended_at").toInstant()
+        rs.getTimestamp("started_at").toInstant(), rs.getTimestamp("ended_at") == null ? null : rs.getTimestamp("ended_at").toInstant(),
+        readManifest(rs.getString("manifest"))
     );
 
     public TripDto startTrip(UUID schoolId, UUID routeId, UUID vehicleId, UUID driverId, String direction) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO trip (id, school_id, route_id, vehicle_id, driver_id, direction, started_at) VALUES (?, ?, ?, ?, ?, ?, now())",
-            id, schoolId, routeId, vehicleId, driverId, direction
+            "INSERT INTO trip (id, school_id, route_id, vehicle_id, driver_id, direction, started_at, manifest) VALUES (?, ?, ?, ?, ?, ?, now(), ?)",
+            id, schoolId, routeId, vehicleId, driverId, direction, jsonb(Map.of())
         );
-        return jdbc.queryForObject(
-            "SELECT id, school_id, route_id, vehicle_id, driver_id, direction, started_at, ended_at FROM trip WHERE id = ?",
-            TRIP_MAPPER, id
-        );
+        return jdbc.queryForObject("SELECT " + TRIP_COLS + " FROM trip WHERE id = ?", tripMapper, id);
     }
 
     public TripDto endTrip(UUID id) {
         int updated = jdbc.update("UPDATE trip SET ended_at = now() WHERE id = ?", id);
         if (updated == 0) throw new NotFoundException("Trip not found: " + id);
-        return jdbc.queryForObject(
-            "SELECT id, school_id, route_id, vehicle_id, driver_id, direction, started_at, ended_at FROM trip WHERE id = ?",
-            TRIP_MAPPER, id
+        return jdbc.queryForObject("SELECT " + TRIP_COLS + " FROM trip WHERE id = ?", tripMapper, id);
+    }
+
+    public TripDto findTrip(UUID id) {
+        var rows = jdbc.query("SELECT " + TRIP_COLS + " FROM trip WHERE id = ?", tripMapper, id);
+        if (rows.isEmpty()) throw new NotFoundException("Trip not found: " + id);
+        return rows.get(0);
+    }
+
+    public List<TripDto> tripsForDriver(UUID driverId, int limit) {
+        return jdbc.query(
+            "SELECT " + TRIP_COLS + " FROM trip WHERE driver_id = ? ORDER BY started_at DESC LIMIT ?",
+            tripMapper, driverId, limit
         );
+    }
+
+    /**
+     * Merges one student's boarding state into the trip's {@code manifest}
+     * jsonb blob — read-modify-write is fine at this demo's concurrency scale
+     * (one driver's phone, a few dozen students per trip); a real fleet-scale
+     * version would move check-ins to their own table.
+     */
+    public TripDto checkIn(UUID tripId, UUID studentId, String status) {
+        TripDto trip = findTrip(tripId);
+        Map<String, Object> manifest = new HashMap<>(trip.manifest());
+        manifest.put(studentId.toString(), Map.of("status", status, "at", Instant.now().toString()));
+        jdbc.update("UPDATE trip SET manifest = ? WHERE id = ?", jsonb(manifest), tripId);
+        return findTrip(tripId);
     }
 
     // -------------------------- Geofencing --------------------------

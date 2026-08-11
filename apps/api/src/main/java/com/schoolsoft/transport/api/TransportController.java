@@ -116,6 +116,23 @@ public class TransportController {
         return repo.endTrip(id);
     }
 
+    @GetMapping("/trips")
+    public List<TripDto> tripsForDriver(@RequestParam UUID driverId, @RequestParam(defaultValue = "20") int limit) {
+        return repo.tripsForDriver(driverId, Math.min(limit, 200));
+    }
+
+    @GetMapping("/trips/{id}")
+    public TripDto trip(@PathVariable UUID id) {
+        return repo.findTrip(id);
+    }
+
+    public record CheckInRequest(@NotNull UUID studentId, @NotBlank String status) {}
+
+    @PostMapping("/trips/{id}/checkin")
+    public TripDto checkIn(@PathVariable UUID id, @RequestBody CheckInRequest req) {
+        return repo.checkIn(id, req.studentId(), req.status());
+    }
+
     // -------------------------- Geofencing --------------------------
 
     @GetMapping("/geofence-status")

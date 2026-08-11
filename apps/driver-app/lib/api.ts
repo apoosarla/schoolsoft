@@ -175,6 +175,8 @@ export function listVehicles(schoolId: string): Promise<VehicleDto[]> {
   return apiFetch<VehicleDto[]>(`/v1/transport/vehicles?schoolId=${schoolId}`);
 }
 
+export type ManifestEntry = { status: string; at: string };
+
 export type TripDto = {
   id: string;
   schoolId: string;
@@ -184,6 +186,7 @@ export type TripDto = {
   direction: string;
   startedAt: string;
   endedAt: string | null;
+  manifest: Record<string, ManifestEntry>;
 };
 
 export function startTrip(req: {
@@ -215,4 +218,41 @@ export function recordGpsPing(req: {
     method: "POST",
     body: JSON.stringify(req),
   });
+}
+
+export function tripsForDriver(driverId: string, limit = 20): Promise<TripDto[]> {
+  const params = new URLSearchParams({ driverId, limit: String(limit) });
+  return apiFetch<TripDto[]>(`/v1/transport/trips?${params.toString()}`);
+}
+
+export function checkIn(tripId: string, studentId: string, status: string): Promise<TripDto> {
+  return apiFetch<TripDto>(`/v1/transport/trips/${tripId}/checkin`, {
+    method: "POST",
+    body: JSON.stringify({ studentId, status }),
+  });
+}
+
+export type StudentTransportDto = {
+  id: string;
+  studentId: string;
+  routeId: string;
+  stopId: string;
+  startsOn: string;
+  endsOn: string | null;
+};
+
+export function studentsOnRoute(routeId: string): Promise<StudentTransportDto[]> {
+  return apiFetch<StudentTransportDto[]>(`/v1/transport/routes/${routeId}/students`);
+}
+
+export type StudentDto = {
+  id: string;
+  admissionNo: string;
+  firstName: string;
+  lastName: string | null;
+  currentSectionLabel: string | null;
+};
+
+export function getStudent(id: string): Promise<StudentDto> {
+  return apiFetch<StudentDto>(`/v1/people/students/${id}`);
 }
