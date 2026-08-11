@@ -31,6 +31,22 @@
   --shadow-md: 0 8px 24px rgba(20, 24, 43, 0.08);
   --topbar-h: 52px;
   --tabbar-h: 60px;
+
+  /* Layout scale — remapped at the tablet breakpoint below so screens opt into
+     wider treatments by using these tokens rather than hard-coded widths. */
+  --shell-max: 560px;
+  --shell-pad: 16px;
+  --gutter: 14px;
+}
+
+/* ============ Tablet (>=768px) ============ */
+@media (min-width: 768px) {
+  :root {
+    --shell-max: 920px;
+    --shell-pad: 28px;
+    --gutter: 18px;
+    --topbar-h: 60px;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -118,9 +134,18 @@ h2 { margin: 0; }
 main.shell {
   flex: 1;
   width: 100%;
-  max-width: 560px;
+  max-width: var(--shell-max);
   margin: 0 auto;
-  padding: 16px 16px calc(var(--tabbar-h) + 24px);
+  padding: var(--shell-pad) var(--shell-pad) calc(var(--tabbar-h) + 24px);
+}
+
+/* Keep the topbar's contents aligned with the shell column once the column
+   stops filling the viewport. */
+@media (min-width: 768px) {
+  .topbar {
+    padding: 0 max(var(--shell-pad), calc((100vw - var(--shell-max)) / 2));
+  }
+  .topbar h1 { font-size: 20px; }
 }
 
 .tabbar {
@@ -150,6 +175,16 @@ main.shell {
 }
 .tab-link.active { color: var(--accent); }
 .tab-link svg { flex: none; }
+
+@media (min-width: 768px) {
+  .tabbar { justify-content: center; }
+  .tab-link {
+    flex: 0 1 150px;
+    flex-direction: row;
+    gap: 8px;
+    font-size: 13.5px;
+  }
+}
 
 /* ============ Components ============ */
 .panel {
@@ -323,6 +358,40 @@ button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .panel-btn:hover { background: var(--surface-2); }
 .panel-btn:active { transform: none; }
 .list-row-sub { font-size: 12px; color: var(--text-faint); font-weight: 400; margin-top: 2px; }
+
+/* ============ Responsive layout primitives ============
+   Single column on phones; screens hang these on a wrapper to opt into the
+   tablet treatment without any JS breakpoint logic. */
+
+.grid-2 { display: block; }
+.pane-split { display: block; }
+
+@media (min-width: 768px) {
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--gutter);
+    align-items: start;
+  }
+
+  /* List + detail side by side, the tablet equivalent of drilling into a row. */
+  .pane-split {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    column-gap: var(--gutter);
+    align-items: start;
+  }
+  .pane-detail {
+    position: sticky;
+    top: calc(var(--topbar-h) + var(--shell-pad));
+  }
+}
+
+.panel-btn.active {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

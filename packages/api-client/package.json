@@ -1,0 +1,23 @@
+{
+  "name": "@schoolsoft/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared browser client for the Schoolsoft API — transport, error type, auth wire shapes, and chain-scoped domain DTOs.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

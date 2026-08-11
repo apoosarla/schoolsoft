@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ApiError,
@@ -149,61 +149,72 @@ export default function MessagesPage() {
         </div>
       )}
 
-      {teachers && teachers.length > 0 && (
-        <div className="panel">
-          <h2>{active?.firstName}&apos;s teachers</h2>
-          <div className="chip-row" style={{ marginTop: 8, marginBottom: 0 }}>
-            {teachers.map((t) => {
-              const dir = directoryFor(t.teacherStaffId);
-              if (!dir) return null;
-              return (
-                <button key={t.id} type="button" className="chip-btn" disabled={starting} onClick={() => onStartThread(dir.userAccountId)}>
-                  {t.teacherName} · {t.subjectName}
-                </button>
-              );
-            })}
+      <div className="pane-split">
+        <div className="pane-list">
+          {teachers && teachers.length > 0 && (
+            <div className="panel">
+              <h2>{active?.firstName}&apos;s teachers</h2>
+              <div className="chip-row" style={{ marginTop: 8, marginBottom: 0 }}>
+                {teachers.map((t) => {
+                  const dir = directoryFor(t.teacherStaffId);
+                  if (!dir) return null;
+                  return (
+                    <button key={t.id} type="button" className="chip-btn" disabled={starting} onClick={() => onStartThread(dir.userAccountId)}>
+                      {t.teacherName} · {t.subjectName}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="panel">
+            <h2>Conversations</h2>
+            {!threads && <p className="hint">Loading…</p>}
+            {threads && threads.length === 0 && <p className="empty-note">No conversations yet. Message a teacher above.</p>}
+            {threads?.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={"panel-btn" + (openThreadId === t.id ? " active" : "")}
+                onClick={() => openThread(t.id)}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span>Thread {t.id.slice(0, 8)}</span>
+                  <span className="list-row-sub">{t.lastMessageAt?.slice(0, 16).replace("T", " ") ?? "—"}</span>
+                </div>
+              </button>
+            ))}
           </div>
         </div>
-      )}
 
-      <div className="panel">
-        <h2>Conversations</h2>
-        {!threads && <p className="hint">Loading…</p>}
-        {threads && threads.length === 0 && <p className="empty-note">No conversations yet. Message a teacher above.</p>}
-        {threads?.map((t) => (
-          <Fragment key={t.id}>
-            <button type="button" className="panel-btn" onClick={() => openThread(t.id)}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span>Thread {t.id.slice(0, 8)}</span>
-                <span className="list-row-sub">{t.lastMessageAt?.slice(0, 16).replace("T", " ") ?? "—"}</span>
+        <div className="pane-detail">
+          {openThreadId && (
+            <div className="panel">
+              <h2>Thread {openThreadId.slice(0, 8)}</h2>
+              <div className="timeline" style={{ marginTop: 12 }}>
+                {messages?.length === 0 && <p className="hint">No messages yet.</p>}
+                {messages?.map((m) => (
+                  <div className="tl-item" key={m.id}>
+                    <div className="tl-time">{m.sentAt.slice(0, 16).replace("T", " ")}</div>
+                    <div className="tl-sub">{m.body}</div>
+                  </div>
+                ))}
               </div>
-            </button>
-            {openThreadId === t.id && (
-              <div style={{ marginTop: -8, marginBottom: 10 }}>
-                <div className="timeline" style={{ marginTop: 12 }}>
-                  {messages?.length === 0 && <p className="hint">No messages yet.</p>}
-                  {messages?.map((m) => (
-                    <div className="tl-item" key={m.id}>
-                      <div className="tl-time">{m.sentAt.slice(0, 16).replace("T", " ")}</div>
-                      <div className="tl-sub">{m.body}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="form-row" style={{ marginTop: 10 }}>
-                  <input
-                    placeholder="Write a message…"
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    style={{ flex: 1 }}
-                  />
-                  <button type="button" onClick={onSend} disabled={sending || !draft.trim()}>
-                    {sending ? "Sending…" : "Send"}
-                  </button>
-                </div>
+              <div className="form-row" style={{ marginTop: 10, marginBottom: 0 }}>
+                <input
+                  placeholder="Write a message…"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <button type="button" onClick={onSend} disabled={sending || !draft.trim()}>
+                  {sending ? "Sending…" : "Send"}
+                </button>
               </div>
-            )}
-          </Fragment>
-        ))}
+            </div>
+          )}
+        </div>
       </div>
     </main>
   );

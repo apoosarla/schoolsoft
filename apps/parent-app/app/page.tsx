@@ -116,42 +116,44 @@ export default function HomePage() {
         </div>
       )}
 
-      {active && (
-        <div className="panel">
-          <h2>{studentName(active)}</h2>
-          <p className="hint">
-            {active.admissionNo}
-            {active.currentSectionLabel ? ` · ${active.currentSectionLabel}` : ""}
-          </p>
-          <div className="stat-row" style={{ marginTop: 12 }}>
-            <div className="stat-chip">
-              <span className="n">
-                {myAttendance ? myAttendance.status.replace("_", " ") : active.currentSectionId ? "—" : "N/A"}
-              </span>
-              <span className="l">Today&apos;s attendance</span>
-            </div>
-            <div className="stat-chip">
-              <span className="n">{active.status}</span>
-              <span className="l">Enrolment</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {announcements && announcements.length > 0 && (
-        <div className="panel">
-          <h2>Announcements</h2>
-          <div className="timeline" style={{ marginTop: 12 }}>
-            {announcements.map((a) => (
-              <div className="tl-item" key={a.id}>
-                <div className="tl-time">{a.publishedAt?.slice(0, 10)}</div>
-                <div className="tl-title">{a.title}</div>
-                <div className="tl-sub">{a.body}</div>
+      <div className="grid-2">
+        {active && (
+          <div className="panel">
+            <h2>{studentName(active)}</h2>
+            <p className="hint">
+              {active.admissionNo}
+              {active.currentSectionLabel ? ` · ${active.currentSectionLabel}` : ""}
+            </p>
+            <div className="stat-row" style={{ marginTop: 12 }}>
+              <div className="stat-chip">
+                <span className="n">
+                  {myAttendance ? myAttendance.status.replace("_", " ") : active.currentSectionId ? "—" : "N/A"}
+                </span>
+                <span className="l">Today&apos;s attendance</span>
               </div>
-            ))}
+              <div className="stat-chip">
+                <span className="n">{active.status}</span>
+                <span className="l">Enrolment</span>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {announcements && announcements.length > 0 && (
+          <div className="panel">
+            <h2>Announcements</h2>
+            <div className="timeline" style={{ marginTop: 12 }}>
+              {announcements.map((a) => (
+                <div className="tl-item" key={a.id}>
+                  <div className="tl-time">{a.publishedAt?.slice(0, 10)}</div>
+                  <div className="tl-title">{a.title}</div>
+                  <div className="tl-sub">{a.body}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </main>
   );
 }

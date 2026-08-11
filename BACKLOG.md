@@ -400,6 +400,155 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   resolved the correct tenant afterward — no leakage between requests.
   2026-08-10.
 
+- ~~Teacher app — Assessment, Classwork (LMS), Comms.~~ New `/assessment`,
+  `/classwork`, `/comms` routes (`apps/teacher-app`), same section-scoped
+  pattern as the existing Attendance tab — resolves the teacher's sections
+  from their timetable, not a school-wide list. Assessment: create an
+  assessment (auto-creates a single "Overall" component so mark entry
+  doesn't need separate component-authoring UI), roster-based mark entry
+  with absent toggling. Classwork: create assignments, view/grade
+  submissions inline. Comms: post + auto-publish section-scoped
+  announcements, plus a read-only feed of announcements visible to the
+  teacher's sections. `lib/api.ts` gained the assessment/lms/comms clients
+  (mirrors admin-web's, scoped down). Bottom tab bar grew from 2 to 5 tabs.
+
+  Verified live end-to-end against local Postgres and a real API instance
+  (`priya.menon@oakridge-hyd.test`, real timetable/section data): created
+  "Class Test 1," entered marks for a 3-student roster, confirmed save;
+  created "Book Report" assignment, confirmed the existing seeded HW1
+  submission showed its real grade/feedback; posted a section announcement
+  and confirmed it appeared both here and in the parent app's Home feed
+  later in the same session. 2026-08-11.
+
+- ~~Parent app — Attendance history + leave, Grades (live marks + report
+  cards), Homework, Messages.~~ New `/attendance`, `/report-cards`,
+  `/homework`, `/messages` routes. Attendance: date-range history
+  (`GET /v1/attendance/students/{id}`, already existed but unused) plus a
+  leave-application form (`POST /v1/attendance/leave`, also already existed
+  but unused). Grades: pulls live assessment marks directly (assessment →
+  components → marks) since `ReportCardDto` itself carries no score
+  payload — the generated-report-card list is shown separately as status
+  metadata (draft/final) rather than duplicating grade display. Homework:
+  assignment list scoped to the child's current section with submit.
+  Messages: a "message this child's teacher" quick-start
+  (`GET /v1/tenancy/sections/{id}/teachers` + `GET /v1/people/directory` to
+  resolve a teacher's `userAccountId`) that creates or reuses a thread, then
+  the existing thread/message read-send flow.
+
+  Found the seeded `section_subject_teacher` table was empty (nothing had
+  ever populated it, despite `timetable_slot` independently carrying
+  teacher assignments) — the Messages teacher-picker had no data to work
+  with until one row was added directly via SQL for live verification.
+  This is a seed-data gap, not a code bug; a fresh `db:seed` run today would
+  reproduce it — worth a real seed-script fix later (see Open items).
+
+  Verified live end-to-end (`sunil.rao@test.dev`, guardian of Ananya Rao):
+  pulled real attendance history, submitted a leave request, saw the "Class
+  Test 1" mark entered from the teacher-app session above show up correctly
+  in Grades, submitted the seeded "Book Report" homework, and completed a
+  full parent→teacher message round-trip (started a thread with Priya
+  Menon, sent a message). 2026-08-11.
+
+- ~~Public/Admissions microsite — application status tracking.~~ New
+  `/track` route: applicant looks up status by application number + the
+  phone number they applied with. New backend:
+  `AdmissionsRepository.findByApplicationNoAndPhone`,
+  `PublicLookupRepository.track`,
+  `GET /v1/public/schools/{chain}/{school}/admissions/track` — deliberately
+  requires both fields to match (not just the application number) so a
+  guessed/leaked number alone can't read another family's record; same
+  "no JWT, trusted-job tenant context" pattern the rest of `publicsite`
+  already uses. Home and the `/apply` confirmation screen both link into it.
+
+  Verified live: submitted a fresh application ("Rahul Verma,"
+  `WEB-E6DA0F34`), looked it up successfully with the right phone,
+  confirmed a wrong phone number gets a generic "not found" (not "wrong
+  phone," avoiding the enumeration tell). 2026-08-11.
+
+- ~~Driver app — student check-in, trip history.~~ New `/history` tab plus
+  a boarding/drop-off checklist that appears on Home while a trip is
+  active — the app's first bottom tab bar (it was single-screen until now).
+  Backend: check-ins write into `trip.manifest` (jsonb column that existed
+  since the original transport migration but was never read or written)
+  via new `POST /v1/transport/trips/{id}/checkin`, read back via new
+  `GET /v1/transport/trips` (by `driverId`, or `schoolId` for the
+  fleet-wide admin view added alongside — see below) and
+  `GET /v1/transport/trips/{id}`. History lists past trips with duration
+  and a check-in count.
+
+  Verified live (`ramesh.kumar@oakridge-hyd.test`, real route/vehicle):
+  started a pickup trip on Route 1, boarded the one student assigned to
+  that route, ended the trip, confirmed it and the two pre-existing seeded
+  trips all show correctly in History. 2026-08-11.
+
+- ~~School Admin Web — Transport screen.~~ New `/transport` route,
+  RBAC-gated behind a new `transport` screen key (migration `V014`, granted
+  to Principal/Vice Principal/IT Admin — the same roles that already hold
+  every other full-access screen). Vehicles, drivers (including linking a
+  driver to a staff account — see gap closed below), routes + stops,
+  student-route assignment, a fleet-wide recent-trips feed
+  (`GET /v1/transport/trips?schoolId=`, new alongside the driver-app work
+  above), and an ad-hoc geofence check.
+
+  Closed a real API gap: `DriverDto`/`CreateDriverRequest` had no `staffId`
+  even though the `driver.staff_id` column has existed since the original
+  transport migration — there was no way to create a driver *and* grant
+  them driver-app login in one step. Both now carry it.
+
+  Verified live end-to-end (Principal login, `priya.menon@oakridge-hyd.test`
+  — who is also seeded as a class teacher, convenient for testing): added a
+  vehicle, added a driver linked to Priya's own staff account (confirmed
+  "linked" badge), created Route 2/Kondapur, added a stop, assigned Ananya
+  Rao to it, ran a geofence check. 2026-08-11.
+
+- ~~Parent Mobile App — Phase 0 (shared `packages/api-client`, tablet CSS
+  breakpoints).~~ First phase of the plan linked above, executed by a fresh
+  subagent per the "clear context between phases" instruction and verified
+  independently by the orchestrating session before commit (see Bugs
+  section — none found this phase, but the process is worth noting since
+  it caught real bugs in earlier work).
+
+  New workspace package `packages/api-client` (`@schoolsoft/api-client`) —
+  transport (`ApiError`, a `createApiClient({ baseUrl, getAccessToken })`
+  factory where `getAccessToken` may be async so a future Capacitor
+  Preferences-backed token store slots in without an API change), OTP wire
+  shapes (`createAuthApi` — deliberately *not* a shared `verifyOtp`, since
+  admin-web resolves `screens`/`roleCodes` while parent/teacher/driver
+  resolve `subjectId`, a real divergence not worth papering over), and
+  chain-scoped domain wrappers grouped by API module (`createPeopleApi`,
+  `createTenancyApi`, `createCommsApi`, `createAttendanceApi`,
+  `createFeesApi`, `createAssessmentApi`, `createLmsApi`) plus their DTOs.
+  `apps/parent-app/lib/api.ts` is now a thin adapter — keeps
+  `SESSION_KEY`/`Session`/`getSession`/`setSession`/`clearSession` local
+  (genuinely app-specific) and re-exports everything else from the shared
+  package under the same names, so no page component's imports changed.
+  The other five apps' `lib/api.ts` are untouched — same migration is a
+  fast-follow whenever each app's next slice touches it, not forced now.
+
+  Tablet breakpoint infrastructure added to `globals.css` as CSS custom
+  properties remapped at `min-width: 768px` (`--shell-max`, `--shell-pad`,
+  `--gutter`) rather than a single hard-coded `560px` cap, plus two layout
+  primitives screens opt into: `.grid-2` (side-by-side panels) and
+  `.pane-split`/`.pane-detail` (list + sticky detail pane, the tablet
+  equivalent of drilling into a row). Proven on two screens — Home
+  (`.grid-2`: child snapshot + announcements side by side) and Messages
+  (`.pane-split`: teacher-picker/conversation-list column + open-thread
+  detail column) — full screen-by-screen rollout is Phase 3.
+
+  Verified live end-to-end against local Postgres and a real API instance:
+  `tsc --noEmit` clean on both the new package and parent-app;
+  `npm install` from repo root correctly symlinks
+  `node_modules/@schoolsoft/api-client` to the new package; fresh OTP login
+  as `sunil.rao@test.dev` through the refactored client hit real endpoints
+  and rendered real data (unchanged from before the refactor — proving the
+  extraction didn't silently change behavior); resized to tablet width
+  (820×1180) and confirmed both `.grid-2` (Home) and `.pane-split`
+  (Messages, including opening a real thread and seeing list + detail
+  genuinely side by side, not stacked) actually use the extra width rather
+  than just centering a wider column; resized back to phone width (390×844)
+  and confirmed both screens correctly fall back to single-column with no
+  regression. Console clean throughout. 2026-08-11.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
@@ -432,26 +581,50 @@ are different claims:
   actually applies something — every restart after the first (a no-op
   migrate call) silently zeroed `platform.chain.schema_version` and
   `platform.chain_schema_version`. Found via the new HQ Console stats UI.
+- `GeofenceStatusDto`'s real field names (`insideGeofence`, `distanceMeters`,
+  `geofenceRadiusM`) didn't match what admin-web's new Transport screen
+  client assumed (`inside`, `distanceM`, `radiusM`) — silently rendered
+  "NaN" instead of erroring, since both sides were plain TS objects never
+  cross-checked against the actual JSON. Caught during live verification,
+  not by the type checker. Fixed by correcting the client type to the real
+  DTO shape.
 
 ## Open items
 
-- **Remaining frontend surfaces.** School Admin Web (`admin-web`) and Chain
-  HQ Console (`hq-web`) are both built out and design-refreshed; Teacher
-  app (`teacher-app`), Driver app (`driver-app`), Parent app
-  (`parent-app`), and the Public/Admissions microsite (`public-site`) each
-  have their first slice — see Done above for all four. Still open:
-  - **Teacher app — Assessment, LMS, Comms.** Same backend endpoints
-    admin-web already uses, scoped to the teacher's own sections/subjects
-    the way Attendance is. Natural next slice for `teacher-app`.
-  - **Driver app — stop-by-stop check-in, trip history.** The live-tracking
-    slice (start/end trip, GPS ping) is done; per-stop manifest/check-in
-    and a historical trip log are the natural next slice.
-  - **Parent app — attendance history, report cards, homework, messaging.**
-    Login/Home/Fees are done; the rest of a full parent experience.
-  - **Public/Admissions microsite — application tracking, richer content.**
-    Home/Apply are done; a "check my application status" lookup and
-    fuller school-info content (staff, facilities, calendar) are the
-    natural next slice.
+- **Remaining frontend surfaces — mostly closed out.** All six frontends
+  (`admin-web`, `hq-web`, `teacher-app`, `driver-app`, `parent-app`,
+  `public-site`) now have at least two slices each, including a new
+  Transport screen for `admin-web` — see Done above. What's still
+  genuinely open:
+  - **LMS quiz engine authoring** (question/option/answer UI) — skipped
+    everywhere so far as its own distinct UI investment, not scoped to any
+    one app.
+  - **Report card *content*.** `ReportCardDto` carries no score payload,
+    only metadata (locked/generated-at); parent-app's Grades page works
+    around this by pulling live assessment marks instead. A real templated
+    report-card renderer is still undesigned.
+  - **`section_subject_teacher` seed gap** (noted in the parent-app entry
+    above) — populate it properly in the seed script instead of by hand.
+  - **Public/Admissions microsite — richer content.** School info beyond
+    the hero (staff, facilities, calendar) is still just a stub.
+
+- **Parent Mobile App.** Requirements + phased plan drafted:
+  https://claude.ai/code/artifact/9a092613-18f6-4f04-8951-85cfd7cd8140.
+  Locked: Capacitor wrap of the existing `parent-app` (not a React Native
+  rewrite — the "switch off Next.js for native code-sharing" instinct
+  doesn't actually buy anything, since React Native doesn't render web JSX
+  either way regardless of framework; the real lever is a shared
+  `packages/api-client`, not yet extracted), first-class tablet layouts
+  (today's shell hard-caps at 560px), Android-first (iOS deferred, addable
+  later without rearchitecting), online fee payment and the live bus map
+  both deferred to post-launch (fee payment is a real gap — no
+  checkout-initiation flow exists at all, see Bugs/gaps above; the bus map
+  just needs driver-app's already-streaming GPS pings rendered back to a
+  parent, nothing built yet). Still open: which push triggers ship at
+  launch —
+  decide at Phase 2 kickoff, not blocking the start. 5 phases, ~4–6 weeks
+  calendar to store-live once Phase 0 (`packages/api-client` extraction +
+  tablet CSS breakpoints) starts.
 
 - **Real external integrations.** GST e-Invoice (NIC IRP), Tally/Zoho Books
   sync, LTI 1.3 / OneRoster 1.2 (real OAuth/OIDC flows), CIE Direct / UDISE+
