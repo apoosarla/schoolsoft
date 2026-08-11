@@ -110,50 +110,52 @@ export default function ReportCardsPage() {
         </div>
       )}
 
-      <div className="panel">
-        <h2>Grades this year</h2>
-        {!grades && <p className="hint">Loading…</p>}
-        {grades && grades.length === 0 && <p className="empty-note">No marks entered yet.</p>}
-        {grades && grades.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Assessment</th>
-                <th>Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {grades.map((g) => (
-                <tr key={g.assessment.id}>
-                  <td>
-                    {g.assessment.name}
-                    <div className="list-row-sub">{g.assessment.assessmentType.replace("_", " ")}</div>
-                  </td>
-                  <td>{g.isAbsent ? "Absent" : `${g.marks ?? "—"} / ${g.maxMarks ?? "—"}`}</td>
+      <div className="grid-2">
+        <div className="panel">
+          <h2>Grades this year</h2>
+          {!grades && <p className="hint">Loading…</p>}
+          {grades && grades.length === 0 && <p className="empty-note">No marks entered yet.</p>}
+          {grades && grades.length > 0 && (
+            <table>
+              <thead>
+                <tr>
+                  <th>Assessment</th>
+                  <th>Score</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+              </thead>
+              <tbody>
+                {grades.map((g) => (
+                  <tr key={g.assessment.id}>
+                    <td>
+                      {g.assessment.name}
+                      <div className="list-row-sub">{g.assessment.assessmentType.replace("_", " ")}</div>
+                    </td>
+                    <td>{g.isAbsent ? "Absent" : `${g.marks ?? "—"} / ${g.maxMarks ?? "—"}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
 
-      <div className="panel">
-        <h2>Report cards</h2>
-        {!reportCards && <p className="hint">Loading…</p>}
-        {reportCards && reportCards.length === 0 && <p className="empty-note">No report card generated yet.</p>}
-        {reportCards && reportCards.length > 0 && (
-          <div className="timeline" style={{ marginTop: 12 }}>
-            {reportCards.map((rc) => (
-              <div className="tl-item" key={rc.id}>
-                <div className="tl-time">{rc.generatedAt.slice(0, 10)}</div>
-                <div className="tl-title">{rc.templateCode}</div>
-                <div className="tl-sub">
-                  <span className={`badge ${rc.isLocked ? "badge-active" : ""}`}>{rc.isLocked ? "final" : "draft"}</span>
+        <div className="panel">
+          <h2>Report cards</h2>
+          {!reportCards && <p className="hint">Loading…</p>}
+          {reportCards && reportCards.length === 0 && <p className="empty-note">No report card generated yet.</p>}
+          {reportCards && reportCards.length > 0 && (
+            <div className="timeline" style={{ marginTop: 12 }}>
+              {reportCards.map((rc) => (
+                <div className="tl-item" key={rc.id}>
+                  <div className="tl-time">{rc.generatedAt.slice(0, 10)}</div>
+                  <div className="tl-title">{rc.templateCode}</div>
+                  <div className="tl-sub">
+                    <span className={`badge ${rc.isLocked ? "badge-active" : ""}`}>{rc.isLocked ? "final" : "draft"}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </main>
   );

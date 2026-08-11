@@ -142,41 +142,43 @@ export default function HomeworkPage() {
         </div>
       )}
 
-      {rows?.map(({ assignment, submission }) => (
-        <div key={assignment.id} className="panel">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div>{assignment.title}</div>
-              <div className="list-row-sub">
-                due {assignment.dueAt ? assignment.dueAt.slice(0, 16).replace("T", " ") : "—"} · max {assignment.maxMarks ?? "—"}
+      <div className="grid-2">
+        {rows?.map(({ assignment, submission }) => (
+          <div key={assignment.id} className="panel">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div>{assignment.title}</div>
+                <div className="list-row-sub">
+                  due {assignment.dueAt ? assignment.dueAt.slice(0, 16).replace("T", " ") : "—"} · max {assignment.maxMarks ?? "—"}
+                </div>
               </div>
+              <span className={`badge ${submission ? "badge-active" : ""}`}>{submission ? "submitted" : "pending"}</span>
             </div>
-            <span className={`badge ${submission ? "badge-active" : ""}`}>{submission ? "submitted" : "pending"}</span>
+            {assignment.instructions && <p className="hint" style={{ marginTop: 8 }}>{assignment.instructions}</p>}
+
+            {submission?.gradedAt && (
+              <p className="hint" style={{ marginTop: 8 }}>
+                Graded: {submission.marks ?? "—"} / {assignment.maxMarks ?? "—"}
+                {submission.feedback ? ` — ${submission.feedback}` : ""}
+              </p>
+            )}
+
+            {!submission && (
+              <div className="form-row" style={{ marginTop: 10 }}>
+                <input
+                  placeholder="Answer / notes"
+                  value={answers[assignment.id] ?? ""}
+                  onChange={(e) => setAnswers((a) => ({ ...a, [assignment.id]: e.target.value }))}
+                  style={{ flex: 1 }}
+                />
+                <button type="button" onClick={() => onSubmit(assignment.id)} disabled={submittingId === assignment.id}>
+                  {submittingId === assignment.id ? "Submitting…" : "Submit"}
+                </button>
+              </div>
+            )}
           </div>
-          {assignment.instructions && <p className="hint" style={{ marginTop: 8 }}>{assignment.instructions}</p>}
-
-          {submission?.gradedAt && (
-            <p className="hint" style={{ marginTop: 8 }}>
-              Graded: {submission.marks ?? "—"} / {assignment.maxMarks ?? "—"}
-              {submission.feedback ? ` — ${submission.feedback}` : ""}
-            </p>
-          )}
-
-          {!submission && (
-            <div className="form-row" style={{ marginTop: 10 }}>
-              <input
-                placeholder="Answer / notes"
-                value={answers[assignment.id] ?? ""}
-                onChange={(e) => setAnswers((a) => ({ ...a, [assignment.id]: e.target.value }))}
-                style={{ flex: 1 }}
-              />
-              <button type="button" onClick={() => onSubmit(assignment.id)} disabled={submittingId === assignment.id}>
-                {submittingId === assignment.id ? "Submitting…" : "Submit"}
-              </button>
-            </div>
-          )}
-        </div>
-      ))}
+        ))}
+      </div>
     </main>
   );
 }

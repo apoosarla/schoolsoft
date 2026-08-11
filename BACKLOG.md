@@ -604,6 +604,34 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   `failed`/reason dispatch row, no exception. Re-confirmed the real
   register endpoint still works after removing the debug code. 2026-08-11.
 
+- ~~Parent Mobile App — Phase 3 (tablet layouts, remaining four screens).~~
+  Home and Messages got Phase 0's `.grid-2`/`.pane-split` treatment already;
+  this phase extended it to Fees, Attendance, Grades, and Homework — same
+  fresh-subagent-then-independently-reverify pattern as Phases 0 and 2.
+
+  Fees: switched to `.pane-split` (invoice list + drilled-down detail side
+  by side, matching Messages' thread-list/thread-detail pattern — the
+  existing expand/collapse interaction mapped onto it directly, with an
+  `.active` state on the selected invoice row). Attendance: `.grid-2`
+  (history table left, leave-application form right — two already-distinct
+  panels). Grades: `.grid-2` (live marks table + report-card list side by
+  side). Homework: `.grid-2` as a card grid rather than a list/detail
+  split — judged not to need drill-down since each assignment's full state
+  (submitted/graded/feedback) already shows inline.
+
+  Verified live end-to-end against local Postgres and a real API instance,
+  independently re-checked by the orchestrating session (not just the
+  subagent's report): `tsc --noEmit` clean; screenshotted all four screens
+  at both tablet (820×1180) and phone (390×844) width as
+  `sunil.rao@test.dev` against real seeded data — Fees showing the real
+  two invoices with a real drill-down (lines + the ₹2,000 UPI payment) at
+  tablet width and correctly stacking single-column on phone; Attendance
+  showing real history + a working leave form side by side; Grades showing
+  the real "Class Test 1" 76/100 mark (entered via teacher-app earlier this
+  session) beside the report-card list; Homework showing both real
+  submissions (HW1 graded 10/10, Book Report) in a two-card grid. Console
+  clean on every screen. 2026-08-11.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something

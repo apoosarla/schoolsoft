@@ -126,55 +126,57 @@ export default function AttendanceHistoryPage() {
         </div>
       )}
 
-      <div className="panel">
-        <h2>History</h2>
-        <div className="form-row">
-          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={{ flex: 1 }} />
-          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={{ flex: 1 }} />
+      <div className="grid-2">
+        <div className="panel">
+          <h2>History</h2>
+          <div className="form-row">
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={{ flex: 1 }} />
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={{ flex: 1 }} />
+          </div>
+
+          {!history && <p className="hint">Loading…</p>}
+          {history && history.length === 0 && <p className="empty-note">No attendance recorded in this range.</p>}
+          {history && history.length > 0 && (
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history
+                  .slice()
+                  .sort((a, b) => b.onDate.localeCompare(a.onDate))
+                  .map((r) => (
+                    <tr key={r.id}>
+                      <td>{r.onDate}</td>
+                      <td>
+                        <span className={`badge ${statusBadgeClass(r.status)}`}>{r.status.replace("_", " ")}</span>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
-        {!history && <p className="hint">Loading…</p>}
-        {history && history.length === 0 && <p className="empty-note">No attendance recorded in this range.</p>}
-        {history && history.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history
-                .slice()
-                .sort((a, b) => b.onDate.localeCompare(a.onDate))
-                .map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.onDate}</td>
-                    <td>
-                      <span className={`badge ${statusBadgeClass(r.status)}`}>{r.status.replace("_", " ")}</span>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="panel">
-        <h2>Apply for leave</h2>
-        <form onSubmit={onApplyLeave}>
-          <div className="form-row" style={{ flexDirection: "column" }}>
-            <div className="form-row">
-              <input value={todayIso()} disabled style={{ flex: 1 }} />
-              <input type="date" value={leaveTo} min={todayIso()} onChange={(e) => setLeaveTo(e.target.value)} style={{ flex: 1 }} />
+        <div className="panel">
+          <h2>Apply for leave</h2>
+          <form onSubmit={onApplyLeave}>
+            <div className="form-row" style={{ flexDirection: "column" }}>
+              <div className="form-row">
+                <input value={todayIso()} disabled style={{ flex: 1 }} />
+                <input type="date" value={leaveTo} min={todayIso()} onChange={(e) => setLeaveTo(e.target.value)} style={{ flex: 1 }} />
+              </div>
+              <input placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} disabled={applying} />
+              <button type="submit" disabled={applying || !activeId}>
+                {applying ? "Submitting…" : "Submit leave request"}
+              </button>
             </div>
-            <input placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} disabled={applying} />
-            <button type="submit" disabled={applying || !activeId}>
-              {applying ? "Submitting…" : "Submit leave request"}
-            </button>
-          </div>
-        </form>
-        {leaveMessage && <p className="hint">{leaveMessage}</p>}
+          </form>
+          {leaveMessage && <p className="hint">{leaveMessage}</p>}
+        </div>
       </div>
     </main>
   );

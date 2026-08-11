@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ApiError,
@@ -76,6 +76,8 @@ export default function FeesPage() {
     }
   }
 
+  const expanded = invoices?.find((i) => i.id === expandedId) ?? null;
+
   if (!session) return null;
 
   if (!session.subjectId) {
@@ -119,16 +121,21 @@ export default function FeesPage() {
         </div>
       )}
 
-      {invoices && invoices.length === 0 && (
-        <div className="panel">
-          <p className="empty-note">No invoices yet.</p>
-        </div>
-      )}
+      <div className="pane-split">
+        <div className="pane-list">
+          {invoices && invoices.length === 0 && (
+            <div className="panel">
+              <p className="empty-note">No invoices yet.</p>
+            </div>
+          )}
 
-      {invoices &&
-        invoices.map((inv) => (
-          <Fragment key={inv.id}>
-            <button type="button" className="panel-btn" onClick={() => toggleExpand(inv)}>
+          {invoices?.map((inv) => (
+            <button
+              key={inv.id}
+              type="button"
+              className={"panel-btn" + (expandedId === inv.id ? " active" : "")}
+              onClick={() => toggleExpand(inv)}
+            >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div>
                   <div>{inv.invoiceNo}</div>
@@ -142,60 +149,68 @@ export default function FeesPage() {
                 </div>
               </div>
             </button>
+          ))}
+        </div>
 
-            {expandedId === inv.id && (
-              <div className="panel" style={{ marginTop: -8 }}>
-                <h2>Lines</h2>
-                {lines && lines.length > 0 ? (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Description</th>
-                        <th>Amount</th>
-                        <th>GST</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lines.map((l) => (
-                        <tr key={l.id}>
-                          <td>{l.description ?? "—"}</td>
-                          <td>{inr(l.amount)}</td>
-                          <td>{inr(l.gst)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className="hint">No lines.</p>
-                )}
+        <div className="pane-detail">
+          {expanded && (
+            <div className="panel">
+              <h2>{expanded.invoiceNo}</h2>
+              <p className="hint">
+                {expanded.cycleLabel} · due {expanded.dueOn} · {inr(expanded.total)}
+              </p>
 
-                <h2 style={{ marginTop: 16 }}>Payments</h2>
-                {payments && payments.length > 0 ? (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Amount</th>
-                        <th>Method</th>
-                        <th>Date</th>
+              <h2 style={{ marginTop: 16 }}>Lines</h2>
+              {lines && lines.length > 0 ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th>Amount</th>
+                      <th>GST</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.map((l) => (
+                      <tr key={l.id}>
+                        <td>{l.description ?? "—"}</td>
+                        <td>{inr(l.amount)}</td>
+                        <td>{inr(l.gst)}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {payments.map((p) => (
-                        <tr key={p.id}>
-                          <td>{inr(p.amount)}</td>
-                          <td>{p.method ?? "—"}</td>
-                          <td>{p.capturedAt?.slice(0, 10) ?? "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className="hint">No payments yet.</p>
-                )}
-              </div>
-            )}
-          </Fragment>
-        ))}
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="hint">No lines.</p>
+              )}
+
+              <h2 style={{ marginTop: 16 }}>Payments</h2>
+              {payments && payments.length > 0 ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Amount</th>
+                      <th>Method</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payments.map((p) => (
+                      <tr key={p.id}>
+                        <td>{inr(p.amount)}</td>
+                        <td>{p.method ?? "—"}</td>
+                        <td>{p.capturedAt?.slice(0, 10) ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="hint">No payments yet.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </main>
   );
 }
