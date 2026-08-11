@@ -632,6 +632,47 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   submissions (HW1 graded 10/10, Book Report) in a two-card grid. Console
   clean on every screen. 2026-08-11.
 
+- ~~Parent Mobile App — Phase 1 (Capacitor Android shell, scaffold only).~~
+  **Explicitly unverified past the Node/npm layer** — this environment has
+  no Android SDK (`ANDROID_HOME` unset, no `adb`), so nothing here has been
+  gradle-built, signed, or run on an emulator/device. Flagged to the user
+  before this phase started; the subagent was briefed to be honest about
+  exactly this boundary rather than claim more than it could actually run,
+  and the orchestrating session independently re-ran the one thing that
+  *is* verifiable without an SDK (see below) rather than trusting the
+  agent's report at face value.
+
+  `apps/parent-app/next.config.mjs` gained `output: "export"` +
+  `trailingSlash: true` (file:// routing needs real directories, not bare
+  `.html` files an unsuffixed route would resolve to). `@capacitor/core`,
+  `@capacitor/android`, `@capacitor/cli` added to `package.json`.
+  `capacitor.config.ts`: app id `com.schoolsoft.parent`, `webDir: "out"`.
+  `npx cap add android` generated a full standard Gradle project under
+  `apps/parent-app/android/` (gradle wrapper, app module, the Cordova
+  compatibility bridge Capacitor still ships) — this is the *unverified*
+  part; it was never built. No custom app icon exists anywhere in this
+  repo to source from, so app icon/splash were deliberately left as
+  Capacitor's stock placeholder resources rather than fabricating a
+  finished-looking one — a real icon is a design asset this phase
+  shouldn't manufacture.
+
+  What **is** genuinely verified, independently, by the orchestrating
+  session: `next build` with `output: "export"` actually ran clean end to
+  end — real `out/` directory with real static HTML for every route
+  (`/`, `/attendance`, `/fees`, `/homework`, `/login`, `/messages`,
+  `/report-cards`), confirming this 100%-client-rendered app (every page
+  is `"use client"` + fetch-on-mount, per earlier phases) genuinely has no
+  server-only Next.js feature blocking static export. Root `npm install`
+  after the new Capacitor dependencies landed didn't break anything.
+  `npm run dev` still boots and serves normally with the new config (`next
+  dev` isn't affected by `output: "export"`).
+
+  Explicitly unverified / needs a real Android SDK environment to take
+  further: whether `android/` actually gradle-builds, whether it launches
+  on an emulator/device, whether the webview correctly loads the exported
+  static bundle and talks to the real API, code signing, and everything in
+  Phase 4 (store submission) downstream of a working build. 2026-08-11.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
