@@ -673,6 +673,51 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
   static bundle and talks to the real API, code signing, and everything in
   Phase 4 (store submission) downstream of a working build. 2026-08-11.
 
+- ~~Parent Mobile App — Phase 4 (store submission artifacts, docs only).~~
+  Final phase. Cannot actually submit to Play Console (no account access in
+  this environment) — deliverable is two grounded documents, not a
+  submission. Every claim in both is cited against a real file in the
+  codebase rather than generic SaaS-privacy-policy boilerplate; spot-
+  checked independently by the orchestrating session against the actual
+  `AndroidManifest.xml` (`INTERNET`-only permission, `allowBackup="true"`)
+  and a `@DeleteMapping` sweep across the whole API (three total — push
+  device, IAM role, timetable slot; none delete an account) — both
+  confirmed accurate.
+
+  `apps/parent-app/docs/privacy-policy.md`: correctly frames Schoolsoft's
+  multi-tenant model (school/chain is the data controller, not a central
+  vendor — schema-per-chain), a real per-feature data inventory (grounded
+  in `lib/api.ts` / `packages/api-client/src/{domain,types}.ts`), and
+  three things worth a second look even outside the mobile-app context:
+  (1) the API base URL defaults to plain `http://localhost:8080` — any
+  build shipped to parents needs that confirmed as `https://` before the
+  "encrypted in transit" claim is true; (2) session storage (including the
+  sign-in email/phone and refresh token) sits in WebView local storage
+  rather than Android's encrypted credential store, compounded by the
+  generated manifest's `allowBackup="true"`; (3) there is no account- or
+  data-deletion endpoint anywhere in the API — Play requires a public
+  deletion-request URL for apps with accounts, making this a real
+  submission blocker, not just a policy nicety.
+
+  `apps/parent-app/docs/play-data-safety.md`: a section-by-section
+  transcription sheet matching Play Console's actual Data Safety form,
+  applying Play's real "collected = leaves the device" definition rather
+  than "the app can see it" — correctly distinguishes the mostly-read-only
+  nature of this app (child/attendance/grades/fees data flows server→
+  device to display, which isn't "collected") from the handful of real
+  device→server writes (sign-in identifier, message bodies, leave reasons,
+  homework answers). Also caught that Phase 2's push infrastructure is
+  backend-only — the app has no push plugin and never calls the
+  registration endpoint — so today's honest answer for "Device or other
+  IDs" is "No," with an explicit note for what three answers flip together
+  once a push plugin actually ships.
+
+  Both documents are explicit, in a "Before you publish this" checklist,
+  about what's a placeholder for the operating school to fill in (legal
+  entity, retention periods, contact details) versus an engineering item
+  that needs fixing or honest disclosure before submission (the two
+  security caveats and the deletion-URL gap above). 2026-08-11.
+
 ## Bugs found and fixed along the way
 
 Worth keeping a record of these since none were caught until something
