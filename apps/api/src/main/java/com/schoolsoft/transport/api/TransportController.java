@@ -38,11 +38,11 @@ public class TransportController {
         return repo.listDrivers(schoolId, staffId);
     }
 
-    public record CreateDriverRequest(@NotBlank String name, String phone, String licenseNo) {}
+    public record CreateDriverRequest(@NotBlank String name, String phone, String licenseNo, UUID staffId) {}
 
     @PostMapping("/drivers")
     public DriverDto createDriver(@RequestParam UUID schoolId, @RequestBody CreateDriverRequest req) {
-        return repo.createDriver(schoolId, req.name(), req.phone(), req.licenseNo());
+        return repo.createDriver(schoolId, req.staffId(), req.name(), req.phone(), req.licenseNo());
     }
 
     // -------------------------- Routes + Stops --------------------------
@@ -117,8 +117,14 @@ public class TransportController {
     }
 
     @GetMapping("/trips")
-    public List<TripDto> tripsForDriver(@RequestParam UUID driverId, @RequestParam(defaultValue = "20") int limit) {
-        return repo.tripsForDriver(driverId, Math.min(limit, 200));
+    public List<TripDto> trips(
+        @RequestParam(required = false) UUID driverId, @RequestParam(required = false) UUID schoolId,
+        @RequestParam(defaultValue = "20") int limit
+    ) {
+        int cappedLimit = Math.min(limit, 200);
+        if (driverId != null) return repo.tripsForDriver(driverId, cappedLimit);
+        if (schoolId != null) return repo.tripsForSchool(schoolId, cappedLimit);
+        throw new IllegalArgumentException("Either driverId or schoolId is required");
     }
 
     @GetMapping("/trips/{id}")

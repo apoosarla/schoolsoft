@@ -895,6 +895,161 @@ export function gradeSubmission(id: string, marks: number, feedback?: string): P
   });
 }
 
+// -------------------------- Transport --------------------------
+
+export type VehicleDto = {
+  id: string;
+  schoolId: string;
+  registrationNo: string;
+  model: string | null;
+  capacity: number | null;
+  isActive: boolean;
+};
+
+export function listVehicles(schoolId: string): Promise<VehicleDto[]> {
+  return apiFetch<VehicleDto[]>(`/v1/transport/vehicles?schoolId=${schoolId}`);
+}
+
+export function createVehicle(
+  schoolId: string,
+  req: { registrationNo: string; model?: string; capacity?: number }
+): Promise<VehicleDto> {
+  return apiFetch<VehicleDto>(`/v1/transport/vehicles?schoolId=${schoolId}`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type DriverDto = {
+  id: string;
+  schoolId: string;
+  staffId: string | null;
+  name: string;
+  phone: string | null;
+  licenseNo: string | null;
+  isActive: boolean;
+};
+
+export function listDrivers(schoolId: string): Promise<DriverDto[]> {
+  return apiFetch<DriverDto[]>(`/v1/transport/drivers?schoolId=${schoolId}`);
+}
+
+export function createDriver(
+  schoolId: string,
+  req: { name: string; phone?: string; licenseNo?: string; staffId?: string }
+): Promise<DriverDto> {
+  return apiFetch<DriverDto>(`/v1/transport/drivers?schoolId=${schoolId}`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type TransportRouteDto = {
+  id: string;
+  schoolId: string;
+  code: string;
+  name: string;
+  direction: string;
+  isActive: boolean;
+};
+
+export function listTransportRoutes(schoolId: string): Promise<TransportRouteDto[]> {
+  return apiFetch<TransportRouteDto[]>(`/v1/transport/routes?schoolId=${schoolId}`);
+}
+
+export function createTransportRoute(
+  schoolId: string,
+  req: { code: string; name: string; direction?: string }
+): Promise<TransportRouteDto> {
+  return apiFetch<TransportRouteDto>(`/v1/transport/routes?schoolId=${schoolId}`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type TransportStopDto = {
+  id: string;
+  routeId: string;
+  name: string;
+  sortOrder: number;
+  lat: number | null;
+  lng: number | null;
+  fee: number | null;
+};
+
+export function listTransportStops(routeId: string): Promise<TransportStopDto[]> {
+  return apiFetch<TransportStopDto[]>(`/v1/transport/routes/${routeId}/stops`);
+}
+
+export function addTransportStop(
+  routeId: string,
+  req: { name: string; sortOrder: number; lat?: number; lng?: number; fee?: number }
+): Promise<TransportStopDto> {
+  return apiFetch<TransportStopDto>(`/v1/transport/routes/${routeId}/stops`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type StudentTransportDto = {
+  id: string;
+  studentId: string;
+  routeId: string;
+  stopId: string;
+  startsOn: string;
+  endsOn: string | null;
+};
+
+export function studentsOnRoute(routeId: string): Promise<StudentTransportDto[]> {
+  return apiFetch<StudentTransportDto[]>(`/v1/transport/routes/${routeId}/students`);
+}
+
+export function assignStudentTransport(req: {
+  schoolId: string;
+  studentId: string;
+  routeId: string;
+  stopId: string;
+  startsOn: string;
+}): Promise<StudentTransportDto> {
+  return apiFetch<StudentTransportDto>("/v1/transport/student-assignments", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type TransportManifestEntry = { status: string; at: string };
+
+export type TripDto = {
+  id: string;
+  schoolId: string;
+  routeId: string;
+  vehicleId: string;
+  driverId: string;
+  direction: string;
+  startedAt: string;
+  endedAt: string | null;
+  manifest: Record<string, TransportManifestEntry>;
+};
+
+export function listTripsForSchool(schoolId: string, limit = 30): Promise<TripDto[]> {
+  const params = new URLSearchParams({ schoolId, limit: String(limit) });
+  return apiFetch<TripDto[]>(`/v1/transport/trips?${params.toString()}`);
+}
+
+export type GeofenceStatusDto = {
+  vehicleId: string;
+  stopId: string;
+  insideGeofence: boolean;
+  distanceMeters: number;
+  geofenceRadiusM: number;
+  asOf: string;
+};
+
+export function geofenceStatus(vehicleId: string, stopId: string): Promise<GeofenceStatusDto> {
+  const params = new URLSearchParams({ vehicleId, stopId });
+  return apiFetch<GeofenceStatusDto>(`/v1/transport/geofence-status?${params.toString()}`);
+}
+
 // -------------------------- Roles & access --------------------------
 
 /** Every admin-web route that's gated by a role's screen_keys, plus "admin" for this Roles & Users screen itself. */
@@ -909,6 +1064,7 @@ export const SCREEN_DEFS = [
   { key: "lms", label: "LMS", path: "/lms" },
   { key: "comms", label: "Comms", path: "/comms" },
   { key: "library", label: "Library", path: "/library" },
+  { key: "transport", label: "Transport", path: "/transport" },
   { key: "admin", label: "Roles & Users", path: "/roles" },
 ] as const;
 

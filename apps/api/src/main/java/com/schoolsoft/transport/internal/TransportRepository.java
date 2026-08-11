@@ -82,34 +82,34 @@ public class TransportRepository {
 
     // -------------------------- Drivers --------------------------
 
+    private static final String DRIVER_COLS = "id, school_id, staff_id, name, phone, license_no, is_active";
+
     private static final RowMapper<DriverDto> DRIVER_MAPPER = (rs, i) -> new DriverDto(
         UUID.fromString(rs.getString("id")), UUID.fromString(rs.getString("school_id")),
+        rs.getString("staff_id") == null ? null : UUID.fromString(rs.getString("staff_id")),
         rs.getString("name"), rs.getString("phone"), rs.getString("license_no"), rs.getBoolean("is_active")
     );
 
     public List<DriverDto> listDrivers(UUID schoolId, UUID staffId) {
         if (staffId != null) {
             return jdbc.query(
-                "SELECT id, school_id, name, phone, license_no, is_active FROM driver " +
-                "WHERE school_id = ? AND staff_id = ? ORDER BY name",
+                "SELECT " + DRIVER_COLS + " FROM driver WHERE school_id = ? AND staff_id = ? ORDER BY name",
                 DRIVER_MAPPER, schoolId, staffId
             );
         }
         return jdbc.query(
-            "SELECT id, school_id, name, phone, license_no, is_active FROM driver WHERE school_id = ? ORDER BY name",
+            "SELECT " + DRIVER_COLS + " FROM driver WHERE school_id = ? ORDER BY name",
             DRIVER_MAPPER, schoolId
         );
     }
 
-    public DriverDto createDriver(UUID schoolId, String name, String phone, String licenseNo) {
+    public DriverDto createDriver(UUID schoolId, UUID staffId, String name, String phone, String licenseNo) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO driver (id, school_id, name, phone, license_no) VALUES (?, ?, ?, ?, ?)",
-            id, schoolId, name, phone, licenseNo
+            "INSERT INTO driver (id, school_id, staff_id, name, phone, license_no) VALUES (?, ?, ?, ?, ?, ?)",
+            id, schoolId, staffId, name, phone, licenseNo
         );
-        return jdbc.queryForObject(
-            "SELECT id, school_id, name, phone, license_no, is_active FROM driver WHERE id = ?", DRIVER_MAPPER, id
-        );
+        return jdbc.queryForObject("SELECT " + DRIVER_COLS + " FROM driver WHERE id = ?", DRIVER_MAPPER, id);
     }
 
     // -------------------------- Routes + Stops --------------------------
@@ -254,6 +254,13 @@ public class TransportRepository {
         return jdbc.query(
             "SELECT " + TRIP_COLS + " FROM trip WHERE driver_id = ? ORDER BY started_at DESC LIMIT ?",
             tripMapper, driverId, limit
+        );
+    }
+
+    public List<TripDto> tripsForSchool(UUID schoolId, int limit) {
+        return jdbc.query(
+            "SELECT " + TRIP_COLS + " FROM trip WHERE school_id = ? ORDER BY started_at DESC LIMIT ?",
+            tripMapper, schoolId, limit
         );
     }
 

@@ -72,6 +72,15 @@ const ICON: Record<string, JSX.Element> = {
       <path d="M13 3.6L15.6 4.4L12.8 15L10.2 14.2L13 3.6Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
     </svg>
   ),
+  transport: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path d="M2.5 11.5V6.3C2.5 5.4 3.2 4.7 4.1 4.7H12.4C13.6 4.7 14.6 5.5 14.9 6.6L15.5 8.7V11.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M2.5 11.5H15.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="5.3" cy="13.3" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="12.7" cy="13.3" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M2.5 8.7H15.2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  ),
   admin: (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <path d="M9 2L15 4.3V8.4C15 12 12.4 14.8 9 16C5.6 14.8 3 12 3 8.4V4.3L9 2Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
