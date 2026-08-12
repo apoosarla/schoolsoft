@@ -6,10 +6,10 @@ name: Certification
 # unfinished work — the unfinished work is the disabled list, published as an
 # artifact by the P1 job.
 
+# Pull requests only. Pushing to main does not re-run it: main is what the PR
+# gate already passed, so a second run there costs minutes and proves nothing.
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   p1-gate:
