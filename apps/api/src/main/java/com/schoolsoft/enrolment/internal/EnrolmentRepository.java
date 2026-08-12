@@ -1,8 +1,8 @@
 package com.schoolsoft.enrolment.internal;
 
 import com.schoolsoft.enrolment.api.EnrolmentDto;
+import com.schoolsoft.enrolment.api.RollNumbers;
 import com.schoolsoft.platform.web.NotFoundException;
-import com.schoolsoft.tenancy.api.NumberSeries;
 import com.schoolsoft.tenancy.api.SectionCapacity;
 import java.sql.Date;
 import java.time.LocalDate;
@@ -18,38 +18,16 @@ public class EnrolmentRepository {
 
     private final JdbcTemplate jdbc;
     private final SectionCapacity capacity;
-    private final NumberSeries numbers;
+    private final RollNumbers rollNumbers;
 
-    public EnrolmentRepository(JdbcTemplate jdbc, SectionCapacity capacity, NumberSeries numbers) {
+    public EnrolmentRepository(JdbcTemplate jdbc, SectionCapacity capacity, RollNumbers rollNumbers) {
         this.jdbc = jdbc;
         this.capacity = capacity;
-        this.numbers = numbers;
+        this.rollNumbers = rollNumbers;
     }
 
-    /**
-     * Roll numbers run per section, so the series is scoped to one. A section
-     * that already holds hand-keyed rolls seeds the series past them, and the
-     * generator still skips a number someone typed in by hand afterwards —
-     * the uniqueness index means a collision is a failed admission, not a
-     * cosmetic problem.
-     */
     private String rollNumberFor(UUID schoolId, UUID sectionId, String supplied) {
-        if (supplied != null && !supplied.isBlank()) return supplied;
-
-        Integer highest = jdbc.queryForObject(
-            "SELECT COALESCE(max(NULLIF(regexp_replace(roll_no, '\\D', '', 'g'), '')::int), 0) " +
-            "FROM enrolment WHERE section_id = ? AND status = 'active' AND roll_no IS NOT NULL",
-            Integer.class, sectionId);
-        long startAt = (highest == null ? 0 : highest) + 1L;
-
-        for (int attempt = 0; attempt < 50; attempt++) {
-            String candidate = numbers.next(schoolId, NumberSeries.Kind.roll, sectionId, "{SEQ:2}", null, startAt);
-            Integer taken = jdbc.queryForObject(
-                "SELECT count(*) FROM enrolment WHERE section_id = ? AND roll_no = ? AND status = 'active'",
-                Integer.class, sectionId, candidate);
-            if (taken == null || taken == 0) return candidate;
-        }
-        throw new IllegalStateException("Could not find a free roll number in section " + sectionId);
+        return rollNumbers.nextFor(schoolId, sectionId, supplied);
     }
 
     private static final RowMapper<EnrolmentDto> MAPPER = (rs, i) -> new EnrolmentDto(

@@ -254,6 +254,52 @@ testable without it.
 
 **Certifies:** FEE-02/04/08/09/10/11/12/14/15, LIB-03/04, TRN-06, ADM-11.
 
+### Status — landed 2026-08-12
+
+`V020__fee_lifecycle.sql`, plus the scheduler the phase opened with.
+
+- **`TenantJobRunner`** — per-chain fan-out, a per-school advisory lock, and a
+  `job_run` row keyed on (school, job, run key). A repeated run key is one run,
+  which is what makes a crashed billing run safe to retry. Phases 6–8 inherit
+  it.
+- **Generation** assembles each invoice from the grade's structure, the
+  student's transport assignment, their own concessions and their sibling
+  rank — every discount a visible line, GST per head on the net amount.
+  Idempotency is enforced twice: the run record for the friendly answer, and a
+  partial unique index on generated (student, cycle) for the real one.
+- **`fee_adjustment`** carries every after-the-fact change, each posting a
+  balanced ledger pair. A bounced cheque is a reversal, never a deleted
+  payment.
+- **Dunning** marks overdue, sends the school's reminder cadence and applies a
+  late fee after grace, with `dunning_event` keyed on (invoice, kind, day) so a
+  family never gets the same reminder twice.
+- **Reports** — a day book that reconciles collections against the ledger's own
+  bank movement, and an outstanding-dues report that year-end clearance reads
+  the student level of.
+- **Library and transport charges** post through `FeeCharges`, so a fine or a
+  lost book lands on a real invoice rather than a column nobody collects.
+
+Four things the plan did not anticipate:
+
+- **The payment race was still open after the atomic UPDATE.** `FOR UPDATE`
+  only serialises inside a transaction, and the repository was not
+  transactional — two threads paying at once still over-credited. The
+  certification scenario ran two real threads and caught it.
+- **Roll-number allocation had drifted into two places** (direct enrolment and
+  admission conversion), and the conversion path immediately handed out a
+  number the section already used. Now one `RollNumbers` service.
+- **Admission conversion never created a guardian**, so a converted applicant's
+  family had no login and no household to hang a sibling rule on. Conversion
+  now links (or reuses) the guardian by phone — which also closes the
+  ADM-10 half of that gap.
+- **The day book must count receipts by when the money arrived**, not by the
+  payment's current status: a cheque that bounced next week was still banked
+  today, and the reversal belongs in its own column.
+
+**Executable scenarios: 66 → 83.** Newly passing: FEE-01/02/03/04/08/09/10/11/
+12/13/14/15/17, LIB-03/04, TRN-06, ADM-11. FEE-05 stays blocked on gateway
+credentials and FEE-16 on rollover.
+
 ---
 
 ## Phase 5 — Assessment and report card content

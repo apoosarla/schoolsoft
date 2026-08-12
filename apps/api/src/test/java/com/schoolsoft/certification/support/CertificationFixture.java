@@ -708,10 +708,15 @@ public class CertificationFixture {
                         .atZone(java.time.ZoneId.of("Asia/Kolkata")).toOffsetDateTime()
                 });
                 UUID journalId = id("journal:" + invoiceId);
+                // Posted when the money moved, not when the fixture was built —
+                // otherwise a day-book reconciliation sees last year's receipts
+                // land in today's column.
+                var capturedAt = ay.startsOn().plusMonths(1).atStartOfDay()
+                    .atZone(java.time.ZoneId.of("Asia/Kolkata")).toOffsetDateTime();
                 ledger.add(new Object[]{id("ledger:" + invoiceId + ":dr"), schoolId, journalId, "BANK",
-                    30000, 0, "Fee receipt " + invoiceNo, "payment", paymentId});
+                    30000, 0, "Fee receipt " + invoiceNo, "payment", paymentId, capturedAt});
                 ledger.add(new Object[]{id("ledger:" + invoiceId + ":cr"), schoolId, journalId, "FEE_RECEIVABLE",
-                    0, 30000, "Fee receipt " + invoiceNo, "payment", paymentId});
+                    0, 30000, "Fee receipt " + invoiceNo, "payment", paymentId, capturedAt});
             }
         }
 
@@ -725,8 +730,8 @@ public class CertificationFixture {
             "INSERT INTO payment (id, school_id, fee_invoice_id, amount, gateway, status, idempotency_key, captured_at) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", payments);
         jdbc.batchUpdate(
-            "INSERT INTO ledger_entry (id, school_id, journal_id, account_code, debit, credit, narration, source_type, source_id) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", ledger);
+            "INSERT INTO ledger_entry (id, school_id, journal_id, account_code, debit, credit, narration, " +
+            "source_type, source_id, posted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ledger);
     }
 
     // ---------------------------------------------------------------- library

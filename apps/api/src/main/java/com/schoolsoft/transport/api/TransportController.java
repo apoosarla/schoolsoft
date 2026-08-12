@@ -83,8 +83,32 @@ public class TransportController {
     }
 
     @GetMapping("/routes/{routeId}/students")
-    public List<StudentTransportDto> studentsOnRoute(@PathVariable UUID routeId) {
-        return repo.listStudentsOnRoute(routeId);
+    public List<StudentTransportDto> studentsOnRoute(
+        @PathVariable UUID routeId,
+        @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate onDate
+    ) {
+        return repo.listStudentsOnRoute(routeId, onDate);
+    }
+
+    public record ChangeAssignmentRequest(
+        @NotNull UUID schoolId, @NotNull UUID studentId, @NotNull UUID routeId, @NotNull UUID stopId,
+        @NotNull LocalDate effectiveFrom
+    ) {}
+
+    /** Moves a rider to another stop or route from a date (TRN-06). */
+    @PostMapping("/student-assignments/change")
+    public StudentTransportDto changeAssignment(@RequestBody ChangeAssignmentRequest req) {
+        return repo.changeAssignment(req.schoolId(), req.studentId(), req.routeId(), req.stopId(),
+            req.effectiveFrom());
+    }
+
+    public record EndAssignmentRequest(@NotNull UUID studentId, @NotNull LocalDate lastDay) {}
+
+    @PostMapping("/student-assignments/end")
+    public org.springframework.http.ResponseEntity<Void> endAssignment(@RequestBody EndAssignmentRequest req) {
+        repo.endAssignment(req.studentId(), req.lastDay());
+        return org.springframework.http.ResponseEntity.noContent().build();
     }
 
     // -------------------------- GPS + Trips --------------------------

@@ -107,8 +107,82 @@ class AdmissionsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-09 — no family grouping, no sibling concession, no combined invoice (Phase 4).")
     void cert_ADM_11_siblingAdmissionLinksTheFamilyAndAppliesTheConcession() {
+        String token = registrarToken(cbse());
+        String accountant = accountantToken(cbse());
+
+        // An existing family: take a student and the guardian who already has
+        // their login.
+        UUID elder = firstStudentIn(currentFocusSection(cbse()));
+        UUID guardianId = queryOne(
+            "SELECT guardian_id FROM guardian_student WHERE student_id = ? ORDER BY is_primary DESC LIMIT 1",
+            UUID.class, elder);
+        String guardianPhone = queryOne("SELECT phone FROM guardian WHERE id = ?", String.class, guardianId);
+        UUID youngerSection = sectionOf(cbse(), cbse().currentAy().code(), "6", "A");
+        UUID youngerGrade = gradeOf(cbse(), "6");
+
+        post("/v1/fees/sibling-policies", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(),
+            "nthChild", 2, "pct", 25.0), accountant);
+
+        // The younger sibling applies, with the same guardian phone.
+        UUID applicationId = UUID.fromString(post("/v1/admissions/applications", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(), "gradeId", youngerGrade,
+            "applicationNo", "ADM11-" + UUID.randomUUID().toString().substring(0, 8),
+            "applicantFirstName", "Younger", "applicantLastName", "Sibling",
+            "applicantDob", "2016-02-02", "applicantGender", "female",
+            "guardianName", "Sibling Guardian", "guardianPhone", guardianPhone,
+            "source", "walkin"), token).getBody().get("id").asText());
+        for (String state : List.of("application_started", "document_pending", "fee_pending", "review",
+                "test_scheduled", "test_done", "offered", "accepted")) {
+            post("/v1/admissions/applications/" + applicationId + "/transition",
+                Map.of("toState", state), token);
+        }
+        UUID younger = UUID.fromString(post("/v1/admissions/applications/" + applicationId + "/enrol",
+            Map.of("sectionId", youngerSection), token).getBody().get("studentId").asText());
+
+        try {
+            // The guardian's existing login now covers both children.
+            var children = get("/v1/people/guardians/" + guardianId + "/students",
+                guardianTokenFor(cbse(), elder)).getBody();
+            List<String> ids = children.findValuesAsText("id");
+            assertThat(ids).contains(elder.toString(), younger.toString());
+
+            // Linking the household applies the sibling rule to the new child's bill.
+            UUID familyId = UUID.fromString(post("/v1/fees/families/link",
+                body("schoolId", cbse().id(), "studentId", younger), accountant)
+                .getBody().get("familyId").asText());
+            assertThat(queryOne("SELECT family_id FROM student WHERE id = ?", UUID.class, elder))
+                .isEqualTo(familyId);
+
+            post("/v1/fees/generate", body(
+                "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(),
+                "gradeId", youngerGrade, "cycleLabel", "ADM11 cycle", "dueOn", "2026-09-10"), accountant);
+
+            double discount = queryOne(
+                "SELECT COALESCE(sum(l.discount), 0) FROM fee_invoice_line l " +
+                "JOIN fee_invoice i ON i.id = l.fee_invoice_id " +
+                "WHERE i.student_id = ? AND i.cycle_label = 'ADM11 cycle'", Double.class, younger);
+            assertThat(discount).isGreaterThan(0);
+        } finally {
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM fee_invoice_line WHERE fee_invoice_id IN " +
+                    "(SELECT id FROM fee_invoice WHERE cycle_label = 'ADM11 cycle')");
+                jdbc.update("DELETE FROM fee_invoice WHERE cycle_label = 'ADM11 cycle'");
+                jdbc.update("DELETE FROM fee_schedule_run WHERE cycle_label = 'ADM11 cycle'");
+                jdbc.update("DELETE FROM sibling_concession_policy WHERE school_id = ?", cbse().id());
+                jdbc.update("UPDATE student SET family_id = NULL WHERE family_id IN " +
+                    "(SELECT id FROM family WHERE school_id = ?)", cbse().id());
+                jdbc.update("DELETE FROM family WHERE school_id = ?", cbse().id());
+                jdbc.update("DELETE FROM guardian_student WHERE student_id = ?", younger);
+                jdbc.update("DELETE FROM enrolment WHERE student_id = ?", younger);
+                jdbc.update("UPDATE admission_application SET converted_student_id = NULL WHERE id = ?",
+                    applicationId);
+                jdbc.update("DELETE FROM student WHERE id = ?", younger);
+                jdbc.update("DELETE FROM admission_event WHERE application_id = ?", applicationId);
+                jdbc.update("DELETE FROM admission_application WHERE id = ?", applicationId);
+            });
+        }
     }
 
     @Test @Tag("P1")
@@ -136,8 +210,9 @@ class AdmissionsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-01 + GAP-09 — a mid-year joiner needs a working-day denominator from the join date and a "
-        + "pro-rated fee schedule; neither exists (Phases 1 and 4).")
+    @Disabled("The working-day denominator (Phase 1) and the fee engine (Phase 4) both exist now, but "
+        + "nothing pro-rates a cycle for a mid-year joiner: generation bills the full structure amount to "
+        + "whoever is enrolled on the run date.")
     void cert_ADM_16_midYearAdmissionProRatesFeesAndAttendance() {
     }
 

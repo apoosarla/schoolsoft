@@ -55,6 +55,14 @@ public class LibraryController {
         return repo.returnCopy(id);
     }
 
+    public record ChargeCopyRequest(@NotBlank String kind, Double amount, String notes) {}
+
+    /** Charges a lost or damaged copy to the member's fee account (LIB-04). */
+    @PostMapping("/issues/{id}/charge")
+    public LibraryIssueDto chargeCopy(@PathVariable UUID id, @RequestBody ChargeCopyRequest req) {
+        return repo.chargeLostOrDamaged(id, req.kind(), req.amount(), req.notes());
+    }
+
     @GetMapping("/issues/active")
     public List<LibraryIssueDto> activeForMember(@RequestParam String memberType, @RequestParam UUID memberId) {
         return repo.listActiveForMember(memberType, memberId);

@@ -86,9 +86,84 @@ class TransportCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("GAP-30 + GAP-09 — student_transport carries starts_on/ends_on but nothing effective-dates a "
-        + "change through the roster or the fee schedule (Phases 4 and 8).")
     void cert_TRN_06_midYearStopChangeAdjustsRosterAndFees() {
+        String token = principalToken(cie());
+        UUID sectionId = sectionOf(cie(), cie().currentAy().code(), cie().terminalGradeCode(), "A");
+        UUID rider = studentsIn(sectionId).get(2);
+        UUID routeId = queryOne("SELECT id FROM transport_route WHERE school_id = ? LIMIT 1",
+            UUID.class, cie().id());
+        var stops = queryList("SELECT id FROM transport_stop WHERE route_id = ? ORDER BY sort_order",
+            UUID.class, routeId);
+        UUID firstStop = stops.get(0);
+        UUID secondStop = stops.get(stops.size() - 1);
+
+        inChainDo(jdbc -> jdbc.update(
+            "UPDATE transport_route SET monthly_fee = 1500, fee_head_id = " +
+            "(SELECT id FROM fee_head WHERE school_id = ? AND code = 'TRANSPORT') WHERE id = ?",
+            cie().id(), routeId));
+
+        var assigned = post("/v1/transport/student-assignments", body(
+            "schoolId", cie().id(), "studentId", rider, "routeId", routeId, "stopId", firstStop,
+            "startsOn", "2026-04-01"), token);
+        assertThat(assigned.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        try {
+            // Moves to another stop from 1 October.
+            var changed = post("/v1/transport/student-assignments/change", body(
+                "schoolId", cie().id(), "studentId", rider, "routeId", routeId, "stopId", secondStop,
+                "effectiveFrom", "2026-10-01"), token);
+            assertThat(changed.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            // The roster answers per date rather than per newest row.
+            assertThat(stopOnRoster(routeId, "2026-09-15", rider)).isEqualTo(firstStop);
+            assertThat(stopOnRoster(routeId, "2026-10-15", rider)).isEqualTo(secondStop);
+
+            // September's bill carries transport; after they leave the service in
+            // October, November's does not.
+            generateCycle("TRN06 September", "2026-09-10");
+            assertThat(transportLines(rider, "TRN06 September")).isEqualTo(1);
+
+            post("/v1/transport/student-assignments/end",
+                body("studentId", rider, "lastDay", "2026-10-31"), token);
+            generateCycle("TRN06 November", "2026-11-10");
+            assertThat(transportLines(rider, "TRN06 November")).isZero();
+        } finally {
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM fee_invoice_line WHERE fee_invoice_id IN " +
+                    "(SELECT id FROM fee_invoice WHERE cycle_label LIKE 'TRN06%')");
+                jdbc.update("DELETE FROM fee_invoice WHERE cycle_label LIKE 'TRN06%'");
+                jdbc.update("DELETE FROM fee_schedule_run WHERE cycle_label LIKE 'TRN06%'");
+                jdbc.update("DELETE FROM student_transport WHERE student_id = ?", rider);
+                jdbc.update("UPDATE transport_route SET monthly_fee = NULL, fee_head_id = NULL WHERE id = ?",
+                    routeId);
+            });
+        }
+    }
+
+    private UUID stopOnRoster(UUID routeId, String onDate, UUID studentId) {
+        var roster = get("/v1/transport/routes/" + routeId + "/students?onDate=" + onDate,
+            principalToken(cie())).getBody();
+        for (var row : roster) {
+            if (studentId.toString().equals(row.get("studentId").asText())) {
+                return UUID.fromString(row.get("stopId").asText());
+            }
+        }
+        throw new AssertionError("Student " + studentId + " is not on the roster for " + onDate);
+    }
+
+    private void generateCycle(String cycleLabel, String dueOn) {
+        var run = post("/v1/fees/generate", body(
+            "schoolId", cie().id(), "academicYearId", cie().currentAy().id(),
+            "gradeId", gradeOf(cie(), cie().terminalGradeCode()),
+            "cycleLabel", cycleLabel, "dueOn", dueOn), accountantToken(cie()));
+        assertThat(run.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    private long transportLines(UUID studentId, String cycleLabel) {
+        return count(
+            "SELECT count(*) FROM fee_invoice_line l JOIN fee_invoice i ON i.id = l.fee_invoice_id " +
+            "WHERE i.student_id = ? AND i.cycle_label = ? AND l.source = 'transport'",
+            studentId, cycleLabel);
     }
 
     @Test @Tag("P2")

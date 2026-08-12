@@ -32,8 +32,9 @@ class NonFunctionalCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-09 + GAP-21 — invoice generation and notification fan-out do not exist as jobs, so "
-        + "there is no queue to measure backlog on (Phases 4 and 8).")
+    @Disabled("GAP-21 — invoice generation is a job as of Phase 4, but notification fan-out is not: "
+        + "there is still no queue whose backlog can be measured under load, and the perf fixture needs "
+        + "the bulk seed.")
     void cert_NFR_03_feeDueDayGenerationAndFanOutStayWithinSla() {
     }
 

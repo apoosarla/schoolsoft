@@ -922,7 +922,15 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   authorised, reason-captured, audited *unlock* of locked marks. Blocks
   ASMT-05/07/08/09, TT-09.
 
-- **GAP-09 — Fee lifecycle holes.** The only scheduled job in the codebase is
+- **GAP-09 — Fee lifecycle holes.** ✅ **Closed 2026-08-12 (Phase 4).**
+  `TenantJobRunner` (per-chain fan-out, per-school advisory lock, `job_run`
+  records), `fee_schedule_run` idempotent bulk invoicing, `fee_adjustment`
+  (credit note / refund / waiver / late fee / charge / reversal) posting to the
+  ledger, `family` + sibling concessions + combined family invoices, dunning
+  policy with overdue/reminder/late-fee jobs, and transport fees derived from
+  the route assignment. Online checkout (FEE-05) stays open on gateway
+  credentials, and arrears carry-forward (FEE-16) waits for rollover.
+  Original finding: The only scheduled job in the codebase is
   `OutboxPublisher`, which is the tell: there is no invoice-generation run
   from `fee_structure`, no scheduled `open → overdue` transition, no
   reminder/dunning cadence, and no late-fee application. Also absent: refund
@@ -1018,7 +1026,13 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   the waitlist is never promoted on a decline, and duplicate leads from the
   same guardian phone are not deduped. Blocks ADM-07/08/09.
 
-- **GAP-30 — Transport operational gaps.** Route capacity is never checked
+- **GAP-30 — Transport operational gaps.** ⚠️ **Fee half closed 2026-08-12
+  (Phase 4):** routes carry a `monthly_fee`, assignments are effective-dated
+  with an explicit change/end path, the roster answers per date, and invoice
+  generation bills transport only for the cycles a student actually rides
+  (FEE-12, TRN-06). Still open: capacity against the vehicle and the
+  boarded-vs-attendance mismatch alert (Phase 8). Original finding: Route
+  capacity is never checked
   against vehicle capacity; a mid-year stop/route change has no
   effective-dated path (and so no fee adjustment); there is no
   boarded-but-absent / present-but-never-boarded mismatch alert. Blocks
@@ -1068,7 +1082,12 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   retry policy or failure surface over `notification_dispatch`. Blocks
   COMM-04/05.
 
-- **GAP-22 — Library has no fines or holds.** No overdue fine calculation, no
+- **GAP-22 — Library has no fines or holds.** ⚠️ **Fee half closed 2026-08-12
+  (Phase 4):** `library_charge_policy` drives an overdue fine and a
+  lost/damaged replacement charge, both posted to the student's fee account
+  through `FeeCharges` and visible in the outstanding-dues report. Still open:
+  per-grade issue limits (LIB-02), holds/reservations, and year-end clearance
+  (LIB-05, Phase 7). Original finding: No overdue fine calculation, no
   posting of fines / lost-book charges to the fee ledger, no reservations, no
   per-grade issue limits. Blocks LIB-02/03/04, and the library half of the
   exit clearance in GAP-03.
@@ -1137,7 +1156,11 @@ several are security-relevant.
   silently (ASMT-12), and component weights are never validated against the
   assessment total (ASMT-03).
 
-- **GAP-38 — Invoice totals are computed by read-modify-write.**
+- **GAP-38 — Invoice totals are computed by read-modify-write.** ✅ **Closed
+  2026-08-12 (Phase 4).** `recordPayment` is transactional, takes the invoice
+  row with `FOR UPDATE`, applies the balance atomically and holds any
+  overpayment as `advance_amount` against a liability account. Original
+  finding:
   `recordPayment` reads `invoice.paid` and writes back `paid + amount` with no
   guard, so simultaneous payments lose an update and can over-credit; there is
   no advance-payment path (FEE-17).
@@ -1164,14 +1187,23 @@ several are security-relevant.
 
 ### Missing surfaces (endpoints the scenarios expect and nothing provides)
 
-- **GAP-42 — Fee structure and concession have no API.** `fee_structure`,
+- **GAP-42 — Fee structure and concession have no API.** ✅ **Closed
+  2026-08-12 (Phase 4).** Structures are created, edited and cloned into the
+  next year through `/v1/fees/structures`; concessions and sibling policies
+  have endpoints and are applied by generation as visible discount lines.
+  Original finding: `fee_structure`,
   `fee_structure_line` and `fee_concession` exist in the schema with no
   endpoint, and invoice creation consults neither, so a school cannot define
   next year's fees or apply a concession as a visible line (FEE-01, FEE-03).
   GST is stored per line but never computed from `fee_head.gst_rate_pct`
   (FEE-13).
 
-- **GAP-43 — No operational reports.** No day-book / collection report
+- **GAP-43 — No operational reports.** ⚠️ **Fee reports closed 2026-08-12
+  (Phase 4):** `/v1/fees/reports/day-book` reconciles collections against the
+  ledger's bank movement, and `/v1/fees/reports/outstanding` aggregates dues by
+  grade, section and student with a per-student clearance predicate. Other
+  areas' reports remain open. Original finding: No day-book / collection
+  report
   (FEE-14), no outstanding-dues report (FEE-15), no chronic-absence report
   (ATT-11), no admissions funnel analytics (ADM-15), and no setup-readiness
   report for sections missing a primary teacher (ACAD-07).

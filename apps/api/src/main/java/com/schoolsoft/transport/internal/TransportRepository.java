@@ -183,16 +183,46 @@ public class TransportRepository {
         );
     }
 
-    public List<StudentTransportDto> listStudentsOnRoute(UUID routeId) {
+    /**
+     * The roster as it stands on a date. A mid-year stop or route change is
+     * effective-dated, so "who rides this bus" is a question about a day, not
+     * about the newest row (TRN-06). Passing no date asks about today.
+     */
+    public List<StudentTransportDto> listStudentsOnRoute(UUID routeId, LocalDate onDate) {
+        LocalDate date = onDate == null ? LocalDate.now() : onDate;
         return jdbc.query(
-            "SELECT id, student_id, route_id, stop_id, starts_on, ends_on FROM student_transport WHERE route_id = ? AND ends_on IS NULL",
+            "SELECT id, student_id, route_id, stop_id, starts_on, ends_on FROM student_transport " +
+            "WHERE route_id = ? AND starts_on <= ? AND COALESCE(ends_on, 'infinity'::date) >= ?",
             (rs, i) -> new StudentTransportDto(
                 UUID.fromString(rs.getString("id")), UUID.fromString(rs.getString("student_id")),
                 UUID.fromString(rs.getString("route_id")), UUID.fromString(rs.getString("stop_id")),
                 rs.getDate("starts_on").toLocalDate(), rs.getDate("ends_on") == null ? null : rs.getDate("ends_on").toLocalDate()
             ),
-            routeId
+            routeId, Date.valueOf(date), Date.valueOf(date)
         );
+    }
+
+    /**
+     * Moves a student to another stop or route from a date: the old assignment
+     * is closed the day before, a new one opens. Nothing is overwritten, so
+     * last month's roster still says who was on which bus.
+     */
+    public StudentTransportDto changeAssignment(UUID schoolId, UUID studentId, UUID newRouteId,
+                                                UUID newStopId, LocalDate effectiveFrom) {
+        jdbc.update(
+            "UPDATE student_transport SET ends_on = ? " +
+            "WHERE student_id = ? AND (ends_on IS NULL OR ends_on >= ?) AND starts_on < ?",
+            Date.valueOf(effectiveFrom.minusDays(1)), studentId, Date.valueOf(effectiveFrom),
+            Date.valueOf(effectiveFrom));
+        return assignStudent(schoolId, studentId, newRouteId, newStopId, effectiveFrom);
+    }
+
+    /** Ends a student's transport from a date — they stop being billed for it. */
+    public void endAssignment(UUID studentId, LocalDate lastDay) {
+        jdbc.update(
+            "UPDATE student_transport SET ends_on = ? WHERE student_id = ? " +
+            "  AND (ends_on IS NULL OR ends_on > ?)",
+            Date.valueOf(lastDay), studentId, Date.valueOf(lastDay));
     }
 
     // -------------------------- GPS + Trips --------------------------

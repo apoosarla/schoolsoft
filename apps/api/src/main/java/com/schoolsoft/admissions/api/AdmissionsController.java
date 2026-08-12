@@ -64,11 +64,11 @@ public class AdmissionsController {
         return repo.listEvents(id);
     }
 
-    public record ConvertRequest(@NotNull UUID sectionId, String rollNo) {}
+    public record ConvertRequest(@NotNull UUID sectionId, String rollNo, String overCapacityReason) {}
 
     @PostMapping("/applications/{id}/enrol")
     public Map<String, UUID> enrol(@PathVariable UUID id, @RequestBody ConvertRequest req) {
-        UUID studentId = repo.convertToStudent(id, req.sectionId(), req.rollNo());
+        UUID studentId = repo.convertToStudent(id, req.sectionId(), req.rollNo(), req.overCapacityReason());
         return Map.of("studentId", studentId);
     }
 }
