@@ -856,7 +856,204 @@ are different claims:
 
 ---
 
+## Gaps found during certification scenario design (2026-08-12)
+
+Found while writing `docs/certification-test-scenarios.md` — a full-lifecycle
+test catalogue (lead → admissions → daily ops → year closure → transfer /
+graduation). Each gap below blocks one or more **P1** certification scenarios;
+the `GAP-nn` ids and the scenarios that reference them live in that document
+(§23). Ordered roughly by how much of the lifecycle they block.
+
+### Lifecycle-blocking (nothing above them can be certified)
+
+- **GAP-01 — No school calendar / holiday master.** There is no
+  `holiday`/`calendar` table anywhere in the chain migrations (only
+  `admission_event` and `announcement`). Consequence is wide: attendance
+  percentages have no working-day denominator, the timetable renders periods
+  on holidays, an unplanned closure can't void a day, term day-counts and fee
+  due-date shifting have nothing to compute against. Needs: holiday +
+  working-day-pattern master (5/6-day week, alternate Saturdays), scoped to
+  school / grade / campus, and a `WorkingDays` service every attendance and
+  fee computation calls. Blocks CAL-01..07, ATT-02/04/10, TT-01/09.
+
+- **GAP-02 — No academic year rollover / bulk promotion.**
+  `enrolment.status` already allows `promoted` and `graduated`, but nothing
+  ever sets them and there is no rollover code (only a comment in
+  `enrolment/package-info.java`). Missing: next-AY structure cloning
+  (grades/sections/curriculum bindings), a year-end readiness check
+  (unpublished assessments, unlocked report cards, unmarked days, dues),
+  bulk promote / detain / graduate, section reshuffle at promotion,
+  carry-forward of fee arrears + library dues + transport + guardian links,
+  and an idempotent, restartable, reversible-before-activation run. This is
+  the single largest missing capability in the product. Blocks all of
+  YEC-01..11, GRAD-01/06, FEE-16, ENR-08.
+
+- **GAP-03 — No student exit workflow.** Withdrawal statuses exist; the
+  workflow does not. Missing: withdrawal initiation with reason and
+  last-working-date, clearance checklist (fees / library / transport /
+  assets), **Transfer Certificate generation** with the statutory fields
+  (admission + withdrawal dates, grade, conduct, attendance, board reg. no.,
+  serial numbering), and the downstream de-listing — rosters, timetable,
+  transport, and section communications must stop from the effective date
+  while history stays queryable. Blocks XFER-01..08, COMM-08, TRN-09,
+  LIB-05, GRAD-02.
+
+- **GAP-05 — No student-level subject election.**
+  `section_subject_teacher` binds subjects to a *section* only, so IGCSE /
+  A-level option blocks and Class 11 streams cannot be represented. Marks
+  entry, timetable, report cards, and board exports all currently assume a
+  section-wide subject set. For a Cambridge school this is a launch blocker,
+  not a nice-to-have. Blocks ACAD-09, ASMT-13, INT-02.
+
+- **GAP-06 — Exam operations missing.** `assessment.scheduled_on` is the
+  only scheduling field. No exam timetable entity, no per-student paper-clash
+  detection, no room or invigilator allocation, no hall tickets. Also missing
+  at the marks layer: `absent` / medical-leave semantics (today a blank and a
+  zero are indistinguishable in effect), re-evaluation and moderation, and an
+  authorised, reason-captured, audited *unlock* of locked marks. Blocks
+  ASMT-05/07/08/09, TT-09.
+
+- **GAP-09 — Fee lifecycle holes.** The only scheduled job in the codebase is
+  `OutboxPublisher`, which is the tell: there is no invoice-generation run
+  from `fee_structure`, no scheduled `open → overdue` transition, no
+  reminder/dunning cadence, and no late-fee application. Also absent: refund
+  / credit note (status `refunded` exists, nothing sets it), cheque-bounce
+  reversal, sibling / family concession and combined family invoice,
+  transport-fee linkage to route assignment, and online checkout initiation
+  (already noted separately in Open items). Blocks FEE-02/05/08/09/10/11/12,
+  ADM-11.
+
+### Correctness and control gaps
+
+- **GAP-08 — Attendance corrections are unaudited silent overwrites.** The
+  `AttendanceRepository` upsert on the V010 unique index replaces the prior
+  value with no history, no approval step, and no reason. Approved leave also
+  does not auto-materialise as `leave` attendance — a teacher must remember
+  to mark it. Blocks ATT-05/06, STF-02.
+
+- **GAP-07 — No teacher substitution / cover.** `staff_attendance` records
+  the absence and `timetable_slot` names the teacher, but the two are
+  unrelated. No cover assignment, no substitute notification to the section,
+  and no permission path letting the substitute mark that period's
+  attendance. This is a daily-operations blocker for any school. Blocks
+  TT-08, STF-03.
+
+- **GAP-14 — No closed-year lock.** `academic_year` has only `is_current`;
+  prior-year attendance, marks, and invoices remain editable indefinitely,
+  with no reopen-with-approval path. Blocks YEC-08, GRAD-05.
+
+- **GAP-10 — `section.capacity` is decorative.** Stored and selected, never
+  checked. `capacity` appears in Java only for `vehicle` and one `SELECT` in
+  `SchoolRepository`. Enrolment and admission-offer paths both need to
+  enforce it (with an explicit over-capacity override + reason). Blocks
+  ACAD-06, YEC-05.
+
+- **GAP-25 — No AY / term date validation.** Terms are not constrained to sit
+  inside their academic year, and two academic years may overlap. Only
+  `ends_on > starts_on` is enforced. Blocks ACAD-02/03.
+
+- **GAP-26 — No admission / roll number policy.** `enrolment.roll_no` is free
+  text with no uniqueness constraint and no generator; admission numbers have
+  no scheme at all. Renumbering after a section transfer is undefined.
+  Blocks ENR-02.
+
+- **GAP-12 — Timetable: room clash unchecked, no bell-schedule master.**
+  `TimetableRepository`'s clash query is teacher-only, so two sections can be
+  put in the same room in the same period. Each slot also carries its own
+  free-text `starts_at`/`ends_at`, so there is no period/bell master to
+  validate against or to re-time the school day from one place. No
+  teacher-max-load rule either. Blocks TT-01/03/04.
+
+- **GAP-27 — Audit not wired to the high-risk mutations.** Extends the
+  existing audit-retrofit item with a certification-scoped priority: before
+  release, `AuditService.record` must at minimum cover enrolment status
+  changes, mark unlock, fee waiver / concession grants, and role grants —
+  actor, before/after, reason. Blocks SEC-08, ASMT-07, FEE-10, STF-04.
+
+- **GAP-24 — Campus is decorative.** The `campus` table exists, but
+  `section`, `staff`, and `timetable_slot` carry no `campus_id`. Campus-scoped
+  timetables, attendance, holidays, and campus-admin roles are therefore
+  impossible in a multi-campus school. Blocks TEN-07, CAL-06.
+
+- **GAP-15 — No intra-chain school transfer.**
+  `POST /enrolments/{id}/transfer` takes `TransferRequest(newSectionId,
+  rollNo)` — a section move only. A student moving between two schools of the
+  same chain has no path that preserves the profile and history while
+  settling the source school's ledger. Blocks XFER-05.
+
+- **GAP-11 — Admissions funnel automation missing.** `offer_expires_on` and
+  the `lapsed` state exist and are read by `AdmissionsRepository`, but
+  nothing acts on them: offers never expire, seats never return to the pool,
+  the waitlist is never promoted on a decline, and duplicate leads from the
+  same guardian phone are not deduped. Blocks ADM-07/08/09.
+
+- **GAP-30 — Transport operational gaps.** Route capacity is never checked
+  against vehicle capacity; a mid-year stop/route change has no
+  effective-dated path (and so no fee adjustment); there is no
+  boarded-but-absent / present-but-never-boarded mismatch alert. Blocks
+  TRN-02/05/06.
+
+### Missing record types (each blocks a real school workflow)
+
+- **GAP-16 — No student document store.** `admission_application.documents`
+  is loose JSONB with no per-document verification state or reviewer, and an
+  *enrolled* student has no document set at all — no incoming TC, birth
+  certificate, or immunisation record. Blocks ADM-12, ENR-07, XFER-06.
+
+- **GAP-17 — No health / emergency data.** Allergies, medical conditions,
+  blood group, and prioritised emergency contacts aren't modelled, so they
+  cannot reach the class teacher or the driver's trip view — the two people
+  who need them in an incident. Blocks ENR-06, OPS-05.
+
+- **GAP-18 — No safety operations.** No gate pass / early-dismissal approval
+  chain, no authorised-pickup list, no visitor log, no evacuation roster from
+  live attendance. Bus check-in exists; the walk-home and parent-pickup
+  dismissal paths do not. Blocks OPS-01/02/03/07, ENR-05.
+
+- **GAP-19 — No discipline or counselling records.** Conduct has no source of
+  truth, which also leaves the conduct line on a Transfer Certificate
+  unbacked. Counselling notes additionally need restricted access, not
+  general staff visibility. Blocks OPS-04/06.
+
+- **GAP-04 — No alumni identity.** What happens to a login after Grade 12 is
+  undefined: no scope downgrade to transcript/receipt retrieval, no alumni
+  record, no document-request path years later. Blocks GRAD-04/05, XFER-04.
+
+- **GAP-20 — No PTM scheduling.** Message threads exist; publishing meeting
+  slots and letting a parent book one (with double-booking prevention) does
+  not. Blocks COMM-09.
+
+- **GAP-13 — Report card has no content model.** (Sharpens the existing Open
+  item.) Beyond the missing score payload: no attendance summary, no
+  co-scholastic ratings, no teacher remarks, no promotion decision — and the
+  promotion decision is what YEC-03 reads to run bulk promotion, so this and
+  GAP-02 are coupled. Blocks ASMT-10/14.
+
+- **GAP-29 — No rank / percentile / grade-boundary computation.** Needed on
+  report cards and for board preparation. Blocks ASMT-11.
+
+- **GAP-21 — No notification preferences or delivery management.** No
+  per-guardian channel choice, quiet hours, category mute, or opt-out; no
+  retry policy or failure surface over `notification_dispatch`. Blocks
+  COMM-04/05.
+
+- **GAP-22 — Library has no fines or holds.** No overdue fine calculation, no
+  posting of fines / lost-book charges to the fee ledger, no reservations, no
+  per-grade issue limits. Blocks LIB-02/03/04, and the library half of the
+  exit clearance in GAP-03.
+
+- **GAP-23 — No bulk import, no DPDP data lifecycle.** No CSV import for
+  students / staff / marks (schools onboard with spreadsheets, so this is an
+  onboarding blocker). `consent_record` exists but there is no export,
+  erasure, or retention job behind it. Blocks ENR-09, SEC-09.
+
+_(No GAP-28: session expiry / token refresh is already an Open item above and
+is referenced by scenario SEC-02 rather than duplicated here.)_
+
+---
+
 _Added 2026-08-02, from a conversation reviewing SSO/RBAC plans and noticing
 tenant onboarding had no admin surface. Rewritten 2026-08-03 after a session
 that built out nearly the entire MVP backend module surface — see git log
-for the full sequence of commits._
+for the full sequence of commits. Certification gap list appended 2026-08-12
+alongside `docs/certification-test-scenarios.md`._
