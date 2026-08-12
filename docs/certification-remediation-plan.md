@@ -1,0 +1,332 @@
+# Certification Remediation — Implementation Plan
+
+Closes the 29 gaps in `BACKLOG.md` (§ "Gaps found during certification
+scenario design") so that every **P1** scenario in
+`docs/certification-test-scenarios.md` can pass.
+
+Ordered by dependency, not by pain. The controlling fact: **GAP-02 (year
+rollover) reads from four other gaps' outputs** — the working-day calendar,
+the fee arrears balance, the report card's promotion decision, and section
+capacity. It cannot be built first even though it is the largest hole. The
+phases below are arranged so nothing is built twice.
+
+Migration numbering continues the chain schema from `V015__notification_device.sql`.
+
+---
+
+## Phase 0 — Make certification executable
+
+Without this, the 150 scenarios are prose and nothing below is measurable.
+
+| Work | Detail |
+|------|--------|
+| Seed fixture | Two-school chain — one CBSE, one Cambridge — carrying **one full prior academic year** of history (attendance, marks, invoices, report cards). One school seeded to 2,000 students for the NFR scenarios. Fixes the `section_subject_teacher` seed gap already in the backlog. |
+| Scenario runner | Integration test per scenario ID, Testcontainers Postgres, one test class per CERT area. Test method names carry the ID (`cert_ATT_05_approvedLeaveMaterialisesAttendance`) so the catalogue and the suite stay in sync mechanically. |
+| CI gate | P1 scenarios block merge. P2/P3 report only. A scenario for an unbuilt gap lands as `@Disabled("GAP-01")` from day one — the disabled list *is* the remaining work, and it shrinks visibly. |
+| Session expiry fix | Existing open item, cheap, blocks SEC-02. Do it in the shared transport (`packages/api-client`) rather than six times. |
+| `packages/api-client` extraction | Already planned for the parent mobile app. Pull it forward to here so every endpoint added in Phases 1–8 lands in one client, not six. |
+
+**Exit:** the suite runs green on today's capability set, with ~60 scenarios
+disabled and each one naming its gap.
+
+---
+
+## Phase 1 — Temporal foundation
+
+**Closes GAP-01, GAP-25, GAP-14, GAP-24.** Everything that computes over dates
+depends on this, so it goes first.
+
+`V016__calendar_and_year_lifecycle.sql`
+
+- `working_day_pattern` — school (optionally campus), `effective_from`,
+  weekday mask, alternate-Saturday rule.
+- `school_calendar` — one row per exceptional date: `kind` ∈
+  `holiday | vacation | working_saturday | closure | exam_day`, optional
+  `grade_id` and `campus_id` for cohort- and campus-scoped days,
+  `declared_by`/`declared_at` (an unplanned same-day closure is an audit event).
+- `academic_year.status` ∈ `planning | active | closed`, plus `closed_at`,
+  `reopened_by`, `reopened_at`. `is_current` stays as the fast lookup.
+- Term-inside-AY constraint; `EXCLUDE USING gist` on `daterange(starts_on,
+  ends_on)` per school so academic years cannot overlap.
+- `campus_id` added to `section`, `staff`, `timetable_slot` — nullable,
+  backfilled to the school's primary campus, then `NOT NULL`.
+
+Code:
+
+- **`WorkingDayService`** — `workingDays(schoolId, from, to, gradeId, campusId)`
+  and `isWorkingDay(...)`. Single authority. Retrofit every attendance
+  percentage and every fee due-date computation onto it; no module computes
+  its own denominator afterwards.
+- Attendance write rejects a non-working day. Declaring a same-day closure
+  voids that day's marks (retaining them as voided, not deleting) and fires
+  the parent notification.
+- `AcademicYearLockInterceptor` — mutations against a `closed` AY are refused
+  across attendance, marks, and fees, with an authorised reopen path.
+- Calendar CRUD endpoints + a gazetted-holiday bulk import.
+
+**Certifies:** CAL-01..07, ACAD-02/03, ATT-02/04/10, TT-09, YEC-08, TEN-07, CAL-06.
+
+---
+
+## Phase 2 — Structural integrity
+
+**Closes GAP-05, GAP-10, GAP-26, GAP-12.** Schema shape changes that get more
+expensive the longer real data sits on top of them.
+
+`V017__student_subjects_and_identity.sql`
+
+- `elective_group` (grade + AY + name + pick-count rule) and
+  `student_subject` (enrolment, subject, elective_group, status,
+  effective_from). Resolution rule: **a student's subject set = the section's
+  compulsory subjects + that student's elections.** Introduce
+  `SubjectSetResolver` and route marks entry, timetable rendering, report
+  cards, and board export through it — this is the change that touches the
+  most existing code, which is exactly why it is early.
+- `number_series` (school, kind ∈ `admission | roll | invoice | receipt |
+  certificate`, pattern, next value, reset policy) — one generator for every
+  human-facing number. Partial unique index on `(section_id, roll_no)` for
+  active enrolments; backfill existing roll numbers into the series.
+- Section capacity enforced in the enrolment and admission-offer paths;
+  `over_capacity_reason` for the explicit override.
+- `bell_schedule` + `period` masters per grade band; `timetable_slot` gains
+  `period_id` and stops carrying free-text times. Room-clash check added
+  alongside the existing teacher-clash check; teacher weekly-load warning at
+  publish.
+
+**Certifies:** ACAD-06/09, ENR-02, ASMT-13, TT-01/03/04, INT-02, YEC-05.
+
+---
+
+## Phase 3 — Daily-operations correctness
+
+**Closes GAP-08, GAP-07, GAP-27.** Small surface, high daily value.
+
+`V018__attendance_amendments_and_cover.sql`
+
+- `attendance_amendment` — record, old status, new status, reason, requester,
+  approver, decided-at. The upsert path stops being a silent overwrite: an
+  edit after the marking window opens an amendment instead.
+- Leave-approval → attendance materialisation. Approving student or staff
+  leave writes `leave` records across the covered **working** days (Phase 1),
+  and revoking the approval unwinds them.
+- `timetable_cover` — slot, date, substitute staff, reason. Surfaces in the
+  substitute's day view, notifies the section, and authorises the substitute
+  to mark that period's attendance.
+- Audit retrofit as a **`@Audited` interceptor**, not fifteen controller
+  edits. Mandatory coverage before certification: enrolment status change,
+  mark unlock, fee waiver/concession, role grant.
+
+**Certifies:** ATT-05/06, TT-08, STF-02/03, SEC-08.
+
+---
+
+## Phase 4 — Fee engine completion
+
+**Closes GAP-09, the fee half of GAP-22, the fee half of GAP-30.** Rollover
+(Phase 6) reads the arrears balance this phase produces.
+
+First, a prerequisite: the codebase's only scheduled job is `OutboxPublisher`.
+Phase 4 opens with a **real tenant-aware scheduler** — per-chain fan-out,
+per-school locking, restartable runs — because four of the items below are
+jobs and Phases 6–8 need three more.
+
+`V019__fee_lifecycle.sql`
+
+- `fee_schedule_run` — idempotent invoice generation keyed on
+  (school, AY, cycle). Re-running is a no-op, which is what makes FEE-02 pass.
+- `fee_adjustment` — typed `credit_note | refund | waiver | late_fee |
+  reversal`, each posting to the ledger. Cheque bounce becomes a reversal, not
+  a delete.
+- `family` grouping over guardians; sibling concession rules; combined family
+  invoice.
+- Dunning config + jobs: scheduled `open → overdue` transition, reminder
+  cadence, late-fee application after grace.
+- Transport fee derived from the student's route assignment and
+  effective-dated, so a mid-year route change adjusts subsequent invoices.
+- Library fines and lost-book charges post as `fee_adjustment` rows.
+
+Online checkout initiation stays tracked as its own existing backlog item —
+it needs gateway credentials this environment lacks, and everything above is
+testable without it.
+
+**Certifies:** FEE-02/04/08/09/10/11/12/14/15, LIB-03/04, TRN-06, ADM-11.
+
+---
+
+## Phase 5 — Assessment and report card content
+
+**Closes GAP-06, GAP-13, GAP-29.** Produces the promotion decision that
+Phase 6 consumes.
+
+`V020__exam_ops_and_report_cards.sql`
+
+- `exam_schedule` + `exam_session` — paper, date, period, room, invigilator.
+  Clash detection runs over `student_subject` (Phase 2), so it catches the
+  clash that matters: one *student* with two papers, not one section.
+  Hall-ticket generation per student.
+- `mark.status` ∈ `entered | absent | medical_leave | exempt`. A blank stops
+  being indistinguishable from a zero; absent is excluded from averages and
+  renders as AB.
+- `mark_revision` — re-evaluation and moderation supersede without discarding;
+  unlock of a locked assessment requires an authorised role, a reason, and an
+  audit row (Phase 3's interceptor).
+- Report card content model: subject rows, attendance summary (via
+  `WorkingDayService`), co-scholastic ratings, teacher remarks, and
+  **`promotion_decision`** ∈ `promote | detain | graduate`.
+- Rank / percentile / grade boundaries computed inside the curriculum
+  strategy, so CBSE and CIE differ without a config fork.
+- Templated renderer → PDF, per strategy.
+
+**Certifies:** ASMT-05/07/08/09/10/11/12/13/14, TT-09, GRAD-03 (partially).
+
+---
+
+## Phase 6 — Year closure and rollover
+
+**Closes GAP-02.** The largest single capability; buildable only now.
+
+`V021__rollover.sql`
+
+- `rollover_run` — school, from-AY, to-AY, state ∈ `draft | structure_cloned |
+  allocated | committed | rolled_back`, batch checkpoints, statistics.
+- **Readiness check** endpoint, assembled from earlier phases: unpublished
+  assessments and unlocked report cards (Ph 5), unmarked working days (Ph 1),
+  outstanding dues (Ph 4), missing promotion decisions (Ph 5), students with
+  no allocated section.
+- **Structure clone** — grades, sections, curriculum bindings, bell schedules,
+  fee structures cloned into the next AY as `planning`, fully editable before
+  activation.
+- **Allocation** — promote / detain / graduate driven by
+  `promotion_decision`; section reshuffle by rule or manual, respecting
+  capacity (Ph 2) and the sibling/twin policy.
+- **Carry-forward** — fee arrears as an opening balance, library dues,
+  transport assignment, guardian links, medical info, and elective
+  continuity (`student_subject`).
+- **Idempotent** on the run key, **restartable** at batch checkpoints,
+  **reversible** until the target AY is activated.
+- Commit closes the source AY (`status = closed`, Phase 1 lock engages).
+- Teacher section assignments deliberately **do not** carry forward —
+  reassignment is explicit (YEC-10).
+
+Perf target from NFR: a 2,000-student rollover inside the agreed window, and
+restartable after a mid-run interruption.
+
+**Certifies:** YEC-01..11, GRAD-01/06, FEE-16, ENR-08.
+
+---
+
+## Phase 7 — Exit, transfer, graduation, alumni
+
+**Closes GAP-03, GAP-15, GAP-04.** Depends on Phase 4 (dues) and Phase 6
+(graduation as a rollover outcome).
+
+`V022__exit_and_alumni.sql`
+
+- `withdrawal` — enrolment, reason, last working date, per-domain clearance
+  state, workflow state. Clearance probes call fees (Ph 4), library (Ph 4),
+  transport, and assets. Withdrawal with dues is blocked pending an authorised
+  override with reason.
+- `certificate` — kind ∈ `TC | SLC | transcript`, serial from `number_series`
+  (Ph 2), **payload snapshotted at issue** so a reprint is byte-identical,
+  `issued_by`, revocation support, duplicate-issue prevention.
+- **One `enrolmentActiveOn(studentId, date)` predicate**, reused by rosters,
+  timetable, attendance, transport, fee generation, and communications. This
+  single predicate is what makes the de-listing scenarios (XFER-03, COMM-08,
+  TRN-09, GRAD-06) pass together rather than one leaky surface at a time.
+- Intra-chain school transfer: link the student across schools, settle the
+  source ledger, carry documents and history, no profile re-keying.
+- Alumni scope — role downgrade to transcript/receipt retrieval within the
+  retention window, audited document requests.
+
+**Certifies:** XFER-01..08, GRAD-02/04/05, COMM-08, TRN-09, LIB-05, ENR-05.
+
+---
+
+## Phase 8 — Missing record types
+
+**Closes GAP-16, 17, 18, 19, 20, 21, 23, 11, and the remainder of 30.** Mostly
+independent of each other, so this phase parallelises across the team more
+than any other.
+
+`V023__student_records_and_safety.sql`
+
+- **Documents** (GAP-16) — typed document store with per-document
+  verification state and reviewer; enrolment gated on mandatory documents;
+  applies to enrolled students, not only applicants.
+- **Health** (GAP-17) — conditions, allergies, blood group, prioritised
+  emergency contacts; surfaced to the class teacher and the driver's trip
+  view, which are the two people present during an incident.
+- **Safety** (GAP-18) — gate pass / early-dismissal approval chain (writes a
+  half-day via Phase 3's amendment path), authorised-pickup list, visitor
+  log, evacuation roster from live attendance.
+- **Conduct** (GAP-19) — discipline incidents feeding the TC conduct line
+  (Ph 7); counselling notes under a restricted access class, not general
+  staff visibility.
+- **PTM** (GAP-20) — slot publication, parent booking, double-booking
+  prevention.
+- **Notifications** (GAP-21) — per-guardian channel preferences, quiet hours,
+  category mute, emergency override; dispatch retry policy and a failure
+  surface.
+- **Data lifecycle** (GAP-23) — CSV bulk import for students/staff/marks with
+  per-row validation (schools onboard from spreadsheets, so this is an
+  onboarding blocker, not a convenience); DPDP export, erasure, and retention
+  jobs behind the existing `consent_record`.
+- **Admissions automation** (GAP-11) — offer-expiry job returning seats to the
+  pool, waitlist promotion on decline, guardian-phone dedupe on intake.
+- **Transport** (GAP-30 remainder) — route capacity against vehicle capacity,
+  boarded-vs-attendance mismatch alert.
+
+**Certifies:** ADM-07/08/09/12, ENR-05/06/07/09, OPS-01..07, COMM-04/05/09,
+SEC-09, TRN-02/05.
+
+---
+
+## Parallel workstreams
+
+Not phases — they run alongside from Phase 1 onward.
+
+- **Frontend slices.** Every phase carries admin-web / teacher-app /
+  parent-app work. Two need real design investment rather than a form:
+  the **rollover wizard** (Phase 6) and the **report card template renderer**
+  (Phase 5).
+- **Report card renderer** is on the critical path for Phase 6 — the
+  promotion decision is captured there.
+- **External integrations** (GST e-Invoice, Tally, LTI/OneRoster, CIE Direct,
+  UDISE+, WhatsApp) stay blocked on credentials. Keep the adapters stubbed and
+  the job framework exercised; certify INT-01 against the stub.
+- **Chain HQ analytics** remains Phase 2 per design doc §19 — out of scope here.
+
+## Sequencing rationale
+
+```
+Ph0 harness
+  └─ Ph1 calendar / AY lifecycle ──┬─ Ph3 daily-ops correctness
+                                   ├─ Ph4 fee engine ─┐
+     Ph2 structure (subjects, ─────┼─ Ph5 assessment ─┼─ Ph6 rollover ── Ph7 exit/alumni
+         numbers, capacity, bell)  │                  │
+                                   └──────────────────┘
+     Ph8 records/safety — parallel from Ph3 onward
+```
+
+Ph1 and Ph2 can start together (different tables). Ph3, Ph4, Ph5 are
+independent of each other and can run three-abreast. Ph6 needs all of
+1, 2, 4, 5. Ph7 needs 4 and 6. Ph8 needs only 3 (for the gate-pass
+half-day path) and otherwise floats.
+
+## Risks
+
+| Risk | Handling |
+|------|----------|
+| `SubjectSetResolver` (Ph 2) touches marks, timetable, report cards, and export | Land it before any of those modules grow further; it is the widest blast radius in the plan |
+| `campus_id` backfill (Ph 1) on live data | Nullable → backfill to primary campus → `NOT NULL`, in three separate migrations |
+| `mark.status` migration (Ph 5) over existing marks | Existing non-null marks → `entered`; existing nulls need a human decision per school, not a default |
+| Roll-number backfill into `number_series` (Ph 2) | Existing free-text roll numbers may already collide; detect and report before applying the unique index |
+| Rollover reversibility (Ph 6) | Reversible only until target-AY activation. Make activation a distinct, explicit, audited step — not a side effect of commit |
+| Rollover perf at 2,000 students | Batch with checkpoints from the start; retrofitting restartability after the fact is the expensive path |
+
+## Definition of done
+
+Every P1 scenario in gates 1–4 of `docs/certification-test-scenarios.md` §24
+passes against the Phase 0 seed fixture, with the closure gate run **twice
+consecutively** — proving rollover is repeatable and history survives two
+year boundaries.
