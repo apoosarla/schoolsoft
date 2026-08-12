@@ -757,8 +757,36 @@ are different claims:
   cross-checked against the actual JSON. Caught during live verification,
   not by the type checker. Fixed by correcting the client type to the real
   DTO shape.
+- `parent-app/app-shell.tsx` did exact string matches (`pathname ===
+  "/login"`, `TITLES[pathname]`, tab active-state) against `usePathname()`.
+  Phase 1's `trailingSlash: true` (needed for the Capacitor static export)
+  made `usePathname()` return `"/attendance/"` instead of `"/attendance"`
+  in dev mode too, not just the export build — every one of those
+  comparisons silently missed: the login page kept showing the app
+  chrome (topbar/tabbar) while signed out, every other page's title fell
+  back to "Schoolsoft" instead of its real name, and the active tab
+  highlight never lit up. Found live while spot-checking Phase 3 the day
+  after (a stale/expired session on the same page separately surfaced a
+  different real gap — see Open items). Fixed with a `normalize()` that
+  strips a trailing slash before any path comparison; verified live
+  end-to-end after the fix — `/login/` correctly bare-chrome again,
+  `/attendance/` shows "Attendance" as both the title and the highlighted
+  tab. 2026-08-12.
 
 ## Open items
+
+- **Session expiry isn't handled.** Letting a session sit overnight and
+  reopening a page (found on `parent-app`, but every app shares the same
+  `apiFetch` pattern so likely universal) surfaces the real gap: the
+  access token expires, the API correctly 403s, and the app just... sits
+  there — an empty error banner and a permanent "Loading…", no redirect to
+  `/login`, no attempt at the refresh-token flow `POST /v1/auth/refresh`
+  already supports (see the platform-admin login entry above, which
+  exercises refresh for `hq-web`). Worth a shared fix: on a 401/403,
+  either transparently refresh and retry once, or clear the session and
+  bounce to `/login` — ideally in the shared `packages/api-client`
+  transport so every app gets it at once rather than six separate patches.
+
 
 - **Remaining frontend surfaces — mostly closed out.** All six frontends
   (`admin-web`, `hq-web`, `teacher-app`, `driver-app`, `parent-app`,

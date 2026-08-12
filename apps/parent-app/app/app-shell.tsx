@@ -77,9 +77,14 @@ const TITLES: Record<string, string> = {
   "/messages": "Messages",
 };
 
+/** next.config.mjs sets trailingSlash for the Capacitor static export, so usePathname() returns "/attendance/" rather than "/attendance" — normalize before any exact-path comparison. */
+function normalize(pathname: string): string {
+  return pathname !== "/" && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = normalize(usePathname());
   const [session, setSessionState] = useState<Session | null>(null);
 
   useEffect(() => {
