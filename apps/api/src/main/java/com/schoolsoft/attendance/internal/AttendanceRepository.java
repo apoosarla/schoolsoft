@@ -3,6 +3,10 @@ package com.schoolsoft.attendance.internal;
 import com.schoolsoft.attendance.api.AttendanceRecordDto;
 import com.schoolsoft.attendance.api.AttendanceSummaryDto;
 import com.schoolsoft.attendance.api.LeaveApplicationDto;
+import com.schoolsoft.iam.api.Authz;
+import com.schoolsoft.platform.tenancy.TenantContext;
+import com.schoolsoft.platform.web.ConflictException;
+import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.tenancy.api.AcademicYearGuard;
@@ -15,6 +19,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class AttendanceRepository {
@@ -22,12 +27,19 @@ public class AttendanceRepository {
     private final JdbcTemplate jdbc;
     private final WorkingDayService workingDays;
     private final AcademicYearGuard academicYears;
+    private final AttendanceAmendmentService amendments;
+    private final LeaveMaterialisationService leaveDays;
+    private final Authz authz;
 
     public AttendanceRepository(JdbcTemplate jdbc, WorkingDayService workingDays,
-                                AcademicYearGuard academicYears) {
+                                AcademicYearGuard academicYears, AttendanceAmendmentService amendments,
+                                LeaveMaterialisationService leaveDays, Authz authz) {
         this.jdbc = jdbc;
         this.workingDays = workingDays;
         this.academicYears = academicYears;
+        this.amendments = amendments;
+        this.leaveDays = leaveDays;
+        this.authz = authz;
     }
 
     /** A section's cohort scope, which is what a calendar entry can be narrowed to. */
@@ -119,6 +131,8 @@ public class AttendanceRepository {
                 "Attendance cannot be marked on " + onDate + ": " + day.reason());
         }
 
+        requireInsideMarkingWindow(schoolId, studentId, onDate, periodNo, status);
+
         UUID id = UUID.randomUUID();
         String conflictClause = periodNo == null
             ? "ON CONFLICT (student_id, on_date) WHERE period_no IS NULL AND voided_at IS NULL DO UPDATE SET "
@@ -136,6 +150,35 @@ public class AttendanceRepository {
             "  AND period_no IS NOT DISTINCT FROM ? AND voided_at IS NULL",
             RECORD_MAPPER, studentId, Date.valueOf(onDate), periodNo
         );
+    }
+
+    /**
+     * A mark that changes a register the school has already signed off is an
+     * amendment, not a correction (ATT-06). Inside the window the teacher who
+     * mistyped it fixes it; outside, the upsert refuses and points at the
+     * workflow that keeps the prior value.
+     *
+     * Re-marking the same status is always allowed — a device replaying its
+     * backlog is not changing anything.
+     */
+    private void requireInsideMarkingWindow(UUID schoolId, UUID studentId, LocalDate onDate,
+                                            Integer periodNo, String status) {
+        record Existing(String status, java.time.Instant markedAt) {}
+        var rows = jdbc.query(
+            "SELECT status, marked_at FROM attendance_record WHERE student_id = ? AND on_date = ? " +
+            "  AND period_no IS NOT DISTINCT FROM ? AND voided_at IS NULL",
+            (rs, i) -> new Existing(rs.getString("status"), rs.getTimestamp("marked_at").toInstant()),
+            studentId, Date.valueOf(onDate), periodNo);
+        if (rows.isEmpty()) return;
+
+        Existing existing = rows.get(0);
+        if (existing.status().equals(status)) return;
+        if (amendments.withinEditWindow(schoolId, existing.markedAt())) return;
+
+        throw new ConflictException(
+            "Attendance for " + onDate + " was signed off and can no longer be overwritten. "
+                + "Raise an amendment (POST /v1/attendance/amendments) with a reason; "
+                + "it keeps the prior value of '" + existing.status() + "' and needs approval.");
     }
 
     public List<AttendanceRecordDto> forSectionOnDate(UUID sectionId, LocalDate onDate) {
@@ -260,12 +303,75 @@ public class AttendanceRepository {
         return status == null ? jdbc.query(sql, LEAVE_MAPPER, schoolId) : jdbc.query(sql, LEAVE_MAPPER, schoolId, status);
     }
 
+    /**
+     * Deciding a leave is what makes it real: approval writes the days into the
+     * register (ATT-05, ATT-13) and withdrawing the approval takes them back
+     * out again.
+     *
+     * The approver is checked rather than accepted — before this, any staff id
+     * could be passed as {@code approverStaffId} and a teacher could approve
+     * their own leave (STF-02).
+     */
+    @Transactional
     public LeaveApplicationDto decideLeave(UUID id, String status, UUID approverStaffId) {
-        int updated = jdbc.update(
-            "UPDATE leave_application SET status = ?, approver_staff_id = ?, decided_at = now() WHERE id = ?",
-            status, approverStaffId, id
-        );
-        if (updated == 0) throw new NotFoundException("Leave application not found: " + id);
+        var existing = jdbc.query(
+            "SELECT school_id, subject_type, subject_id, status FROM leave_application WHERE id = ?",
+            (rs, i) -> new Object[]{
+                UUID.fromString(rs.getString("school_id")), rs.getString("subject_type"),
+                UUID.fromString(rs.getString("subject_id")), rs.getString("status")},
+            id);
+        if (existing.isEmpty()) throw new NotFoundException("Leave application not found: " + id);
+        UUID schoolId = (UUID) existing.get(0)[0];
+        String subjectType = (String) existing.get(0)[1];
+        UUID subjectId = (UUID) existing.get(0)[2];
+        String previous = (String) existing.get(0)[3];
+
+        UUID approver = requireLeaveApprover(subjectType, subjectId, approverStaffId);
+        var snap = TenantContext.get();
+
+        jdbc.update(
+            "UPDATE leave_application SET status = ?, approver_staff_id = ?, decided_by_user_id = ?, " +
+            "  decided_at = now() WHERE id = ?",
+            status, approver, snap == null ? null : snap.userAccountId(), id);
+
+        if ("approved".equals(status) && !"approved".equals(previous)) {
+            leaveDays.materialise(id);
+        } else if (!"approved".equals(status) && "approved".equals(previous)) {
+            leaveDays.unwind(id);
+        }
         return jdbc.queryForObject("SELECT " + LEAVE_COLS + " FROM leave_application WHERE id = ?", LEAVE_MAPPER, id);
+    }
+
+    /** Roles that may decide leave. Student leave is a class teacher's call; staff leave is not. */
+    private static final List<String> STAFF_LEAVE_APPROVERS =
+        List.of("principal", "vice_principal", "it_admin");
+    private static final List<String> STUDENT_LEAVE_APPROVERS =
+        List.of("principal", "vice_principal", "it_admin", "academic_coordinator", "class_teacher");
+
+    private UUID requireLeaveApprover(String subjectType, UUID subjectId, UUID claimedApproverStaffId) {
+        var snap = TenantContext.get();
+        if (snap != null && (snap.trusted() || "platform_admin".equals(snap.subjectType()))) {
+            return claimedApproverStaffId;
+        }
+        if (snap == null || !"staff".equals(snap.subjectType())) {
+            throw new ForbiddenException("Only staff may decide a leave application");
+        }
+
+        UUID callerStaffId = authz.currentStaffId();
+        if (callerStaffId == null) throw new ForbiddenException("No staff record behind this login");
+        if ("staff".equals(subjectType) && callerStaffId.equals(subjectId)) {
+            throw new ForbiddenException("A staff member cannot approve their own leave");
+        }
+        if (claimedApproverStaffId != null && !claimedApproverStaffId.equals(callerStaffId)) {
+            throw new ForbiddenException(
+                "The approver on record is whoever decides it; approverStaffId must be your own staff id");
+        }
+
+        var allowed = "staff".equals(subjectType) ? STAFF_LEAVE_APPROVERS : STUDENT_LEAVE_APPROVERS;
+        if (authz.rolesOfCurrentUser().stream().noneMatch(allowed::contains)) {
+            throw new ForbiddenException(
+                "Your role cannot decide " + subjectType + " leave (needs one of " + allowed + ")");
+        }
+        return callerStaffId;
     }
 }

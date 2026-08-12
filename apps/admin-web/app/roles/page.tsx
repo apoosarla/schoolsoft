@@ -37,6 +37,7 @@ export default function RolesPage() {
 
   const [staff, setStaff] = useState<StaffWithRolesDto[] | null>(null);
   const [assignRoleCode, setAssignRoleCode] = useState<Record<string, string>>({});
+  const [assignReason, setAssignReason] = useState<Record<string, string>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -132,12 +133,14 @@ export default function RolesPage() {
   async function onAssign(member: StaffWithRolesDto) {
     if (!session) return;
     const roleCode = assignRoleCode[member.staffId];
-    if (!roleCode) return;
+    const reason = (assignReason[member.staffId] ?? "").trim();
+    if (!roleCode || !reason) return;
     setAssigningId(member.staffId);
     setError(null);
     try {
-      await assignStaffRole(member.staffId, session.schoolId, roleCode);
+      await assignStaffRole(member.staffId, session.schoolId, roleCode, reason);
       setAssignRoleCode((m) => ({ ...m, [member.staffId]: "" }));
+      setAssignReason((m) => ({ ...m, [member.staffId]: "" }));
       refreshStaff(session.schoolId);
     } catch (err) {
       setError(describeError(err));
@@ -148,10 +151,12 @@ export default function RolesPage() {
 
   async function onUnassign(member: StaffWithRolesDto, roleCode: string) {
     if (!session) return;
+    const reason = window.prompt("Why is this role being revoked?")?.trim();
+    if (!reason) return;
     setAssigningId(member.staffId);
     setError(null);
     try {
-      await unassignStaffRole(member.staffId, session.schoolId, roleCode);
+      await unassignStaffRole(member.staffId, session.schoolId, roleCode, reason);
       refreshStaff(session.schoolId);
     } catch (err) {
       setError(describeError(err));
@@ -351,10 +356,21 @@ export default function RolesPage() {
                             </option>
                           ))}
                       </select>
+                      <input
+                        placeholder="Reason"
+                        value={assignReason[m.staffId] ?? ""}
+                        onChange={(e) =>
+                          setAssignReason((s) => ({ ...s, [m.staffId]: e.target.value }))
+                        }
+                      />
                       <button
                         type="button"
                         onClick={() => onAssign(m)}
-                        disabled={assigningId === m.staffId || !assignRoleCode[m.staffId]}
+                        disabled={
+                          assigningId === m.staffId ||
+                          !assignRoleCode[m.staffId] ||
+                          !(assignReason[m.staffId] ?? "").trim()
+                        }
                       >
                         Assign
                       </button>

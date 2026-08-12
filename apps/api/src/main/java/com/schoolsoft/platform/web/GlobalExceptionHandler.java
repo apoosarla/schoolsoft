@@ -38,6 +38,12 @@ public class GlobalExceptionHandler {
             .body(ApiError.of("forbidden", ex.getMessage()));
     }
 
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiError> conflict(ConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ApiError.of("conflict", ex.getMessage()));
+    }
+
     /**
      * A constraint the application did not pre-check — an academic-year overlap
      * racing another writer, a duplicate natural key, a trigger refusing a term

@@ -221,6 +221,61 @@ TT-01/03/04, INT-02. YEC-05 still needs Phase 6's reshuffle.
 
 **Certifies:** ATT-05/06, TT-08, STF-02/03, SEC-08.
 
+### Status — landed 2026-08-12
+
+`V021__attendance_amendments_and_cover.sql` (V018 was taken by Phase 1's campus
+backfill, so the numbering moved).
+
+- **`attendance_policy`** gives each school a marking window and a list of
+  amendment approvers. Inside the window a mark is still a correction; outside
+  it the upsert refuses with a 409 that names the amendment path.
+- **`attendance_amendment`** carries the request: prior value, new value,
+  reason, requester, and a decision by somebody who is neither the requester
+  nor a colleague without the role. Approval applies the change; rejection is
+  recorded too, because a refused correction is evidence that somebody looked.
+- **Leave materialisation** writes the covered working days on approval —
+  student leave against each enrolment segment's own calendar scope, staff
+  leave into `staff_attendance` — and takes them back when the approval is
+  withdrawn.
+- **`timetable_cover`** is per slot per date. Approved staff leave raises the
+  day's cover needs with the teachers who are actually free in that period;
+  assigning cover notifies the substitute and the section's primary teacher,
+  moves the period between the two teachers' day views, and authorises the
+  substitute to mark that period's register.
+- **`@Audited` + one interceptor** covers enrolment status change, assessment
+  reopen, report-card unlock, fee adjustment and concession, role grant and
+  revoke, and both attendance decisions. `audit_log` gained `reason` and
+  `request_payload`.
+
+Five things the plan did not anticipate:
+
+- **Attendance had no authorisation at all.** Any staff token could mark any
+  section's register, so "the substitute may now mark that period" was not a
+  new permission — it was the first one. `AttendanceAuthorizer` is the rule the
+  cover work needed to exist in order to mean anything: office roles, the
+  section's own teachers, and the holder of a cover for that period. It is not
+  teacher scoping; STF-05's gap is still open and doing half of it here would
+  only have hidden it.
+- **ATT-02 was certifying the wrong thing.** It marked a period with a teacher
+  who does not teach it, which passed only because nothing was checked. The
+  scenario now uses the teacher actually timetabled for the period.
+- **An approved leave over an existing mark is an amendment.** Reusing
+  `attendance_amendment` rather than overwriting is what makes the unwind
+  exact: revoking an approval deletes the days the approval created and
+  restores the days it changed, instead of leaving a hole where a teacher's
+  'absent' used to be.
+- **Leave decisions were unchecked in both directions.** Any staff id could be
+  passed as `approverStaffId`, and a teacher could approve their own leave. The
+  approver is now the caller, holds an approving role, and is never the
+  applicant.
+- **RLS had stopped following new tables.** V009 applied school isolation once,
+  in a loop over the tables that existed then; everything added by Phases 1, 2
+  and 4 had no policy at all. V021 re-runs that rule over anything school-scoped
+  still missing one.
+
+**Executable scenarios: 83 → 90.** Newly passing: ATT-05/06/13, TT-08,
+STF-02/03, SEC-08. Suite: 208 run, 0 failures, 115 disabled.
+
 ---
 
 ## Phase 4 — Fee engine completion

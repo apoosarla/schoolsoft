@@ -221,9 +221,108 @@ class TimetableCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-07 — staff absence and timetable slots are unrelated: no cover assignment, no "
-        + "substitute view, no permission for the substitute to mark that period (Phase 3).")
     void cert_TT_08_teacherAbsenceAssignsASubstituteWhoCanMarkAttendance() {
+        String principal = principalToken(cbse());
+        UUID sectionId = currentFocusSection(cbse());
+        String onDate = "2026-08-04";                       // a Tuesday already past
+        int periodNo = 3;
+
+        UUID slotId = queryOne("SELECT id FROM timetable_slot WHERE section_id = ? AND day_of_week = 2 "
+            + "AND period_no = ?", UUID.class, sectionId, periodNo);
+        UUID absentStaffId = queryOne("SELECT teacher_staff_id FROM timetable_slot WHERE id = ?",
+            UUID.class, slotId);
+
+        var applied = post("/v1/attendance/leave", body(
+            "schoolId", cbse().id(), "subjectType", "staff", "subjectId", absentStaffId,
+            "fromDate", onDate, "toDate", onDate, "reason", "Unwell"), principal);
+        UUID leaveId = UUID.fromString(applied.getBody().get("id").asText());
+        assertThat(post("/v1/attendance/leave/" + leaveId + "/decide",
+            body("status", "approved", "approverStaffId", cbse().principalStaffId()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Somebody free that period, who is neither the class teacher nor a
+        // teacher of this section — so the only thing that can authorise them
+        // is the cover itself.
+        int substituteIndex = substituteIndexFor(sectionId, absentStaffId);
+        UUID substituteStaffId = cbse().teacherStaffIds().get(substituteIndex);
+        String substitute = teacherToken(cbse(), substituteIndex);
+        UUID studentId = studentsIn(sectionId).get(2);
+
+        var refused = post("/v1/attendance/mark", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "onDate", onDate, "periodNo", periodNo, "status", "present"), substitute);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        var assigned = post("/v1/timetable/cover", body(
+            "slotId", slotId, "onDate", onDate, "substituteStaffId", substituteStaffId,
+            "reason", "Covering for approved leave"), principal);
+        assertThat(assigned.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID coverId = UUID.fromString(assigned.getBody().get("id").asText());
+        assertThat(assigned.getBody().get("absentStaffId").asText()).isEqualTo(absentStaffId.toString());
+        assertThat(assigned.getBody().get("leaveApplicationId").asText()).isEqualTo(leaveId.toString());
+
+        // The substitute sees the period in their own day.
+        var substituteDay = get("/v1/timetable/teachers/" + substituteStaffId + "/day?date=" + onDate,
+            substitute);
+        assertThat(substituteDay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(substituteDay.getBody().get("covering")).hasSize(1);
+        assertThat(substituteDay.getBody().get("covering").get(0).get("slotId").asText())
+            .isEqualTo(slotId.toString());
+
+        // The absent teacher no longer does.
+        var absentDay = get("/v1/timetable/teachers/" + absentStaffId + "/day?date=" + onDate, principal);
+        absentDay.getBody().get("slots").forEach(slot ->
+            assertThat(slot.get("id").asText()).isNotEqualTo(slotId.toString()));
+        assertThat(absentDay.getBody().get("coveredForThem")).hasSize(1);
+
+        // And the section is told who is walking through the door.
+        var sectionDay = get("/v1/timetable/sections/" + sectionId + "/day?date=" + onDate, principal);
+        assertThat(sectionDay.getBody().get("covers")).hasSize(1);
+        assertThat(sectionDay.getBody().get("covers").get(0).get("substituteStaffId").asText())
+            .isEqualTo(substituteStaffId.toString());
+
+        // The cover is what authorises the register.
+        var marked = post("/v1/attendance/mark", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "onDate", onDate, "periodNo", periodNo, "status", "present",
+            "markedByStaffId", substituteStaffId), substitute);
+        assertThat(marked.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
+            + "AND period_no = ?", studentId, onDate, periodNo)).isEqualTo(1);
+
+        // Cancelling it takes the authority away again.
+        assertThat(delete("/v1/timetable/cover/" + coverId, principal).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(post("/v1/attendance/mark", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "onDate", onDate, "periodNo", periodNo, "status", "absent"), substitute).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        inChainDo(jdbc -> {
+            jdbc.update("DELETE FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
+                + "AND period_no = ?", studentId, java.sql.Date.valueOf(onDate), periodNo);
+            jdbc.update("DELETE FROM timetable_cover WHERE slot_id = ?", slotId);
+            jdbc.update("DELETE FROM staff_attendance WHERE leave_application_id = ?", leaveId);
+            jdbc.update("DELETE FROM leave_application WHERE id = ?", leaveId);
+        });
+    }
+
+    /**
+     * A teacher who can only be authorised by the cover: not the absent one,
+     * not the class teacher (teacher 1 holds that role school-wide), and not
+     * timetabled against this section that day.
+     */
+    private int substituteIndexFor(UUID sectionId, UUID absentStaffId) {
+        for (int i = 1; i < cbse().teacherStaffIds().size(); i++) {
+            UUID candidate = cbse().teacherStaffIds().get(i);
+            if (candidate.equals(absentStaffId)) continue;
+            long ownSlots = count("SELECT count(*) FROM timetable_slot WHERE teacher_staff_id = ? "
+                + "AND section_id = ? AND day_of_week = 2", candidate, sectionId);
+            long primary = count("SELECT count(*) FROM section_subject_teacher WHERE section_id = ? "
+                + "AND teacher_staff_id = ? AND is_primary", sectionId, candidate);
+            if (ownSlots == 0 && primary == 0) return i;
+        }
+        throw new IllegalStateException("The fixture has no teacher free of this section on Tuesdays");
     }
 
     @Test @Tag("P1")

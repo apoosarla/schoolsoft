@@ -7,6 +7,8 @@ import com.schoolsoft.assessment.api.MarkDto;
 import com.schoolsoft.assessment.api.ReportCardDto;
 import com.schoolsoft.enrolment.api.StudentSubjectDto;
 import com.schoolsoft.enrolment.api.SubjectSetResolver;
+import com.schoolsoft.iam.api.Authz;
+import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.AcademicYearGuard;
 import java.sql.Date;
@@ -26,12 +28,14 @@ public class AssessmentRepository {
     private final JdbcTemplate jdbc;
     private final AcademicYearGuard academicYears;
     private final SubjectSetResolver subjectSets;
+    private final Authz authz;
     private final ObjectMapper json;
 
     public AssessmentRepository(JdbcTemplate jdbc, ObjectMapper json, AcademicYearGuard academicYears,
-                               SubjectSetResolver subjectSets) {
+                               SubjectSetResolver subjectSets, Authz authz) {
         this.academicYears = academicYears;
         this.subjectSets = subjectSets;
+        this.authz = authz;
         this.jdbc = jdbc;
         this.json = json;
     }
@@ -84,7 +88,32 @@ public class AssessmentRepository {
         return find(id).orElseThrow();
     }
 
-    public AssessmentDto setStatus(UUID id, String status) {
+    /** Statuses past which marks are considered final, and reopening one is a decision. */
+    private static final List<String> SEALED = List.of("locked", "published");
+
+    /** Roles allowed to reopen a sealed assessment. */
+    private static final List<String> UNLOCK_ROLES =
+        List.of("principal", "vice_principal", "exams_officer", "academic_coordinator", "it_admin");
+
+    public AssessmentDto setStatus(UUID id, String status, String reason) {
+        String current = find(id)
+            .orElseThrow(() -> new NotFoundException("Assessment not found: " + id))
+            .status();
+
+        // Unlocking is the high-risk direction: marks a parent has already seen
+        // become editable again, so it needs an authorised role and a reason,
+        // and the audit entry at the endpoint records both (SEC-08).
+        if (SEALED.contains(current) && !SEALED.contains(status)) {
+            if (reason == null || reason.isBlank()) {
+                throw new IllegalArgumentException(
+                    "Reopening a " + current + " assessment needs a reason");
+            }
+            if (authz.rolesOfCurrentUser().stream().noneMatch(UNLOCK_ROLES::contains)) {
+                throw new ForbiddenException(
+                    "Your role cannot reopen a " + current + " assessment (needs one of " + UNLOCK_ROLES + ")");
+            }
+        }
+
         int updated = jdbc.update("UPDATE assessment SET status = ? WHERE id = ?", status, id);
         if (updated == 0) throw new NotFoundException("Assessment not found: " + id);
         return find(id).orElseThrow();
@@ -238,6 +267,23 @@ public class AssessmentRepository {
 
     public ReportCardDto lockReportCard(UUID id) {
         int updated = jdbc.update("UPDATE report_card SET is_locked = TRUE WHERE id = ?", id);
+        if (updated == 0) throw new NotFoundException("Report card not found: " + id);
+        return jdbc.queryForObject("SELECT " + REPORT_CARD_COLS + " FROM report_card WHERE id = ?", REPORT_CARD_MAPPER, id);
+    }
+
+    /**
+     * Unlocking a report card the family has already been shown. Same rule as
+     * reopening an assessment: an authorised role, a reason, and an audit row.
+     */
+    public ReportCardDto unlockReportCard(UUID id, String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Unlocking a report card needs a reason");
+        }
+        if (authz.rolesOfCurrentUser().stream().noneMatch(UNLOCK_ROLES::contains)) {
+            throw new ForbiddenException(
+                "Your role cannot unlock a report card (needs one of " + UNLOCK_ROLES + ")");
+        }
+        int updated = jdbc.update("UPDATE report_card SET is_locked = FALSE WHERE id = ?", id);
         if (updated == 0) throw new NotFoundException("Report card not found: " + id);
         return jdbc.queryForObject("SELECT " + REPORT_CARD_COLS + " FROM report_card WHERE id = ?", REPORT_CARD_MAPPER, id);
     }

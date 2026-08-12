@@ -43,12 +43,15 @@ class AttendanceCertTest extends AbstractCertificationTest {
 
     @Test @Tag("P1")
     void cert_ATT_02_periodAndDayLevelRecordsCoexistForTheSameDate() {
-        String token = teacherToken(cbse(), 1);
         UUID sectionId = currentFocusSection(cbse());
         UUID studentId = firstStudentIn(sectionId);
+        // The class teacher takes the day; the subject teacher timetabled for
+        // period 4 takes the period — each marking what is theirs to mark.
+        String classTeacher = teacherToken(cbse(), 0);
+        String token = tokenForTeacherOfPeriod(sectionId, 1, 4);
 
         post("/v1/attendance/mark", body("schoolId", cbse().id(), "studentId", studentId,
-            "sectionId", sectionId, "onDate", MARK_DATE, "status", "present"), token);
+            "sectionId", sectionId, "onDate", MARK_DATE, "status", "present"), classTeacher);
         var periodMark = post("/v1/attendance/mark", body("schoolId", cbse().id(), "studentId", studentId,
             "sectionId", sectionId, "onDate", MARK_DATE, "periodNo", 4, "status", "absent"), token);
         assertThat(periodMark.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -105,15 +108,142 @@ class AttendanceCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-08 — approving a leave application updates leave_application only; no attendance "
-        + "records are materialised for the covered days (Phase 3).")
     void cert_ATT_05_approvedLeaveMaterialisesAttendance() {
+        String principal = principalToken(cbse());
+        String teacher = teacherToken(cbse(), 0);
+        UUID sectionId = currentFocusSection(cbse());
+        UUID studentId = studentsIn(sectionId).get(4);
+
+        // A day the teacher had already marked, and three days still to come:
+        // approval has to cope with both, because a family applies for leave
+        // after the fact as often as before it.
+        String markedDay = "2026-08-06";
+        assertThat(post("/v1/attendance/mark", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "onDate", markedDay, "status", "absent",
+            "markedByStaffId", cbse().teacherStaffIds().get(0)), teacher).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+
+        UUID leaveId = applyLeave(studentId, markedDay, markedDay, "Fever", principal);
+        UUID futureLeaveId = applyLeave(studentId, "2026-08-17", "2026-08-19", "Family wedding", principal);
+
+        // Pending leave changes nothing — an application is a request.
+        assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? "
+            + "AND on_date BETWEEN '2026-08-17' AND '2026-08-19'", studentId)).isZero();
+
+        approveLeave(leaveId, principal);
+        approveLeave(futureLeaveId, principal);
+
+        // The three future working days are written; Saturday and Sunday are not.
+        assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? AND status = 'leave' "
+            + "AND source = 'auto' AND leave_application_id = ?", studentId, futureLeaveId)).isEqualTo(3);
+
+        // The marked day is amended rather than silently overwritten: the
+        // teacher's 'absent' is still recoverable.
+        assertThat(queryOne("SELECT status FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
+            + "AND period_no IS NULL", String.class, studentId, markedDay)).isEqualTo("leave");
+        assertThat(queryOne("SELECT old_status FROM attendance_amendment WHERE student_id = ? "
+            + "AND on_date = ?::date", String.class, studentId, markedDay)).isEqualTo("absent");
+
+        var summary = get("/v1/attendance/students/" + studentId
+            + "/summary?from=2026-08-17&to=2026-08-19", principal).getBody();
+        assertThat(summary.get("workingDays").asInt()).isEqualTo(3);
+        assertThat(summary.get("onLeave").asInt()).isEqualTo(3);
+        // Approved leave leaves the denominator rather than counting against the child.
+        assertThat(summary.get("consideredDays").asInt()).isZero();
+
+        // Revoking the approval unwinds exactly what it created, and restores
+        // what it changed.
+        assertThat(post("/v1/attendance/leave/" + futureLeaveId + "/decide", body(
+            "status", "rejected", "approverStaffId", cbse().principalStaffId()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(post("/v1/attendance/leave/" + leaveId + "/decide", body(
+            "status", "rejected", "approverStaffId", cbse().principalStaffId()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? "
+            + "AND on_date BETWEEN '2026-08-17' AND '2026-08-19'", studentId)).isZero();
+        assertThat(queryOne("SELECT status FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
+            + "AND period_no IS NULL", String.class, studentId, markedDay)).isEqualTo("absent");
+
+        inChainDo(jdbc -> {
+            jdbc.update("DELETE FROM attendance_amendment WHERE student_id = ?", studentId);
+            jdbc.update("DELETE FROM attendance_record WHERE student_id = ? AND on_date = ?::date",
+                studentId, markedDay);
+            jdbc.update("DELETE FROM leave_application WHERE id IN (?, ?)", leaveId, futureLeaveId);
+        });
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-08 + GAP-27 — the upsert overwrites the prior value with no amendment record, no "
-        + "approval and no audit row (Phase 3).")
     void cert_ATT_06_correctionAfterLockRequiresAnApprovedAuditedAmendment() {
+        String teacher = teacherToken(cbse(), 0);
+        String principal = principalToken(cbse());
+        UUID sectionId = currentFocusSection(cbse());
+        UUID studentId = studentsIn(sectionId).get(3);
+        String onDate = "2026-08-05";
+
+        assertThat(post("/v1/attendance/mark", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "onDate", onDate, "status", "absent",
+            "markedByStaffId", cbse().teacherStaffIds().get(0)), teacher).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+
+        // Age the mark past the school's 24-hour marking window: the register
+        // has been read by then, so it stops being a teacher's to overwrite.
+        inChainDo(jdbc -> jdbc.update(
+            "UPDATE attendance_record SET marked_at = now() - interval '3 days' "
+            + "WHERE student_id = ? AND on_date = ?::date AND period_no IS NULL", studentId, onDate));
+
+        var overwrite = post("/v1/attendance/mark", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "onDate", onDate, "status", "present"), teacher);
+        assertThat(overwrite.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(overwrite.getBody().get("message").asText()).contains("amendment");
+        assertThat(queryOne("SELECT status FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
+            + "AND period_no IS NULL", String.class, studentId, onDate)).isEqualTo("absent");
+
+        var requested = post("/v1/attendance/amendments", body(
+            "studentId", studentId, "onDate", onDate, "newStatus", "present",
+            "reason", "Parent produced the medical certificate; child was in school"), teacher);
+        assertThat(requested.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID amendmentId = UUID.fromString(requested.getBody().get("id").asText());
+        assertThat(requested.getBody().get("oldStatus").asText()).isEqualTo("absent");
+        assertThat(requested.getBody().get("status").asText()).isEqualTo("pending");
+
+        // The register is untouched until somebody decides.
+        assertThat(queryOne("SELECT status FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
+            + "AND period_no IS NULL", String.class, studentId, onDate)).isEqualTo("absent");
+
+        // Neither the person who raised it nor a teacher without an approving
+        // role can wave it through.
+        assertThat(post("/v1/attendance/amendments/" + amendmentId + "/decide",
+            body("status", "approved", "reason", "Mine to fix"), teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/attendance/amendments/" + amendmentId + "/decide",
+            body("status", "approved", "reason", "Looks fine"), teacherToken(cbse(), 1)).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        var decided = post("/v1/attendance/amendments/" + amendmentId + "/decide",
+            body("status", "approved", "reason", "Certificate seen and filed"), principal);
+        assertThat(decided.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(decided.getBody().get("status").asText()).isEqualTo("approved");
+
+        assertThat(queryOne("SELECT status FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
+            + "AND period_no IS NULL", String.class, studentId, onDate)).isEqualTo("present");
+        // The prior value survives the correction.
+        assertThat(queryOne("SELECT old_status FROM attendance_amendment WHERE id = ?",
+            String.class, amendmentId)).isEqualTo("absent");
+
+        assertThat(count("SELECT count(*) FROM audit_log WHERE action = 'attendance.amendment_decided' "
+            + "AND target_id = ? AND actor_user_id = ? AND reason = ? "
+            + "AND before_state IS NOT NULL AND after_state IS NOT NULL",
+            amendmentId, cbse().principalUserId(), "Certificate seen and filed")).isEqualTo(1);
+
+        inChainDo(jdbc -> {
+            jdbc.update("DELETE FROM attendance_amendment WHERE id = ?", amendmentId);
+            jdbc.update("DELETE FROM attendance_record WHERE student_id = ? AND on_date = ?::date",
+                studentId, onDate);
+        });
     }
 
     @Test @Tag("P1")
@@ -221,9 +351,30 @@ class AttendanceCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("GAP-08 — staff punches are recorded, but an approved staff leave does not surface as "
-        + "`leave` in staff_attendance (Phase 3).")
     void cert_ATT_13_staffAttendanceReflectsApprovedLeave() {
+        String principal = principalToken(cbse());
+        UUID staffId = cbse().teacherStaffIds().get(7);
+        String onDate = "2026-08-05";
+
+        UUID leaveId = applyStaffLeave(staffId, onDate, onDate, "Medical", principal);
+        assertThat(count("SELECT count(*) FROM staff_attendance WHERE staff_id = ? AND on_date = ?::date",
+            staffId, onDate)).isZero();
+
+        approveLeave(leaveId, principal);
+
+        assertThat(queryOne("SELECT status FROM staff_attendance WHERE staff_id = ? AND on_date = ?::date",
+            String.class, staffId, onDate)).isEqualTo("leave");
+        assertThat(queryOne("SELECT leave_application_id FROM staff_attendance WHERE staff_id = ? "
+            + "AND on_date = ?::date", UUID.class, staffId, onDate)).isEqualTo(leaveId);
+
+        // Withdrawing the approval takes the day back out of the register.
+        assertThat(post("/v1/attendance/leave/" + leaveId + "/decide", body(
+            "status", "cancelled", "approverStaffId", cbse().principalStaffId()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(count("SELECT count(*) FROM staff_attendance WHERE staff_id = ? AND on_date = ?::date",
+            staffId, onDate)).isZero();
+
+        inChainDo(jdbc -> jdbc.update("DELETE FROM leave_application WHERE id = ?", leaveId));
     }
 
     // ---------------------------------------------------------------- helpers
@@ -246,9 +397,40 @@ class AttendanceCertTest extends AbstractCertificationTest {
         if (endsOn != null) {
             UUID enrolmentId = UUID.fromString(enrolled.getBody().get("id").asText());
             var closed = post("/v1/enrolment/" + enrolmentId + "/status",
-                body("status", "withdrawn", "endsOn", endsOn), token);
+                body("status", "withdrawn", "endsOn", endsOn, "reason", "Certification fixture leaver"), token);
             assertThat(closed.getStatusCode()).isEqualTo(HttpStatus.OK);
         }
+    }
+
+    /** A token for whoever is timetabled to teach that period of that weekday. */
+    private String tokenForTeacherOfPeriod(UUID sectionId, int dayOfWeek, int periodNo) {
+        UUID staffId = queryOne("SELECT teacher_staff_id FROM timetable_slot WHERE section_id = ? "
+            + "AND day_of_week = ? AND period_no = ?", UUID.class, sectionId, dayOfWeek, periodNo);
+        int index = cbse().teacherStaffIds().indexOf(staffId);
+        assertThat(index).as("period %s is taught by a seeded teacher", periodNo).isNotNegative();
+        return teacherToken(cbse(), index);
+    }
+
+    private UUID applyLeave(UUID studentId, String from, String to, String reason, String token) {
+        var applied = post("/v1/attendance/leave", body(
+            "schoolId", cbse().id(), "subjectType", "student", "subjectId", studentId,
+            "fromDate", from, "toDate", to, "reason", reason), token);
+        assertThat(applied.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return UUID.fromString(applied.getBody().get("id").asText());
+    }
+
+    private UUID applyStaffLeave(UUID staffId, String from, String to, String reason, String token) {
+        var applied = post("/v1/attendance/leave", body(
+            "schoolId", cbse().id(), "subjectType", "staff", "subjectId", staffId,
+            "fromDate", from, "toDate", to, "reason", reason), token);
+        assertThat(applied.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return UUID.fromString(applied.getBody().get("id").asText());
+    }
+
+    private void approveLeave(UUID leaveId, String approverToken) {
+        var decided = post("/v1/attendance/leave/" + leaveId + "/decide", body(
+            "status", "approved", "approverStaffId", cbse().principalStaffId()), approverToken);
+        assertThat(decided.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
     private UUID registerDevice(String serialNo) {

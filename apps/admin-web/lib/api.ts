@@ -552,10 +552,16 @@ export function createAssessment(req: {
   });
 }
 
-export function setAssessmentStatus(id: string, status: string): Promise<AssessmentDto> {
+// Reopening a locked or published assessment needs a reason; ordinary forward
+// transitions do not.
+export function setAssessmentStatus(
+  id: string,
+  status: string,
+  reason?: string,
+): Promise<AssessmentDto> {
   return apiFetch<AssessmentDto>(`/v1/assessment/${id}/status`, {
     method: "POST",
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, reason }),
   });
 }
 
@@ -1102,16 +1108,28 @@ export function listStaffRoles(schoolId: string): Promise<StaffWithRolesDto[]> {
   return apiFetch<StaffWithRolesDto[]>(`/v1/iam/staff-roles?schoolId=${schoolId}`);
 }
 
-export function assignStaffRole(staffId: string, schoolId: string, roleCode: string): Promise<void> {
+// A role grant hands somebody screens full of other people's children, so the
+// API records why it was made; both calls carry the reason (SEC-08).
+export function assignStaffRole(
+  staffId: string,
+  schoolId: string,
+  roleCode: string,
+  reason: string,
+): Promise<void> {
   return apiFetch<void>("/v1/iam/staff-roles/assign", {
     method: "POST",
-    body: JSON.stringify({ staffId, schoolId, roleCode }),
+    body: JSON.stringify({ staffId, schoolId, roleCode, reason }),
   });
 }
 
-export function unassignStaffRole(staffId: string, schoolId: string, roleCode: string): Promise<void> {
+export function unassignStaffRole(
+  staffId: string,
+  schoolId: string,
+  roleCode: string,
+  reason: string,
+): Promise<void> {
   return apiFetch<void>("/v1/iam/staff-roles/unassign", {
     method: "POST",
-    body: JSON.stringify({ staffId, schoolId, roleCode }),
+    body: JSON.stringify({ staffId, schoolId, roleCode, reason }),
   });
 }

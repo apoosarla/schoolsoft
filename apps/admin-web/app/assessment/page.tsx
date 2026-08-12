@@ -138,10 +138,19 @@ export default function AssessmentPage() {
 
   async function onStatusChange(status: string) {
     if (!selectedAssessment) return;
+    // Reopening marks a family has already seen is a decision somebody owns.
+    const reopening =
+      ["locked", "published"].includes(selectedAssessment.status) &&
+      !["locked", "published"].includes(status);
+    let reason: string | undefined;
+    if (reopening) {
+      reason = window.prompt("Why is this assessment being reopened?")?.trim();
+      if (!reason) return;
+    }
     setStatusSaving(true);
     setError(null);
     try {
-      const updated = await setAssessmentStatus(selectedAssessment.id, status);
+      const updated = await setAssessmentStatus(selectedAssessment.id, status, reason);
       setSelectedAssessment(updated);
       refreshAssessments(sectionId);
     } catch (err) {

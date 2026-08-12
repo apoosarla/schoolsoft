@@ -120,9 +120,98 @@ class SecurityCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-27 — AuditService.record exists but no high-risk mutation calls it: mark unlock, fee "
-        + "waiver, enrolment status change and role grant all write without an audit row (Phase 3).")
     void cert_SEC_08_highRiskMutationsAreAuditLogged() {
+        String principal = principalToken(cbse());
+        String accountant = accountantToken(cbse());
+
+        // 1. Enrolment status change — and the reason is not optional.
+        UUID studentId = queryOne("SELECT student_id FROM enrolment WHERE section_id = ? ORDER BY roll_no "
+            + "OFFSET 6 LIMIT 1", UUID.class, currentFocusSection(cbse()));
+        UUID enrolmentId = queryOne("SELECT id FROM enrolment WHERE student_id = ? AND status = 'active'",
+            UUID.class, studentId);
+
+        var noReason = post("/v1/enrolment/" + enrolmentId + "/status",
+            Map.of("status", "withdrawn"), principal);
+        assertThat(noReason.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(noReason.getBody().get("code").asText()).isEqualTo("reason_required");
+        assertThat(queryOne("SELECT status FROM enrolment WHERE id = ?", String.class, enrolmentId))
+            .isEqualTo("active");
+
+        var withdrawn = post("/v1/enrolment/" + enrolmentId + "/status",
+            Map.of("status", "withdrawn", "reason", "Family relocating; TC requested"), principal);
+        assertThat(withdrawn.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertAudited("enrolment.status_change", enrolmentId, cbse().principalUserId(),
+            "Family relocating; TC requested");
+        // The entry carries the row on both sides, not just the fact of a change.
+        assertThat(queryOne("SELECT before_state->>'status' FROM audit_log "
+            + "WHERE action = 'enrolment.status_change' AND target_id = ? ORDER BY occurred_at DESC LIMIT 1",
+            String.class, enrolmentId)).isEqualTo("active");
+        assertThat(queryOne("SELECT after_state->>'status' FROM audit_log "
+            + "WHERE action = 'enrolment.status_change' AND target_id = ? ORDER BY occurred_at DESC LIMIT 1",
+            String.class, enrolmentId)).isEqualTo("withdrawn");
+        post("/v1/enrolment/" + enrolmentId + "/status",
+            Map.of("status", "active", "reason", "Relocation cancelled; child stays"), principal);
+
+        // 2. Mark unlock — reopening a published assessment.
+        UUID assessmentId = UUID.fromString(post("/v1/assessment", Map.of(
+            "schoolId", cbse().id(), "sectionId", currentFocusSection(cbse()),
+            "subjectId", subjectOf(cbse(), cbse().subjectCodes().get(0)),
+            "termId", termOf(cbse(), cbse().currentAy().code(), "T1"),
+            "strategyCode", cbse().strategyCode(), "name", "SEC-08 unlock probe",
+            "assessmentType", "PT", "maxMarks", 20.0), principal).getBody().get("id").asText());
+        post("/v1/assessment/" + assessmentId + "/status", Map.of("status", "published"), principal);
+
+        var unlockWithoutRole = post("/v1/assessment/" + assessmentId + "/status",
+            Map.of("status", "marking", "reason", "Re-evaluation requested"), teacherToken(cbse(), 1));
+        assertThat(unlockWithoutRole.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        var unlockWithoutReason = post("/v1/assessment/" + assessmentId + "/status",
+            Map.of("status", "marking"), principal);
+        assertThat(unlockWithoutReason.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        var unlocked = post("/v1/assessment/" + assessmentId + "/status",
+            Map.of("status", "marking", "reason", "Board asked for a re-evaluation"), principal);
+        assertThat(unlocked.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertAudited("assessment.status_change", assessmentId, cbse().principalUserId(),
+            "Board asked for a re-evaluation");
+
+        // 3. Fee waiver.
+        UUID invoiceId = queryOne("SELECT id FROM fee_invoice WHERE school_id = ? AND status <> 'cancelled' "
+            + "ORDER BY created_at LIMIT 1", UUID.class, cbse().id());
+        var waived = post("/v1/fees/invoices/" + invoiceId + "/adjustments", body(
+            "schoolId", cbse().id(), "kind", "waiver", "amount", 100.0,
+            "reason", "Hardship waiver approved by the trust",
+            "approvedByStaffId", cbse().principalStaffId()), accountant);
+        assertThat(waived.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertAudited("fee.adjustment", invoiceId, cbse().accountantUserId(),
+            "Hardship waiver approved by the trust");
+
+        // 4. Role grant.
+        UUID staffId = cbse().teacherStaffIds().get(4);
+        var granted = post("/v1/iam/staff-roles/assign", body(
+            "staffId", staffId, "schoolId", cbse().id(), "roleCode", "exams_officer",
+            "reason", "Covering exams while the officer is on leave"), principal);
+        assertThat(granted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertAudited("role.granted", staffId, cbse().principalUserId(),
+            "Covering exams while the officer is on leave");
+
+        var revoked = post("/v1/iam/staff-roles/unassign", body(
+            "staffId", staffId, "schoolId", cbse().id(), "roleCode", "exams_officer",
+            "reason", "Officer back from leave"), principal);
+        assertThat(revoked.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertAudited("role.revoked", staffId, cbse().principalUserId(), "Officer back from leave");
+
+        inChainDo(jdbc -> {
+            jdbc.update("DELETE FROM assessment WHERE id = ?", assessmentId);
+            jdbc.update("DELETE FROM staff_role WHERE staff_id = ? AND role_code = 'exams_officer'", staffId);
+        });
+    }
+
+    /** One audit entry naming the actor, the reason and both sides of the change. */
+    private void assertAudited(String action, UUID targetId, UUID actorUserId, String reason) {
+        assertThat(count("SELECT count(*) FROM audit_log WHERE action = ? AND target_id = ? "
+            + "AND actor_user_id = ? AND reason = ?", action, targetId, actorUserId, reason))
+            .as("audit entry for %s", action)
+            .isEqualTo(1);
     }
 
     @Test @Tag("P1")

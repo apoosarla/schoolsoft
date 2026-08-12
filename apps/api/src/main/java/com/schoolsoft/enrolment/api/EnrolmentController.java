@@ -1,5 +1,6 @@
 package com.schoolsoft.enrolment.api;
 
+import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.enrolment.internal.EnrolmentRepository;
 import com.schoolsoft.enrolment.internal.StudentSubjectRepository;
 import jakarta.validation.constraints.NotNull;
@@ -57,9 +58,15 @@ public class EnrolmentController {
         return repo.transfer(id, req.newSectionId(), req.rollNo(), req.overCapacityReason());
     }
 
-    public record StatusRequest(@NotNull String status, LocalDate endsOn) {}
+    public record StatusRequest(@NotNull String status, LocalDate endsOn, String reason) {}
 
+    /**
+     * Withdrawing, suspending or reinstating a child is the kind of change a
+     * family disputes months later, so it carries a reason and an audit entry
+     * with the enrolment row before and after (SEC-08).
+     */
     @PostMapping("/{id}/status")
+    @Audited(action = "enrolment.status_change", targetType = "enrolment")
     public EnrolmentDto setStatus(@PathVariable UUID id, @RequestBody StatusRequest req) {
         return repo.setStatus(id, req.status(), req.endsOn());
     }

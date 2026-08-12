@@ -22,6 +22,16 @@ public class AuditService {
 
     public void record(String action, String targetType, UUID targetId,
                        Object beforeState, Object afterState) {
+        record(action, targetType, targetId, beforeState, afterState, null, null);
+    }
+
+    /**
+     * The full entry: what changed, and why it was allowed to (SEC-08). The
+     * reason is a first-class column rather than a note inside the payload
+     * because it is the column an auditor reads.
+     */
+    public void record(String action, String targetType, UUID targetId,
+                       Object beforeState, Object afterState, String reason, Object requestPayload) {
         var snap = TenantContext.get();
         UUID userId = snap == null ? null : snap.userAccountId();
         UUID schoolId = snap == null ? null : snap.schoolId();
@@ -34,11 +44,14 @@ public class AuditService {
         try {
             jdbc.update(
                 "INSERT INTO audit_log (school_id, actor_user_id, action, target_type, target_id, " +
-                "                       before_state, after_state, ip_address, user_agent) " +
-                "VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::inet, ?)",
+                "                       before_state, after_state, reason, request_payload, " +
+                "                       ip_address, user_agent) " +
+                "VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?::jsonb, ?::inet, ?)",
                 schoolId, userId, action, targetType, targetId,
                 beforeState == null ? null : json.writeValueAsString(beforeState),
                 afterState  == null ? null : json.writeValueAsString(afterState),
+                reason,
+                requestPayload == null ? null : json.writeValueAsString(requestPayload),
                 ip, ua
             );
         } catch (JsonProcessingException e) {
@@ -56,7 +69,8 @@ public class AuditService {
 
     public List<AuditLogEntryDto> query(String targetType, UUID targetId, UUID actorUserId, int limit) {
         StringBuilder sql = new StringBuilder(
-            "SELECT id, school_id, actor_user_id, action, target_type, target_id, occurred_at FROM audit_log WHERE 1=1 "
+            "SELECT id, school_id, actor_user_id, action, target_type, target_id, reason, occurred_at " +
+            "FROM audit_log WHERE 1=1 "
         );
         List<Object> args = new ArrayList<>();
         if (targetType != null) { sql.append("AND target_type = ? "); args.add(targetType); }
@@ -72,6 +86,7 @@ public class AuditService {
                 rs.getString("action"),
                 rs.getString("target_type"),
                 rs.getString("target_id") == null ? null : UUID.fromString(rs.getString("target_id")),
+                rs.getString("reason"),
                 rs.getTimestamp("occurred_at").toInstant()
             ),
             args.toArray()

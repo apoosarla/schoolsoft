@@ -1,5 +1,6 @@
 package com.schoolsoft.iam.api;
 
+import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.iam.internal.RoleRepository;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import jakarta.validation.constraints.NotBlank;
@@ -67,16 +68,23 @@ public class RoleController {
      */
     public record AssignRoleRequest(
         @NotNull UUID staffId, @NotNull UUID schoolId, @NotBlank String roleCode,
-        String scopeType, UUID scopeId
+        String scopeType, UUID scopeId, String reason
     ) {}
 
+    /**
+     * A role grant is the widest change anybody makes in this system — it hands
+     * somebody screens full of other people's children — so it takes a reason
+     * and lands in the audit log (SEC-08).
+     */
     @PostMapping("/staff-roles/assign")
+    @Audited(action = "role.granted", targetType = "staff", idParam = "staffId", snapshot = false)
     public ResponseEntity<Void> assign(@RequestBody AssignRoleRequest req) {
         repo.assignRole(req.staffId(), req.schoolId(), req.roleCode(), req.scopeType(), req.scopeId());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/staff-roles/unassign")
+    @Audited(action = "role.revoked", targetType = "staff", idParam = "staffId", snapshot = false)
     public ResponseEntity<Void> unassign(@RequestBody AssignRoleRequest req) {
         repo.unassignRole(req.staffId(), req.schoolId(), req.roleCode(), req.scopeType(), req.scopeId());
         return ResponseEntity.noContent().build();

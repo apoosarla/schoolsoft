@@ -942,13 +942,26 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
 
 ### Correctness and control gaps
 
-- **GAP-08 — Attendance corrections are unaudited silent overwrites.** The
+- **GAP-08 — Attendance corrections are unaudited silent overwrites.**
+  ✅ **Closed 2026-08-12 (Phase 3).** `attendance_policy` gives each school a
+  marking window; inside it a mark is still a correction, outside it the upsert
+  refuses and `attendance_amendment` carries the request — prior value, reason,
+  requester, and an approver who is neither the requester nor a colleague
+  without the role. Approved leave now materialises across the covered working
+  days (student and staff), and revoking the approval unwinds exactly what it
+  created and restores what it changed. Original finding: The
   `AttendanceRepository` upsert on the V010 unique index replaces the prior
   value with no history, no approval step, and no reason. Approved leave also
   does not auto-materialise as `leave` attendance — a teacher must remember
   to mark it. Blocks ATT-05/06, STF-02.
 
-- **GAP-07 — No teacher substitution / cover.** `staff_attendance` records
+- **GAP-07 — No teacher substitution / cover.** ✅ **Closed 2026-08-12
+  (Phase 3).** `timetable_cover` is per slot per date: approved staff leave
+  raises the day's cover needs with the teachers free in that period,
+  assignment notifies the substitute and the section's primary teacher, the
+  substitute's day view gains the period and the absent teacher's loses it, and
+  the cover is what authorises the substitute to mark that period's register.
+  Original finding: `staff_attendance` records
   the absence and `timetable_slot` names the teacher, but the two are
   unrelated. No cover assignment, no substitute notification to the section,
   and no permission path letting the substitute mark that period's
@@ -999,7 +1012,14 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   validate against or to re-time the school day from one place. No
   teacher-max-load rule either. Blocks TT-01/03/04.
 
-- **GAP-27 — Audit not wired to the high-risk mutations.** Extends the
+- **GAP-27 — Audit not wired to the high-risk mutations.** ✅ **Closed
+  2026-08-12 (Phase 3).** `@Audited` on the endpoint plus one interceptor:
+  enrolment status change, assessment reopen, report-card unlock, fee
+  adjustment (waiver included), concession grant, role grant/revoke and both
+  attendance decisions now write an entry with actor, the row before and after,
+  and a reason the interceptor refuses to proceed without. `audit_log` gained
+  `reason` and `request_payload` columns. STF-04 stays open on the staff-exit
+  path itself, which is Phase 7's. Original finding: Extends the
   existing audit-retrofit item with a certification-scoped priority: before
   release, `AuditService.record` must at minimum cover enrolment status
   changes, mark unlock, fee waiver / concession grants, and role grants —

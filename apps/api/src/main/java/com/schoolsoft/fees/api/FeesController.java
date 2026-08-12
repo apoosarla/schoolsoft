@@ -1,5 +1,6 @@
 package com.schoolsoft.fees.api;
 
+import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.fees.internal.DunningService;
 import com.schoolsoft.fees.internal.FeeAdjustmentService;
 import com.schoolsoft.fees.internal.FeeGenerationService;
@@ -95,6 +96,8 @@ public class FeesController {
      * discount line rather than a quietly smaller number (FEE-03).
      */
     @PostMapping("/concessions")
+    @Audited(action = "fee.concession_granted", targetType = "student", idParam = "studentId",
+             snapshot = false, requireReason = false)
     public java.util.Map<String, Object> grantConcession(@RequestBody ConcessionRequest req) {
         UUID id = repo.grantConcession(req.schoolId(), req.studentId(), req.academicYearId(), req.kind(),
             req.pct(), req.flatAmount(), req.appliesToHeadId(), req.notes(), req.approvedByStaffId());
@@ -180,6 +183,7 @@ public class FeesController {
 
     /** credit_note | refund | waiver | late_fee | charge | reversal. */
     @PostMapping("/invoices/{id}/adjustments")
+    @Audited(action = "fee.adjustment", targetType = "fee_invoice")
     public FeeAdjustmentDto adjust(@PathVariable UUID id, @RequestBody AdjustRequest req) {
         return adjustments.adjust(req.schoolId(), id, req.kind(), req.amount(), req.reason(),
             req.paymentId(), req.approvedByStaffId(), req.feeHeadId());

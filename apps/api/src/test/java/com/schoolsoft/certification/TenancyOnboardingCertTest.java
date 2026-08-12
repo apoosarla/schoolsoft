@@ -193,7 +193,8 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
             });
             var granted = post("/v1/iam/staff-roles/assign", Map.of(
                 "staffId", annexStaffId, "schoolId", cbse().id(), "roleCode", "vice_principal",
-                "scopeType", "campus", "scopeId", annex), token);
+                "scopeType", "campus", "scopeId", annex,
+                "reason", "Campus-level admin for the annex"), token);
             assertThat(granted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
 
             String annexAdminToken = tokenFor(cbse(), annexUserId, "staff");

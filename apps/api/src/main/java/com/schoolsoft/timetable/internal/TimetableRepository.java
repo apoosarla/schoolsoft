@@ -5,6 +5,8 @@ import com.schoolsoft.enrolment.api.SubjectSetResolver;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.timetable.api.SectionDayDto;
+import com.schoolsoft.timetable.api.TeacherDayDto;
+import com.schoolsoft.timetable.api.TimetableCoverDto;
 import com.schoolsoft.timetable.api.TimetableSlotDto;
 import java.sql.Date;
 import java.sql.Time;
@@ -22,11 +24,14 @@ public class TimetableRepository {
     private final JdbcTemplate jdbc;
     private final WorkingDayService workingDays;
     private final SubjectSetResolver subjectSets;
+    private final CoverRepository covers;
 
-    public TimetableRepository(JdbcTemplate jdbc, WorkingDayService workingDays, SubjectSetResolver subjectSets) {
+    public TimetableRepository(JdbcTemplate jdbc, WorkingDayService workingDays,
+                              SubjectSetResolver subjectSets, CoverRepository covers) {
         this.jdbc = jdbc;
         this.workingDays = workingDays;
         this.subjectSets = subjectSets;
+        this.covers = covers;
     }
 
     private static final RowMapper<TimetableSlotDto> MAPPER = (rs, i) -> new TimetableSlotDto(
@@ -98,7 +103,7 @@ public class TimetableRepository {
 
         var status = workingDays.statusOf(scope.get(0)[0], date, scope.get(0)[1], scope.get(0)[2]);
         if (!status.working()) {
-            return new SectionDayDto(date, false, status.reason(), status.calendarKind(), List.of());
+            return new SectionDayDto(date, false, status.reason(), status.calendarKind(), List.of(), List.of());
         }
 
         // A date is known here, so the slot's effective window is applied — the
@@ -108,7 +113,41 @@ public class TimetableRepository {
             "  AND t.effective_from <= ? AND COALESCE(t.effective_to, 'infinity'::date) >= ? " +
             "ORDER BY t.period_no",
             MAPPER, sectionId, date.getDayOfWeek().getValue(), Date.valueOf(date), Date.valueOf(date));
-        return new SectionDayDto(date, true, status.reason(), status.calendarKind(), slots);
+        return new SectionDayDto(date, true, status.reason(), status.calendarKind(), slots,
+            covers.forSection(sectionId, date));
+    }
+
+    /**
+     * A teacher's day, cover included (TT-08). Their own periods minus the ones
+     * someone else is taking, plus the ones they have been given — which is the
+     * list the teacher app renders as "today".
+     */
+    public TeacherDayDto forTeacherOnDate(UUID teacherStaffId, LocalDate date) {
+        var schools = jdbc.query("SELECT school_id FROM staff WHERE id = ?",
+            (rs, i) -> UUID.fromString(rs.getString("school_id")), teacherStaffId);
+        if (schools.isEmpty()) throw new NotFoundException("Staff member not found: " + teacherStaffId);
+
+        var status = workingDays.statusOf(schools.get(0), date, null, null);
+        if (!status.working()) {
+            return new TeacherDayDto(teacherStaffId, date, false, status.reason(),
+                List.of(), List.of(), List.of());
+        }
+
+        List<TimetableCoverDto> covering = covers.forSubstitute(teacherStaffId, date);
+        List<TimetableCoverDto> handedOver = covers.forAbsentee(teacherStaffId, date);
+        var handedOverSlots = handedOver.stream().map(TimetableCoverDto::slotId)
+            .collect(java.util.stream.Collectors.toSet());
+
+        List<TimetableSlotDto> own = jdbc.query(
+            SELECT + "WHERE t.teacher_staff_id = ? AND t.day_of_week = ? " +
+            "  AND t.effective_from <= ? AND COALESCE(t.effective_to, 'infinity'::date) >= ? " +
+            "ORDER BY t.period_no",
+            MAPPER, teacherStaffId, date.getDayOfWeek().getValue(),
+            Date.valueOf(date), Date.valueOf(date)).stream()
+            .filter(slot -> !handedOverSlots.contains(slot.id()))
+            .toList();
+
+        return new TeacherDayDto(teacherStaffId, date, true, status.reason(), own, covering, handedOver);
     }
 
     /**

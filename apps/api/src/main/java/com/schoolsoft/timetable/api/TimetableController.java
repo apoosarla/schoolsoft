@@ -1,6 +1,7 @@
 package com.schoolsoft.timetable.api;
 
 import com.schoolsoft.timetable.internal.BellScheduleRepository;
+import com.schoolsoft.timetable.internal.CoverRepository;
 import com.schoolsoft.timetable.internal.TimetableRepository;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -18,10 +19,12 @@ public class TimetableController {
 
     private final TimetableRepository repo;
     private final BellScheduleRepository bells;
+    private final CoverRepository covers;
 
-    public TimetableController(TimetableRepository repo, BellScheduleRepository bells) {
+    public TimetableController(TimetableRepository repo, BellScheduleRepository bells, CoverRepository covers) {
         this.repo = repo;
         this.bells = bells;
+        this.covers = covers;
     }
 
     @GetMapping("/sections/{sectionId}")
@@ -52,6 +55,54 @@ public class TimetableController {
     @GetMapping("/teachers/{teacherStaffId}")
     public List<TimetableSlotDto> forTeacher(@PathVariable UUID teacherStaffId) {
         return repo.forTeacher(teacherStaffId);
+    }
+
+    /** A teacher's day including cover taken and cover given away (TT-08). */
+    @GetMapping("/teachers/{teacherStaffId}/day")
+    public TeacherDayDto forTeacherOnDate(
+        @PathVariable UUID teacherStaffId,
+        @RequestParam @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
+        return repo.forTeacherOnDate(teacherStaffId, date);
+    }
+
+    // -------------------------- Cover (GAP-07) --------------------------
+
+    /**
+     * The day's periods whose teacher is on approved leave, each with the
+     * people free to take it (STF-03).
+     */
+    @GetMapping("/cover/needs")
+    public List<CoverNeedDto> coverNeeds(
+        @RequestParam UUID schoolId,
+        @RequestParam @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
+        return covers.needs(schoolId, date);
+    }
+
+    @GetMapping("/cover")
+    public List<TimetableCoverDto> coverForDay(
+        @RequestParam UUID schoolId,
+        @RequestParam @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
+        return covers.forSchool(schoolId, date);
+    }
+
+    public record AssignCoverRequest(
+        @NotNull UUID slotId, @NotNull LocalDate onDate, @NotNull UUID substituteStaffId, String reason
+    ) {}
+
+    @PostMapping("/cover")
+    public TimetableCoverDto assignCover(@RequestBody AssignCoverRequest req) {
+        return covers.assign(req.slotId(), req.onDate(), req.substituteStaffId(), req.reason());
+    }
+
+    @DeleteMapping("/cover/{id}")
+    public TimetableCoverDto cancelCover(@PathVariable UUID id) {
+        return covers.cancel(id);
     }
 
     /**

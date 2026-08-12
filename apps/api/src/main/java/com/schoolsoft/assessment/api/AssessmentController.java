@@ -1,6 +1,7 @@
 package com.schoolsoft.assessment.api;
 
 import com.schoolsoft.assessment.internal.AssessmentRepository;
+import com.schoolsoft.audit.api.Audited;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
@@ -41,11 +42,17 @@ public class AssessmentController {
         );
     }
 
-    public record StatusRequest(@NotBlank String status) {}
+    public record StatusRequest(@NotBlank String status, String reason) {}
 
+    /**
+     * Moving an assessment back out of {@code locked} or {@code published}
+     * reopens marks a family has already seen, so it needs a reason and an
+     * authorised role — and it is audited either way (SEC-08).
+     */
     @PostMapping("/{id}/status")
+    @Audited(action = "assessment.status_change", targetType = "assessment", requireReason = false)
     public AssessmentDto setStatus(@PathVariable UUID id, @RequestBody StatusRequest req) {
-        return repo.setStatus(id, req.status());
+        return repo.setStatus(id, req.status(), req.reason());
     }
 
     // -------------------------- Components --------------------------
@@ -105,7 +112,16 @@ public class AssessmentController {
     }
 
     @PostMapping("/report-cards/{id}/lock")
+    @Audited(action = "report_card.locked", targetType = "report_card", requireReason = false)
     public ReportCardDto lockReportCard(@PathVariable UUID id) {
         return repo.lockReportCard(id);
+    }
+
+    public record UnlockRequest(@NotBlank String reason) {}
+
+    @PostMapping("/report-cards/{id}/unlock")
+    @Audited(action = "report_card.unlocked", targetType = "report_card")
+    public ReportCardDto unlockReportCard(@PathVariable UUID id, @RequestBody UnlockRequest req) {
+        return repo.unlockReportCard(id, req.reason());
     }
 }

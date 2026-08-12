@@ -4,5 +4,6 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record AuditLogEntryDto(
-    long id, UUID schoolId, UUID actorUserId, String action, String targetType, UUID targetId, Instant occurredAt
+    long id, UUID schoolId, UUID actorUserId, String action, String targetType, UUID targetId,
+    String reason, Instant occurredAt
 ) {}

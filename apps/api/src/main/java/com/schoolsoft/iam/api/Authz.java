@@ -68,6 +68,22 @@ public class Authz {
             (rs, i) -> UUID.fromString(rs.getString("scope_id")), snap.userAccountId());
     }
 
+    /**
+     * The staff row behind the current token, or null when the caller is not
+     * staff. Modules that authorise against a teacher's duties (attendance,
+     * cover) need the staff id, and the JWT carries only the user account.
+     */
+    public UUID currentStaffId() {
+        var snap = TenantContext.get();
+        if (snap == null || !"staff".equals(snap.subjectType()) || snap.userAccountId() == null) return null;
+        var jdbc = new JdbcTemplate(dataSource);
+        var rows = jdbc.query(
+            "SELECT subject_id FROM user_account WHERE id = ? AND subject_type = 'staff'",
+            (rs, i) -> rs.getString("subject_id") == null ? null : UUID.fromString(rs.getString("subject_id")),
+            snap.userAccountId());
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     public List<String> rolesOfCurrentUser() {
         var snap = TenantContext.get();
         if (snap == null || !"staff".equals(snap.subjectType())) return List.of();
