@@ -1,5 +1,7 @@
 package com.schoolsoft.tenancy.internal;
 
+import com.schoolsoft.iam.api.Authz;
+import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.AcademicYearDto;
 import com.schoolsoft.tenancy.api.CampusDto;
 import com.schoolsoft.tenancy.api.GradeDto;
@@ -10,6 +12,7 @@ import com.schoolsoft.tenancy.api.SubjectDto;
 import com.schoolsoft.tenancy.api.TermDto;
 import java.sql.Date;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,7 +24,25 @@ import org.springframework.stereotype.Repository;
 public class SchoolRepository {
 
     private final JdbcTemplate jdbc;
-    public SchoolRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final Authz authz;
+
+    public SchoolRepository(JdbcTemplate jdbc, Authz authz) {
+        this.jdbc = jdbc;
+        this.authz = authz;
+    }
+
+    /**
+     * Appends a campus restriction when the caller holds only campus-scoped
+     * role grants. School-wide staff and chain admins get an empty scope and
+     * are left unfiltered (GAP-24).
+     */
+    private String campusFilter(String columnExpression, List<Object> args) {
+        List<UUID> scope = authz.campusScopeOfCurrentUser();
+        if (scope.isEmpty()) return "";
+        args.addAll(scope);
+        return " AND " + columnExpression + " IN (" +
+            String.join(",", scope.stream().map(x -> "?").toList()) + ")";
+    }
 
     private static final RowMapper<SchoolDto> SCHOOL = (rs, i) -> new SchoolDto(
         UUID.fromString(rs.getString("id")),
@@ -57,18 +78,73 @@ public class SchoolRepository {
         return find(id).orElseThrow();
     }
 
+    private static final String AY_COLS =
+        "id, code, starts_on, ends_on, is_current, status, closed_at, reopened_at, reopen_reason";
+
+    private static final RowMapper<AcademicYearDto> ACADEMIC_YEAR = (rs, i) -> new AcademicYearDto(
+        UUID.fromString(rs.getString("id")),
+        rs.getString("code"),
+        rs.getDate("starts_on").toLocalDate(),
+        rs.getDate("ends_on").toLocalDate(),
+        rs.getBoolean("is_current"),
+        rs.getString("status"),
+        rs.getTimestamp("closed_at") == null ? null : rs.getTimestamp("closed_at").toInstant(),
+        rs.getTimestamp("reopened_at") == null ? null : rs.getTimestamp("reopened_at").toInstant(),
+        rs.getString("reopen_reason")
+    );
+
     public List<AcademicYearDto> listAcademicYears(UUID schoolId) {
         return jdbc.query(
-            "SELECT id, code, starts_on, ends_on, is_current FROM academic_year WHERE school_id = ? ORDER BY starts_on DESC",
-            (rs, i) -> new AcademicYearDto(
-                UUID.fromString(rs.getString("id")),
-                rs.getString("code"),
-                rs.getDate("starts_on").toLocalDate(),
-                rs.getDate("ends_on").toLocalDate(),
-                rs.getBoolean("is_current")
-            ),
-            schoolId
+            "SELECT " + AY_COLS + " FROM academic_year WHERE school_id = ? ORDER BY starts_on DESC",
+            ACADEMIC_YEAR, schoolId
         );
+    }
+
+    public AcademicYearDto findAcademicYear(UUID id) {
+        var rows = jdbc.query("SELECT " + AY_COLS + " FROM academic_year WHERE id = ?", ACADEMIC_YEAR, id);
+        if (rows.isEmpty()) throw new NotFoundException("Academic year not found: " + id);
+        return rows.get(0);
+    }
+
+    /**
+     * Moves a year through planning → active → closed, or back via an explicit
+     * reopen. Closing clears {@code is_current} (the schema forbids a closed
+     * year being current); reopening does not restore it, because which year is
+     * current is a separate decision from whether an old one may be edited.
+     */
+    public AcademicYearDto setAcademicYearStatus(UUID id, String status, UUID actingStaffId, String reason) {
+        AcademicYearDto current = findAcademicYear(id);
+        switch (status) {
+            case "closed" -> {
+                if ("closed".equals(current.status())) return current;
+                jdbc.update(
+                    "UPDATE academic_year SET status = 'closed', is_current = FALSE, closed_at = now(), " +
+                    "  closed_by_staff_id = ? WHERE id = ?", actingStaffId, id);
+            }
+            case "active" -> {
+                boolean reopening = "closed".equals(current.status());
+                if (reopening && (reason == null || reason.isBlank())) {
+                    throw new IllegalArgumentException("Reopening a closed academic year requires a reason");
+                }
+                jdbc.update(
+                    "UPDATE academic_year SET status = 'active', " +
+                    "  reopened_at = CASE WHEN ? THEN now() ELSE reopened_at END, " +
+                    "  reopened_by_staff_id = CASE WHEN ? THEN ? ELSE reopened_by_staff_id END, " +
+                    "  reopen_reason = CASE WHEN ? THEN ? ELSE reopen_reason END " +
+                    "WHERE id = ?",
+                    reopening, reopening, actingStaffId, reopening, reason, id);
+            }
+            case "planning" -> {
+                if ("closed".equals(current.status())) {
+                    throw new IllegalArgumentException(
+                        "A closed academic year cannot return to planning; reopen it instead");
+                }
+                jdbc.update("UPDATE academic_year SET status = 'planning' WHERE id = ?", id);
+            }
+            default -> throw new IllegalArgumentException(
+                "Unknown academic year status: " + status + " (planning | active | closed)");
+        }
+        return findAcademicYear(id);
     }
 
     public List<GradeDto> listGrades(UUID schoolId) {
@@ -85,28 +161,19 @@ public class SchoolRepository {
     }
 
     public List<SectionDto> listSections(UUID schoolId, UUID academicYearId) {
-        String sql =
+        List<Object> args = new ArrayList<>();
+        args.add(schoolId);
+        StringBuilder sql = new StringBuilder(
             "SELECT s.id, s.school_id, s.grade_id, g.name AS grade_name, s.academic_year_id, " +
-            "       s.code, s.name, s.curriculum_id, s.strategy_code, s.capacity " +
-            "FROM section s JOIN grade g ON g.id = s.grade_id " +
-            "WHERE s.school_id = ?" +
-            (academicYearId == null ? "" : " AND s.academic_year_id = ?") +
-            " ORDER BY g.sort_order, s.code";
-        RowMapper<SectionDto> mapper = (rs, i) -> new SectionDto(
-            UUID.fromString(rs.getString("id")),
-            UUID.fromString(rs.getString("school_id")),
-            UUID.fromString(rs.getString("grade_id")),
-            rs.getString("grade_name"),
-            UUID.fromString(rs.getString("academic_year_id")),
-            rs.getString("code"),
-            rs.getString("name"),
-            rs.getString("curriculum_id") == null ? null : UUID.fromString(rs.getString("curriculum_id")),
-            rs.getString("strategy_code"),
-            (Integer) rs.getObject("capacity")
-        );
-        return academicYearId == null
-            ? jdbc.query(sql, mapper, schoolId)
-            : jdbc.query(sql, mapper, schoolId, academicYearId);
+            "       s.code, s.name, s.curriculum_id, s.strategy_code, s.capacity, s.campus_id " +
+            "FROM section s JOIN grade g ON g.id = s.grade_id WHERE s.school_id = ?");
+        if (academicYearId != null) {
+            sql.append(" AND s.academic_year_id = ?");
+            args.add(academicYearId);
+        }
+        sql.append(campusFilter("s.campus_id", args));
+        sql.append(" ORDER BY g.sort_order, s.code");
+        return jdbc.query(sql.toString(), SECTION, args.toArray());
     }
 
     // -------------------------- Campus --------------------------
@@ -139,6 +206,23 @@ public class SchoolRepository {
     // -------------------------- Academic Year --------------------------
 
     public AcademicYearDto createAcademicYear(UUID schoolId, String code, LocalDate startsOn, LocalDate endsOn, boolean isCurrent) {
+        if (!endsOn.isAfter(startsOn)) {
+            throw new IllegalArgumentException(
+                "Academic year " + code + " ends on or before it starts (" + startsOn + " .. " + endsOn + ")");
+        }
+        // The exclusion constraint in V016 is the real guarantee; this check exists
+        // so the caller is told which year it collided with rather than reading a
+        // constraint name out of a 500.
+        List<String> overlapping = jdbc.queryForList(
+            "SELECT code || ' (' || starts_on || ' .. ' || ends_on || ')' FROM academic_year " +
+            "WHERE school_id = ? AND daterange(starts_on, ends_on, '[]') && daterange(?, ?, '[]')",
+            String.class, schoolId, Date.valueOf(startsOn), Date.valueOf(endsOn));
+        if (!overlapping.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Academic year " + code + " (" + startsOn + " .. " + endsOn + ") overlaps " +
+                String.join(", ", overlapping));
+        }
+
         UUID id = UUID.randomUUID();
         if (isCurrent) {
             jdbc.update("UPDATE academic_year SET is_current = FALSE WHERE school_id = ?", schoolId);
@@ -147,17 +231,7 @@ public class SchoolRepository {
             "INSERT INTO academic_year (id, school_id, code, starts_on, ends_on, is_current) VALUES (?, ?, ?, ?, ?, ?)",
             id, schoolId, code, Date.valueOf(startsOn), Date.valueOf(endsOn), isCurrent
         );
-        return jdbc.queryForObject(
-            "SELECT id, code, starts_on, ends_on, is_current FROM academic_year WHERE id = ?",
-            (rs, i) -> new AcademicYearDto(
-                UUID.fromString(rs.getString("id")),
-                rs.getString("code"),
-                rs.getDate("starts_on").toLocalDate(),
-                rs.getDate("ends_on").toLocalDate(),
-                rs.getBoolean("is_current")
-            ),
-            id
-        );
+        return findAcademicYear(id);
     }
 
     // -------------------------- Term --------------------------
@@ -180,6 +254,25 @@ public class SchoolRepository {
     }
 
     public TermDto createTerm(UUID academicYearId, String code, String name, LocalDate startsOn, LocalDate endsOn) {
+        AcademicYearDto year = findAcademicYear(academicYearId);
+        if (endsOn.isBefore(startsOn)) {
+            throw new IllegalArgumentException("Term " + code + " ends before it starts");
+        }
+        if (startsOn.isBefore(year.startsOn()) || endsOn.isAfter(year.endsOn())) {
+            throw new IllegalArgumentException(
+                "Term " + code + " (" + startsOn + " .. " + endsOn + ") falls outside academic year " +
+                year.code() + " (" + year.startsOn() + " .. " + year.endsOn() + ")");
+        }
+        List<String> overlapping = jdbc.queryForList(
+            "SELECT code || ' (' || starts_on || ' .. ' || ends_on || ')' FROM term " +
+            "WHERE academic_year_id = ? AND daterange(starts_on, ends_on, '[]') && daterange(?, ?, '[]')",
+            String.class, academicYearId, Date.valueOf(startsOn), Date.valueOf(endsOn));
+        if (!overlapping.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Term " + code + " (" + startsOn + " .. " + endsOn + ") overlaps " +
+                String.join(", ", overlapping));
+        }
+
         UUID id = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO term (id, academic_year_id, code, name, starts_on, ends_on) VALUES (?, ?, ?, ?, ?, ?)",
@@ -210,35 +303,48 @@ public class SchoolRepository {
     // -------------------------- Section --------------------------
 
     public SectionDto createSection(
-        UUID schoolId, UUID gradeId, UUID academicYearId, String code, String name, String strategyCode, Integer capacity
+        UUID schoolId, UUID gradeId, UUID academicYearId, String code, String name, String strategyCode,
+        Integer capacity, UUID campusId
     ) {
+        UUID resolvedCampus = campusId == null ? primaryCampusOf(schoolId) : campusId;
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO section (id, school_id, grade_id, academic_year_id, code, name, strategy_code, capacity) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            id, schoolId, gradeId, academicYearId, code, name, strategyCode, capacity
+            "INSERT INTO section (id, school_id, grade_id, academic_year_id, code, name, strategy_code, " +
+            "  capacity, campus_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            id, schoolId, gradeId, academicYearId, code, name, strategyCode, capacity, resolvedCampus
         );
         return findSection(id).orElseThrow();
     }
 
+    /** Single-campus schools never pick one, so the primary stands in. */
+    public UUID primaryCampusOf(UUID schoolId) {
+        var rows = jdbc.query(
+            "SELECT id FROM campus WHERE school_id = ? ORDER BY is_primary DESC, name LIMIT 1",
+            (rs, i) -> UUID.fromString(rs.getString("id")), schoolId);
+        if (rows.isEmpty()) throw new NotFoundException("School has no campus: " + schoolId);
+        return rows.get(0);
+    }
+
+    private static final RowMapper<SectionDto> SECTION = (rs, i) -> new SectionDto(
+        UUID.fromString(rs.getString("id")),
+        UUID.fromString(rs.getString("school_id")),
+        UUID.fromString(rs.getString("grade_id")),
+        rs.getString("grade_name"),
+        UUID.fromString(rs.getString("academic_year_id")),
+        rs.getString("code"),
+        rs.getString("name"),
+        rs.getString("curriculum_id") == null ? null : UUID.fromString(rs.getString("curriculum_id")),
+        rs.getString("strategy_code"),
+        (Integer) rs.getObject("capacity"),
+        rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id"))
+    );
+
     public Optional<SectionDto> findSection(UUID id) {
         var rows = jdbc.query(
             "SELECT s.id, s.school_id, s.grade_id, g.name AS grade_name, s.academic_year_id, " +
-            "       s.code, s.name, s.curriculum_id, s.strategy_code, s.capacity " +
+            "       s.code, s.name, s.curriculum_id, s.strategy_code, s.capacity, s.campus_id " +
             "FROM section s JOIN grade g ON g.id = s.grade_id WHERE s.id = ?",
-            (rs, i) -> new SectionDto(
-                UUID.fromString(rs.getString("id")),
-                UUID.fromString(rs.getString("school_id")),
-                UUID.fromString(rs.getString("grade_id")),
-                rs.getString("grade_name"),
-                UUID.fromString(rs.getString("academic_year_id")),
-                rs.getString("code"),
-                rs.getString("name"),
-                rs.getString("curriculum_id") == null ? null : UUID.fromString(rs.getString("curriculum_id")),
-                rs.getString("strategy_code"),
-                (Integer) rs.getObject("capacity")
-            ),
-            id
+            SECTION, id
         );
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }

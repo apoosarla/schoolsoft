@@ -6,6 +6,7 @@ import com.schoolsoft.assessment.api.AssessmentDto;
 import com.schoolsoft.assessment.api.MarkDto;
 import com.schoolsoft.assessment.api.ReportCardDto;
 import com.schoolsoft.platform.web.NotFoundException;
+import com.schoolsoft.tenancy.api.AcademicYearGuard;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
@@ -21,9 +22,11 @@ import org.springframework.stereotype.Repository;
 public class AssessmentRepository {
 
     private final JdbcTemplate jdbc;
+    private final AcademicYearGuard academicYears;
     private final ObjectMapper json;
 
-    public AssessmentRepository(JdbcTemplate jdbc, ObjectMapper json) {
+    public AssessmentRepository(JdbcTemplate jdbc, ObjectMapper json, AcademicYearGuard academicYears) {
+        this.academicYears = academicYears;
         this.jdbc = jdbc;
         this.json = json;
     }
@@ -139,10 +142,12 @@ public class AssessmentRepository {
         );
     }
 
+    /** Marks belong to a year; a closed year refuses them (GAP-14). */
     public MarkDto enterMark(
         UUID schoolId, UUID assessmentComponentId, UUID studentId, Double rawMarks,
         String gradeLetter, String remarks, boolean isAbsent, UUID enteredByStaffId
     ) {
+        academicYears.requireOpenForAssessmentComponent(assessmentComponentId);
         UUID id = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO mark (id, school_id, assessment_component_id, student_id, raw_marks, grade_letter, remarks, is_absent, entered_by_staff_id) " +

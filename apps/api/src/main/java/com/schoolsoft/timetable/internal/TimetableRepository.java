@@ -1,5 +1,8 @@
 package com.schoolsoft.timetable.internal;
 
+import com.schoolsoft.platform.web.NotFoundException;
+import com.schoolsoft.schoolcalendar.api.WorkingDayService;
+import com.schoolsoft.timetable.api.SectionDayDto;
 import com.schoolsoft.timetable.api.TimetableSlotDto;
 import java.sql.Date;
 import java.sql.Time;
@@ -15,7 +18,12 @@ import org.springframework.stereotype.Repository;
 public class TimetableRepository {
 
     private final JdbcTemplate jdbc;
-    public TimetableRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final WorkingDayService workingDays;
+
+    public TimetableRepository(JdbcTemplate jdbc, WorkingDayService workingDays) {
+        this.jdbc = jdbc;
+        this.workingDays = workingDays;
+    }
 
     private static final RowMapper<TimetableSlotDto> MAPPER = (rs, i) -> new TimetableSlotDto(
         UUID.fromString(rs.getString("id")),
@@ -43,6 +51,38 @@ public class TimetableRepository {
 
     public List<TimetableSlotDto> forTeacher(UUID teacherStaffId) {
         return jdbc.query(SELECT + "WHERE t.teacher_staff_id = ? ORDER BY t.day_of_week, t.period_no", MAPPER, teacherStaffId);
+    }
+
+    /**
+     * The section's day for a specific date, resolved against the school
+     * calendar (CAL-03). On a holiday, a vacation day or a declared closure the
+     * period list is empty and the reason says why — the caller renders "school
+     * closed", not a blank grid.
+     */
+    public SectionDayDto forSectionOnDate(UUID sectionId, LocalDate date) {
+        var scope = jdbc.query(
+            "SELECT school_id, grade_id, campus_id FROM section WHERE id = ?",
+            (rs, i) -> new UUID[]{
+                UUID.fromString(rs.getString("school_id")),
+                UUID.fromString(rs.getString("grade_id")),
+                rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id"))
+            },
+            sectionId);
+        if (scope.isEmpty()) throw new NotFoundException("Section not found: " + sectionId);
+
+        var status = workingDays.statusOf(scope.get(0)[0], date, scope.get(0)[1], scope.get(0)[2]);
+        if (!status.working()) {
+            return new SectionDayDto(date, false, status.reason(), status.calendarKind(), List.of());
+        }
+
+        // A date is known here, so the slot's effective window is applied — the
+        // week view has no date to apply it with (TT-05 remains open).
+        List<TimetableSlotDto> slots = jdbc.query(
+            SELECT + "WHERE t.section_id = ? AND t.day_of_week = ? " +
+            "  AND t.effective_from <= ? AND COALESCE(t.effective_to, 'infinity'::date) >= ? " +
+            "ORDER BY t.period_no",
+            MAPPER, sectionId, date.getDayOfWeek().getValue(), Date.valueOf(date), Date.valueOf(date));
+        return new SectionDayDto(date, true, status.reason(), status.calendarKind(), slots);
     }
 
     /** Throws {@link IllegalArgumentException} (mapped to 400 by GlobalExceptionHandler) if the teacher already has an overlapping slot. */

@@ -13,5 +13,6 @@ public record StaffDto(
     String phone,
     String employmentType,
     LocalDate joinedOn,
-    boolean isActive
+    boolean isActive,
+    UUID campusId
 ) {}

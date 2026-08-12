@@ -5,6 +5,7 @@ import com.schoolsoft.admissions.internal.AdmissionsRepository;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.publicsite.api.PublicSchoolDto;
+import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.tenancy.api.GradeDto;
 import java.time.LocalDate;
 import java.util.List;
@@ -38,11 +39,14 @@ public class PublicLookupRepository {
     private final JdbcTemplate platformJdbc;
     private final DataSource dataSource;
     private final AdmissionsRepository admissionsRepo;
+    private final WorkingDayService workingDays;
 
-    public PublicLookupRepository(JdbcTemplate platformJdbc, DataSource dataSource, AdmissionsRepository admissionsRepo) {
+    public PublicLookupRepository(JdbcTemplate platformJdbc, DataSource dataSource,
+                                  AdmissionsRepository admissionsRepo, WorkingDayService workingDays) {
         this.platformJdbc = platformJdbc;
         this.dataSource = dataSource;
         this.admissionsRepo = admissionsRepo;
+        this.workingDays = workingDays;
     }
 
     private record ChainRow(UUID id, String schemaName) {}
@@ -94,6 +98,22 @@ public class PublicLookupRepository {
                 (rs, i) -> new GradeDto(UUID.fromString(rs.getString("id")), rs.getString("code"), rs.getString("name"), rs.getInt("sort_order")),
                 schoolId
             );
+        });
+    }
+
+    /**
+     * The school's published calendar for a date range (CAL-07). Resolved
+     * through {@link WorkingDayService} rather than reading the calendar table
+     * directly, so the public site shows the same days off as the parent app —
+     * pattern, holidays, working Saturdays and closures all applied once.
+     */
+    public List<WorkingDayService.DayStatus> calendar(
+        String chainSlug, String schoolSlug, LocalDate from, LocalDate to
+    ) {
+        return withTenant(chainSlug, jdbc -> {
+            UUID schoolId = schoolIdForSlug(jdbc, schoolSlug)
+                .orElseThrow(() -> new NotFoundException("No school for slug: " + schoolSlug));
+            return workingDays.calendar(schoolId, from, to, null, null);
         });
     }
 

@@ -61,17 +61,24 @@ public class RoleController {
         return repo.listStaffWithRoles(schoolId);
     }
 
-    public record AssignRoleRequest(@NotNull UUID staffId, @NotNull UUID schoolId, @NotBlank String roleCode) {}
+    /**
+     * {@code scopeType} defaults to {@code school}; pass {@code campus} with the
+     * campus id in {@code scopeId} to make the holder a campus-level admin.
+     */
+    public record AssignRoleRequest(
+        @NotNull UUID staffId, @NotNull UUID schoolId, @NotBlank String roleCode,
+        String scopeType, UUID scopeId
+    ) {}
 
     @PostMapping("/staff-roles/assign")
     public ResponseEntity<Void> assign(@RequestBody AssignRoleRequest req) {
-        repo.assignRole(req.staffId(), req.schoolId(), req.roleCode());
+        repo.assignRole(req.staffId(), req.schoolId(), req.roleCode(), req.scopeType(), req.scopeId());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/staff-roles/unassign")
     public ResponseEntity<Void> unassign(@RequestBody AssignRoleRequest req) {
-        repo.unassignRole(req.staffId(), req.schoolId(), req.roleCode());
+        repo.unassignRole(req.staffId(), req.schoolId(), req.roleCode(), req.scopeType(), req.scopeId());
         return ResponseEntity.noContent().build();
     }
 

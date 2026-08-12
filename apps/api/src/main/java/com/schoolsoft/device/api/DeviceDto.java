@@ -6,6 +6,7 @@ import java.util.UUID;
 public record DeviceDto(
     UUID id,
     UUID schoolId,
+    UUID campusId,
     String kind,
     String vendor,
     String model,

@@ -68,10 +68,40 @@ class AttendanceCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-01 — statuses persist correctly, but no monthly attendance percentage is computed "
-        + "anywhere (the dashboard reports today's raw present count only), so late/half-day/excused "
-        + "weighting has no consumer (Phase 1).")
     void cert_ATT_04_statusesComputeIntoTheMonthlyPercentage() {
+        String token = teacherToken(cbse(), 0);
+        UUID sectionId = currentFocusSection(cbse());
+        // A student no other scenario marks, so the week is this test's alone.
+        UUID studentId = studentsIn(sectionId).get(5);
+
+        Map<String, String> week = Map.of(
+            "2026-08-03", "present",
+            "2026-08-04", "late",
+            "2026-08-05", "half_day",
+            "2026-08-06", "excused",
+            "2026-08-07", "absent");
+        week.forEach((date, status) -> {
+            var marked = post("/v1/attendance/mark", body(
+                "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+                "onDate", date, "status", status, "markedByStaffId", cbse().teacherStaffIds().get(0)), token);
+            assertThat(marked.getStatusCode()).isEqualTo(HttpStatus.OK);
+        });
+
+        var summary = get("/v1/attendance/students/" + studentId
+            + "/summary?from=2026-08-03&to=2026-08-07", token);
+        assertThat(summary.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var body = summary.getBody();
+
+        assertThat(body.get("workingDays").asInt()).isEqualTo(5);
+        // Excused leaves the denominator rather than counting as an absence.
+        assertThat(body.get("consideredDays").asInt()).isEqualTo(4);
+        assertThat(body.get("present").asInt()).isEqualTo(1);
+        assertThat(body.get("late").asInt()).isEqualTo(1);
+        assertThat(body.get("halfDay").asInt()).isEqualTo(1);
+        assertThat(body.get("excused").asInt()).isEqualTo(1);
+        assertThat(body.get("absent").asInt()).isEqualTo(1);
+        // Present + late (present, just not on time) + half a day, over four days.
+        assertThat(body.get("percentage").asDouble()).isEqualTo(62.5);
     }
 
     @Test @Tag("P1")
@@ -122,9 +152,41 @@ class AttendanceCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-01 — no working-day denominator and no enrolment-window-aware percentage for a "
-        + "mid-year joiner or leaver (Phase 1).")
     void cert_ATT_10_percentageUsesTheEnrolmentWindowAsDenominator() {
+        String token = principalToken(cbse());
+        // Section B, not the focus section: these two enrolments would otherwise
+        // join the roster every other attendance scenario marks.
+        UUID sectionId = sectionOf(cbse(), cbse().currentAy().code(), cbse().focusGradeCode(), "B");
+
+        // Joined on 15 July: the 13 working days from then to month end are the
+        // whole of their denominator, not July's 23.
+        UUID joiner = createStudent("ATT10-JOIN-" + UUID.randomUUID().toString().substring(0, 6));
+        enrol(joiner, sectionId, "2026-07-15", null, token);
+
+        var joinerSummary = get("/v1/attendance/students/" + joiner
+            + "/summary?from=2026-07-01&to=2026-07-31", token);
+        assertThat(joinerSummary.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(joinerSummary.getBody().get("workingDays").asInt()).isEqualTo(13);
+        assertThat(joinerSummary.getBody().get("enrolledFrom").asText()).isEqualTo("2026-07-15");
+
+        // Left on 15 July: the 11 working days up to then.
+        UUID leaver = createStudent("ATT10-LEFT-" + UUID.randomUUID().toString().substring(0, 6));
+        enrol(leaver, sectionId, "2026-07-01", "2026-07-15", token);
+
+        var leaverSummary = get("/v1/attendance/students/" + leaver
+            + "/summary?from=2026-07-01&to=2026-07-31", token);
+        assertThat(leaverSummary.getBody().get("workingDays").asInt()).isEqualTo(11);
+        assertThat(leaverSummary.getBody().get("enrolledTo").asText()).isEqualTo("2026-07-15");
+
+        // A full-year student over the same month is measured against all 23.
+        var fullYear = get("/v1/attendance/students/" + firstStudentIn(currentFocusSection(cbse()))
+            + "/summary?from=2026-07-01&to=2026-07-31", token);
+        assertThat(fullYear.getBody().get("workingDays").asInt()).isEqualTo(23);
+
+        inChainDo(jdbc -> {
+            jdbc.update("DELETE FROM enrolment WHERE student_id IN (?, ?)", joiner, leaver);
+            jdbc.update("DELETE FROM student WHERE id IN (?, ?)", joiner, leaver);
+        });
     }
 
     @Test @Tag("P2")
@@ -134,9 +196,28 @@ class AttendanceCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("Attendance accepts a future date and a date outside the student's enrolment window; neither "
-        + "is validated in AttendanceRepository.mark. New gap found in Phase 0.")
     void cert_ATT_12_futureOrOutOfWindowDatesAreRefused() {
+        String token = teacherToken(cbse(), 0);
+        UUID sectionId = currentFocusSection(cbse());
+        UUID studentId = studentsIn(sectionId).get(7);
+        String futureDate = java.time.LocalDate.now().plusDays(7).toString();
+
+        var future = post("/v1/attendance/mark", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "onDate", futureDate, "status", "present"), token);
+        assertThat(future.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(future.getBody().get("message").asText()).contains("future date");
+
+        // The student's enrolment in this section starts with the current AY, so
+        // a date from the previous year is outside their window here.
+        var beforeEnrolment = post("/v1/attendance/mark", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "onDate", "2026-03-03", "status", "present"), token);
+        assertThat(beforeEnrolment.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(beforeEnrolment.getBody().get("message").asText()).contains("not enrolled");
+
+        assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? "
+            + "AND on_date IN (?::date, '2026-03-03')", studentId, futureDate)).isZero();
     }
 
     @Test @Tag("P2")
@@ -146,6 +227,29 @@ class AttendanceCertTest extends AbstractCertificationTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    private UUID createStudent(String admissionNo) {
+        var created = post("/v1/people/students", Map.of(
+            "schoolId", cbse().id(), "admissionNo", admissionNo,
+            "firstName", "Certification", "lastName", "Candidate",
+            "dob", "2015-05-05", "gender", "male"), principalToken(cbse()));
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return UUID.fromString(created.getBody().get("id").asText());
+    }
+
+    /** Enrols, then closes the window when {@code endsOn} is given. */
+    private void enrol(UUID studentId, UUID sectionId, String startsOn, String endsOn, String token) {
+        var enrolled = post("/v1/enrolment", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "academicYearId", cbse().currentAy().id(), "startsOn", startsOn), token);
+        assertThat(enrolled.getStatusCode()).isEqualTo(HttpStatus.OK);
+        if (endsOn != null) {
+            UUID enrolmentId = UUID.fromString(enrolled.getBody().get("id").asText());
+            var closed = post("/v1/enrolment/" + enrolmentId + "/status",
+                body("status", "withdrawn", "endsOn", endsOn), token);
+            assertThat(closed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+    }
 
     private UUID registerDevice(String serialNo) {
         var created = post("/v1/devices", body("schoolId", cbse().id(), "kind", "biometric",

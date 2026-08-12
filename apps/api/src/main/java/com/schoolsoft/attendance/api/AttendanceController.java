@@ -57,6 +57,14 @@ public class AttendanceController {
         return repo.forStudent(studentId, from, to);
     }
 
+    /** Attendance percentage over a range, against the school-calendar denominator. */
+    @GetMapping("/students/{studentId}/summary")
+    public AttendanceSummaryDto summary(
+        @PathVariable UUID studentId, @RequestParam LocalDate from, @RequestParam LocalDate to
+    ) {
+        return repo.summaryForStudent(studentId, from, to);
+    }
+
     // -------------------------- Leave --------------------------
 
     public record LeaveRequest(

@@ -1,5 +1,6 @@
 package com.schoolsoft.tenancy.api;
 
+import com.schoolsoft.audit.api.AuditService;
 import com.schoolsoft.tenancy.internal.SchoolRepository;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -14,7 +15,12 @@ import org.springframework.web.bind.annotation.*;
 public class SchoolController {
 
     private final SchoolRepository repo;
-    public SchoolController(SchoolRepository repo) { this.repo = repo; }
+    private final AuditService audit;
+
+    public SchoolController(SchoolRepository repo, AuditService audit) {
+        this.repo = repo;
+        this.audit = audit;
+    }
 
     @GetMapping("/schools")
     public List<SchoolDto> list() { return repo.list(); }
@@ -77,6 +83,27 @@ public class SchoolController {
         return repo.createAcademicYear(schoolId, req.code(), req.startsOn(), req.endsOn(), req.isCurrent());
     }
 
+    public record AcademicYearStatusRequest(@NotBlank String status, UUID actingStaffId, String reason) {}
+
+    /**
+     * Drives the year through planning → active → closed, and back out of
+     * closed via an explicit, reasoned reopen (GAP-14). Closure is what makes
+     * last year's attendance, marks and invoices read-only; reopening is
+     * audited so "who let this be edited after closure" has an answer.
+     */
+    @PostMapping("/academic-years/{academicYearId}/status")
+    public AcademicYearDto setAcademicYearStatus(
+        @PathVariable UUID academicYearId, @RequestBody AcademicYearStatusRequest req
+    ) {
+        AcademicYearDto before = repo.findAcademicYear(academicYearId);
+        AcademicYearDto after = repo.setAcademicYearStatus(
+            academicYearId, req.status(), req.actingStaffId(), req.reason());
+        audit.record("academic_year.status_changed", "academic_year", academicYearId,
+            java.util.Map.of("status", before.status()),
+            java.util.Map.of("status", after.status(), "reason", req.reason() == null ? "" : req.reason()));
+        return after;
+    }
+
     // -------------------------- Term --------------------------
 
     @GetMapping("/academic-years/{academicYearId}/terms")
@@ -106,13 +133,14 @@ public class SchoolController {
 
     public record CreateSectionRequest(
         @NotNull UUID gradeId, @NotNull UUID academicYearId, @NotBlank String code, @NotBlank String name,
-        @NotBlank String strategyCode, Integer capacity
+        @NotBlank String strategyCode, Integer capacity, UUID campusId
     ) {}
 
     @PostMapping("/schools/{schoolId}/sections")
     public SectionDto createSection(@PathVariable UUID schoolId, @RequestBody CreateSectionRequest req) {
         return repo.createSection(
-            schoolId, req.gradeId(), req.academicYearId(), req.code(), req.name(), req.strategyCode(), req.capacity()
+            schoolId, req.gradeId(), req.academicYearId(), req.code(), req.name(), req.strategyCode(),
+            req.capacity(), req.campusId()
         );
     }
 

@@ -1,5 +1,6 @@
 package com.schoolsoft.people.internal;
 
+import com.schoolsoft.iam.api.Authz;
 import com.schoolsoft.people.api.GuardianDto;
 import com.schoolsoft.people.api.PeopleController;
 import com.schoolsoft.people.api.StaffDto;
@@ -19,7 +20,11 @@ import org.springframework.stereotype.Repository;
 public class PeopleRepository {
 
     private final JdbcTemplate jdbc;
-    public PeopleRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final Authz authz;
+    public PeopleRepository(JdbcTemplate jdbc, Authz authz) {
+        this.jdbc = jdbc;
+        this.authz = authz;
+    }
 
     private static final RowMapper<StudentDto> STUDENT = (rs, i) -> new StudentDto(
         UUID.fromString(rs.getString("id")),
@@ -138,12 +143,27 @@ public class PeopleRepository {
     }
 
     public List<StaffDto> listStaff(UUID schoolId, String q) {
-        String sql =
+        List<Object> args = new java.util.ArrayList<>();
+        args.add(schoolId);
+        StringBuilder sql = new StringBuilder(
             "SELECT id, school_id, employee_no, first_name, last_name, email, phone, " +
-            "       employment_type, joined_on, is_active " +
-            "FROM staff WHERE school_id = ?" +
-            (q == null || q.isBlank() ? "" : " AND (email ILIKE ? OR first_name ILIKE ? OR employee_no = ?)") +
-            " ORDER BY first_name";
+            "       employment_type, joined_on, is_active, campus_id " +
+            "FROM staff WHERE school_id = ?");
+        if (q != null && !q.isBlank()) {
+            sql.append(" AND (email ILIKE ? OR first_name ILIKE ? OR employee_no = ?)");
+            args.add("%" + q + "%");
+            args.add("%" + q + "%");
+            args.add(q);
+        }
+        // A campus-level admin sees their campus's staff and no one else's (GAP-24).
+        List<UUID> campusScope = authz.campusScopeOfCurrentUser();
+        if (!campusScope.isEmpty()) {
+            sql.append(" AND campus_id IN (")
+               .append(String.join(",", campusScope.stream().map(x -> "?").toList()))
+               .append(")");
+            args.addAll(campusScope);
+        }
+        sql.append(" ORDER BY first_name");
         RowMapper<StaffDto> mapper = (rs, i) -> new StaffDto(
             UUID.fromString(rs.getString("id")),
             UUID.fromString(rs.getString("school_id")),
@@ -154,11 +174,10 @@ public class PeopleRepository {
             rs.getString("phone"),
             rs.getString("employment_type"),
             rs.getDate("joined_on") == null ? null : rs.getDate("joined_on").toLocalDate(),
-            rs.getBoolean("is_active")
+            rs.getBoolean("is_active"),
+            rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id"))
         );
-        if (q == null || q.isBlank()) return jdbc.query(sql, mapper, schoolId);
-        String like = "%" + q + "%";
-        return jdbc.query(sql, mapper, schoolId, like, like, q);
+        return jdbc.query(sql.toString(), mapper, args.toArray());
     }
 
     /**

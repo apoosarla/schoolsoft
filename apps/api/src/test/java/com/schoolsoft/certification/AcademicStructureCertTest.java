@@ -1,6 +1,7 @@
 package com.schoolsoft.certification;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.schoolsoft.certification.support.AbstractCertificationTest;
 import java.util.Map;
@@ -8,6 +9,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 
 /** CERT-ACAD — academic year & structure setup. */
@@ -38,14 +40,57 @@ class AcademicStructureCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-25 — no AY/term date validation: a term outside its academic year, or overlapping "
-        + "terms, are both accepted (Phase 1).")
     void cert_ACAD_02_termOutsideTheYearOrOverlappingTermsAreRejected() {
+        String token = principalToken(cbse());
+        UUID ayId = cbse().currentAy().id();
+        String termsPath = "/v1/tenancy/academic-years/" + ayId + "/terms";
+
+        // The AY runs 2026-04-01 .. 2027-03-31; this term starts before it.
+        var outside = post(termsPath, Map.of(
+            "code", "T0", "name", "Pre-year term", "startsOn", "2026-03-01", "endsOn", "2026-05-31"), token);
+        assertThat(outside.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(outside.getBody().get("message").asText()).contains("outside academic year");
+
+        // T1 and T2 already exist in the fixture; anything straddling them collides.
+        var overlapping = post(termsPath, Map.of(
+            "code", "T1B", "name", "Overlapping term", "startsOn", "2026-06-01", "endsOn", "2026-11-30"), token);
+        assertThat(overlapping.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(overlapping.getBody().get("message").asText()).contains("overlaps");
+
+        assertThat(count("SELECT count(*) FROM term WHERE academic_year_id = ?", ayId)).isEqualTo(2);
+
+        // The database enforces it too, so a racing writer cannot slip past the
+        // pre-check the API does.
+        assertThatThrownBy(() -> inChainDo(jdbc -> jdbc.update(
+            "INSERT INTO term (id, academic_year_id, code, name, starts_on, ends_on) " +
+            "VALUES (gen_random_uuid(), ?, 'T9', 'Direct write', '2026-03-01', '2026-05-31')", ayId)))
+            .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test @Tag("P2")
-    @Disabled("GAP-25 — academic years may overlap; no EXCLUDE constraint on daterange (Phase 1).")
     void cert_ACAD_03_overlappingAcademicYearsAreRejected() {
+        String token = principalToken(cbse());
+
+        var overlapping = post("/v1/tenancy/schools/" + cbse().id() + "/academic-years",
+            Map.of("code", "2026-27-DUP", "startsOn", "2026-10-01", "endsOn", "2027-09-30", "isCurrent", false),
+            token);
+        assertThat(overlapping.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(overlapping.getBody().get("message").asText()).contains("overlaps");
+        assertThat(count("SELECT count(*) FROM academic_year WHERE school_id = ?", cbse().id())).isEqualTo(2);
+
+        // A year that abuts without overlapping is fine, and is cleaned up after.
+        var abutting = post("/v1/tenancy/schools/" + cbse().id() + "/academic-years",
+            Map.of("code", "2027-28", "startsOn", "2027-04-01", "endsOn", "2028-03-31", "isCurrent", false),
+            token);
+        assertThat(abutting.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID abuttingId = UUID.fromString(abutting.getBody().get("id").asText());
+        inChainDo(jdbc -> jdbc.update("DELETE FROM academic_year WHERE id = ?", abuttingId));
+
+        // And the exclusion constraint holds against a direct write.
+        assertThatThrownBy(() -> inChainDo(jdbc -> jdbc.update(
+            "INSERT INTO academic_year (id, school_id, code, starts_on, ends_on, is_current) " +
+            "VALUES (gen_random_uuid(), ?, '2026-27-RAW', '2026-10-01', '2027-09-30', FALSE)", cbse().id())))
+            .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test @Tag("P1")

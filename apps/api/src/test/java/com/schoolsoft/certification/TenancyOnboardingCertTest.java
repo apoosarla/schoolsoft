@@ -146,9 +146,89 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("GAP-24 — campus is decorative: section/staff/timetable_slot carry no campus_id, "
-        + "so campus-scoped structure and a campus-level admin role cannot be expressed (Phase 1).")
     void cert_TEN_07_multiCampusStructureIsCampusScoped() {
+        String token = principalToken(cbse());
+        UUID annex = cbse().annexCampusId();
+        UUID main = cbse().mainCampusId();
+
+        // A section opened on the annex, and a teacher who works there.
+        var annexSection = post("/v1/tenancy/schools/" + cbse().id() + "/sections", Map.of(
+            "gradeId", gradeOf(cbse(), cbse().focusGradeCode()), "academicYearId", cbse().currentAy().id(),
+            "code", "AX", "name", "Grade 5-AX (Annex)", "strategyCode", cbse().strategyCode(),
+            "capacity", 30, "campusId", annex), token);
+        assertThat(annexSection.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID annexSectionId = UUID.fromString(annexSection.getBody().get("id").asText());
+        assertThat(UUID.fromString(annexSection.getBody().get("campusId").asText())).isEqualTo(annex);
+
+        // Sections created without a campus land on the primary one, so nothing
+        // in a single-campus school has to think about this.
+        assertThat(queryOne("SELECT campus_id FROM section WHERE id = ?", UUID.class,
+            currentFocusSection(cbse()))).isEqualTo(main);
+
+        UUID annexStaffId = UUID.randomUUID();
+        UUID annexUserId = UUID.randomUUID();
+        try {
+            // A timetable slot inherits its section's campus rather than carrying
+            // its own answer.
+            UUID slotId = UUID.fromString(post("/v1/timetable/slots", Map.of(
+                "sectionId", annexSectionId, "subjectId", subjectOf(cbse(), cbse().subjectCodes().get(0)),
+                "teacherStaffId", cbse().teacherStaffIds().get(2), "dayOfWeek", 2, "periodNo", 1,
+                "startsAt", "09:00:00", "endsAt", "09:45:00", "room", "AX-1",
+                "effectiveFrom", "2026-04-01"), token).getBody().get("id").asText());
+            assertThat(queryOne("SELECT campus_id FROM timetable_slot WHERE id = ?", UUID.class, slotId))
+                .isEqualTo(annex);
+
+            // A campus-level admin: staff on the annex, granted their role over
+            // that campus rather than the school.
+            inChainDo(jdbc -> {
+                jdbc.update(
+                    "INSERT INTO staff (id, school_id, campus_id, employee_no, first_name, last_name, " +
+                    "  email, employment_type, joined_on) " +
+                    "VALUES (?, ?, ?, 'EMP-ANNEX-ADMIN', 'Annex', 'Admin', ?, 'permanent', '2024-04-01')",
+                    annexStaffId, cbse().id(), annex, "annex.admin+" + annexStaffId + "@oakridge.test");
+                jdbc.update(
+                    "INSERT INTO user_account (id, school_id, subject_type, subject_id, email) " +
+                    "VALUES (?, ?, 'staff', ?, ?)",
+                    annexUserId, cbse().id(), annexStaffId, "annex.admin+" + annexStaffId + "@oakridge.test");
+            });
+            var granted = post("/v1/iam/staff-roles/assign", Map.of(
+                "staffId", annexStaffId, "schoolId", cbse().id(), "roleCode", "vice_principal",
+                "scopeType", "campus", "scopeId", annex), token);
+            assertThat(granted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+            String annexAdminToken = tokenFor(cbse(), annexUserId, "staff");
+
+            // They see their campus's sections and staff, and nothing else's.
+            var theirSections = get("/v1/tenancy/schools/" + cbse().id() + "/sections?academicYearId="
+                + cbse().currentAy().id(), annexAdminToken);
+            assertThat(theirSections.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(theirSections.getBody()).hasSize(1);
+            assertThat(UUID.fromString(theirSections.getBody().get(0).get("id").asText()))
+                .isEqualTo(annexSectionId);
+
+            var theirStaff = get("/v1/people/staff?schoolId=" + cbse().id(), annexAdminToken);
+            assertThat(theirStaff.getBody()).hasSize(1);
+            assertThat(UUID.fromString(theirStaff.getBody().get(0).get("id").asText())).isEqualTo(annexStaffId);
+
+            // The school-wide principal still sees everything.
+            assertThat(get("/v1/tenancy/schools/" + cbse().id() + "/sections?academicYearId="
+                + cbse().currentAy().id(), token).getBody().size()).isGreaterThan(1);
+
+            // And a campus from another school cannot be attached to this one's structure.
+            var wrongCampus = post("/v1/tenancy/schools/" + cbse().id() + "/sections", Map.of(
+                "gradeId", gradeOf(cbse(), cbse().focusGradeCode()), "academicYearId", cbse().currentAy().id(),
+                "code", "XX", "name", "Wrong campus", "strategyCode", cbse().strategyCode(),
+                "capacity", 10, "campusId", cie().annexCampusId()), token);
+            assertThat(wrongCampus.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        } finally {
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM timetable_slot WHERE section_id = ?", annexSectionId);
+                jdbc.update("DELETE FROM section WHERE id = ?", annexSectionId);
+                jdbc.update("DELETE FROM staff_role WHERE staff_id = ?", annexStaffId);
+                jdbc.update("DELETE FROM user_account WHERE id = ?", annexUserId);
+                jdbc.update("DELETE FROM staff WHERE id = ?", annexStaffId);
+            });
+        }
     }
 
     @Test @Tag("P3")

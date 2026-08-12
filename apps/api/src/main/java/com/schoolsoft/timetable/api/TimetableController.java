@@ -21,6 +21,16 @@ public class TimetableController {
         return repo.forSection(sectionId);
     }
 
+    /** One date's periods, or the reason the school is closed that day (CAL-03). */
+    @GetMapping("/sections/{sectionId}/day")
+    public SectionDayDto forSectionOnDate(
+        @PathVariable UUID sectionId,
+        @RequestParam @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
+        return repo.forSectionOnDate(sectionId, date);
+    }
+
     @GetMapping("/teachers/{teacherStaffId}")
     public List<TimetableSlotDto> forTeacher(@PathVariable UUID teacherStaffId) {
         return repo.forTeacher(teacherStaffId);

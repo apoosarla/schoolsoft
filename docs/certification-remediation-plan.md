@@ -91,6 +91,40 @@ Code:
 
 **Certifies:** CAL-01..07, ACAD-02/03, ATT-02/04/10, TT-09, YEC-08, TEN-07, CAL-06.
 
+### Status — landed 2026-08-12
+
+Built as planned, in three migrations so the campus backfill can be run and
+re-run apart from the DDL: `V016__calendar_and_year_lifecycle.sql`,
+`V017__campus_scoping_add.sql`, `V018__campus_scoping_enforce.sql`.
+
+`WorkingDayService` is the single authority, and the retrofit went with it:
+attendance refuses a non-working day, the attendance percentage
+(`/v1/attendance/students/{id}/summary`) counts working days per enrolment
+segment rather than calendar days, the timetable day view
+(`/v1/timetable/sections/{id}/day`) returns the closure reason instead of an
+empty grid, and fee due dates shift onto the next working day. Declaring a
+same-day closure voids that day's marks — retained with `voided_at` and a
+reason, not deleted — and notifies the affected guardians.
+
+Two things the plan did not anticipate:
+
+- **Campus needed a default, not just a column.** Making `campus_id` NOT NULL
+  broke every existing insert path that had no reason to know about campuses.
+  A `BEFORE INSERT` trigger fills it from the school's primary campus (and
+  from the section, for a timetable slot), so single-campus schools never name
+  one and the same-school check still catches a cross-school mistake. `device`
+  gained `campus_id` too — DEV-01 asks which campus a reader hangs on.
+- **The device path had its own attendance INSERT**, which meant the calendar
+  and closed-year rules did not reach it. It now writes through
+  `AttendanceMarking` in the attendance module's API.
+
+ATT-12 (future date, out-of-enrolment-window) came along with the same guard,
+which partly closes GAP-39; the source-precedence half (ATT-08) stays open.
+TT-09 remains disabled — it needs the exam-timetable entity from Phase 5.
+
+**Executable scenarios: 43 → 58.** Newly passing: CAL-01..07, ACAD-02/03,
+ATT-04/10/12, YEC-08, TEN-07, DEV-01.
+
 ---
 
 ## Phase 2 — Structural integrity

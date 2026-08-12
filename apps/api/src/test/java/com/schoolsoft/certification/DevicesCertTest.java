@@ -13,10 +13,44 @@ import org.springframework.http.HttpStatus;
 class DevicesCertTest extends AbstractCertificationTest {
 
     @Test @Tag("P1")
-    @Disabled("GAP-24 — a device is registered to a school but there is no campus to bind it to. The "
-        + "unregistered-device half already holds (an unknown device id is rejected); campus scoping "
-        + "arrives in Phase 1.")
     void cert_DEV_01_deviceIsRegisteredToSchoolAndCampusAndUnknownDevicesAreRejected() {
+        String token = principalToken(cbse());
+        String serial = "CERT-DEV01-" + UUID.randomUUID().toString().substring(0, 6);
+
+        var registered = post("/v1/devices", body("schoolId", cbse().id(), "campusId", cbse().annexCampusId(),
+            "kind", "biometric", "vendor", "eSSL", "model", "K30", "serialNo", serial,
+            "location", "Annex gate", "apiKey", "cert-device-key"), token);
+        assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID deviceId = UUID.fromString(registered.getBody().get("id").asText());
+        assertThat(UUID.fromString(registered.getBody().get("campusId").asText()))
+            .isEqualTo(cbse().annexCampusId());
+
+        try {
+            // The registry can be read per campus — which gate a reader hangs on
+            // is the question an operator actually asks.
+            var onAnnex = get("/v1/devices?schoolId=" + cbse().id() + "&campusId=" + cbse().annexCampusId(), token);
+            assertThat(onAnnex.getBody()).hasSize(1);
+            var onMain = get("/v1/devices?schoolId=" + cbse().id() + "&campusId=" + cbse().mainCampusId(), token);
+            assertThat(onMain.getBody().findValuesAsText("id")).doesNotContain(deviceId.toString());
+
+            // A campus from another school is refused rather than stored.
+            var wrongCampus = post("/v1/devices", body("schoolId", cbse().id(),
+                "campusId", cie().mainCampusId(), "kind", "rfid_reader", "serialNo", serial + "-X",
+                "location", "Nowhere", "apiKey", "cert-device-key"), token);
+            assertThat(wrongCampus.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+            // An unregistered device writes nothing.
+            UUID unknownDevice = UUID.randomUUID();
+            UUID studentId = firstStudentIn(currentFocusSection(cbse()));
+            var rejected = post("/v1/devices/" + unknownDevice + "/events/student", body(
+                "schoolId", cbse().id(), "studentId", studentId, "sectionId", currentFocusSection(cbse()),
+                "onDate", "2026-08-05", "source", "biometric"), token);
+            assertThat(rejected.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? "
+                + "AND on_date = '2026-08-05' AND source = 'biometric'", studentId)).isZero();
+        } finally {
+            inChainDo(jdbc -> jdbc.update("DELETE FROM device WHERE id = ?", deviceId));
+        }
     }
 
     @Test @Tag("P1")

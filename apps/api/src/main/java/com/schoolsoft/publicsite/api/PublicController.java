@@ -35,6 +35,23 @@ public class PublicController {
         return repo.listGrades(chainSlug, schoolSlug);
     }
 
+    /** Published school calendar — the same day resolution the apps see (CAL-07). */
+    @GetMapping("/calendar")
+    public List<PublicCalendarDayDto> calendar(
+        @PathVariable String chainSlug, @PathVariable String schoolSlug,
+        @RequestParam @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate from,
+        @RequestParam @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        return repo.calendar(chainSlug, schoolSlug, from, to).stream()
+            .map(day -> new PublicCalendarDayDto(
+                day.date(), day.working(), day.reason(), day.calendarKind()))
+            .toList();
+    }
+
+    public record PublicCalendarDayDto(LocalDate date, boolean working, String reason, String calendarKind) {}
+
     public record ApplyRequest(
         @NotBlank String applicantFirstName, String applicantLastName, LocalDate applicantDob, String applicantGender,
         @NotNull UUID gradeId, @NotBlank String guardianName, @NotBlank String guardianPhone, String guardianEmail

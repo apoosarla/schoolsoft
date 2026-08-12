@@ -16,18 +16,23 @@ public class DeviceController {
     public DeviceController(DeviceRepository repo) { this.repo = repo; }
 
     @GetMapping
-    public List<DeviceDto> list(@RequestParam UUID schoolId, @RequestParam(required = false) String kind) {
-        return repo.list(schoolId, kind);
+    public List<DeviceDto> list(
+        @RequestParam UUID schoolId,
+        @RequestParam(required = false) String kind,
+        @RequestParam(required = false) UUID campusId
+    ) {
+        return repo.list(schoolId, kind, campusId);
     }
 
     public record RegisterRequest(
-        @NotNull UUID schoolId, @NotBlank String kind, String vendor, String model,
+        @NotNull UUID schoolId, UUID campusId, @NotBlank String kind, String vendor, String model,
         @NotBlank String serialNo, String location, String apiKey
     ) {}
 
     @PostMapping
     public DeviceDto register(@RequestBody RegisterRequest req) {
-        return repo.register(req.schoolId(), req.kind(), req.vendor(), req.model(), req.serialNo(), req.location(), req.apiKey());
+        return repo.register(req.schoolId(), req.campusId(), req.kind(), req.vendor(), req.model(),
+            req.serialNo(), req.location(), req.apiKey());
     }
 
     public record StudentEventRequest(

@@ -1,0 +1,20 @@
+package com.schoolsoft.timetable.api;
+
+import java.time.LocalDate;
+import java.util.List;
+
+/**
+ * A section's schedule for one calendar date (CAL-03).
+ *
+ * A closed day carries {@code working = false} and the reason the school is
+ * shut, with no periods — which is what lets a teacher or parent app say
+ * "school closed: Independence Day" rather than render an empty week and leave
+ * the reader guessing whether the timetable simply had not been published.
+ */
+public record SectionDayDto(
+    LocalDate date,
+    boolean working,
+    String reason,
+    String calendarKind,
+    List<TimetableSlotDto> slots
+) {}

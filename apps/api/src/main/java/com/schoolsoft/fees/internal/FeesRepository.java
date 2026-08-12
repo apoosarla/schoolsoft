@@ -6,6 +6,8 @@ import com.schoolsoft.fees.api.FeeInvoiceLineDto;
 import com.schoolsoft.fees.api.LedgerEntryDto;
 import com.schoolsoft.fees.api.PaymentDto;
 import com.schoolsoft.platform.web.NotFoundException;
+import com.schoolsoft.schoolcalendar.api.WorkingDayService;
+import com.schoolsoft.tenancy.api.AcademicYearGuard;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
@@ -19,7 +21,14 @@ import org.springframework.stereotype.Repository;
 public class FeesRepository {
 
     private final JdbcTemplate jdbc;
-    public FeesRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final AcademicYearGuard academicYears;
+    private final WorkingDayService workingDays;
+
+    public FeesRepository(JdbcTemplate jdbc, AcademicYearGuard academicYears, WorkingDayService workingDays) {
+        this.jdbc = jdbc;
+        this.academicYears = academicYears;
+        this.workingDays = workingDays;
+    }
 
     // -------------------------- Fee Head --------------------------
 
@@ -89,6 +98,14 @@ public class FeesRepository {
     public FeeInvoiceDto createInvoice(
         UUID schoolId, UUID studentId, String invoiceNo, String cycleLabel, LocalDate dueOn, List<InvoiceLineInput> lines
     ) {
+        // Billing into a closed year is the same mistake as editing its marks.
+        academicYears.requireOpenOn(schoolId, LocalDate.now());
+
+        // A due date on a holiday penalises a family for a day the school is
+        // shut, so it moves to the next day the office is open (GAP-01). One
+        // authority for that, shared with every attendance denominator.
+        LocalDate dueOnWorkingDay = workingDays.nextWorkingDayOnOrAfter(schoolId, dueOn, null, null);
+
         double subtotal = lines.stream().mapToDouble(l -> l.amount() - l.discount()).sum();
         double gst = lines.stream().mapToDouble(InvoiceLineInput::gst).sum();
         double total = subtotal + gst;
@@ -97,7 +114,7 @@ public class FeesRepository {
         jdbc.update(
             "INSERT INTO fee_invoice (id, school_id, student_id, invoice_no, cycle_label, due_on, subtotal, gst, total) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            id, schoolId, studentId, invoiceNo, cycleLabel, Date.valueOf(dueOn), subtotal, gst, total
+            id, schoolId, studentId, invoiceNo, cycleLabel, Date.valueOf(dueOnWorkingDay), subtotal, gst, total
         );
         for (InvoiceLineInput line : lines) {
             jdbc.update(
@@ -151,6 +168,7 @@ public class FeesRepository {
     public PaymentDto recordPayment(
         UUID schoolId, UUID feeInvoiceId, double amount, String gateway, String method, String idempotencyKey
     ) {
+        academicYears.requireOpenForInvoice(feeInvoiceId);
         var existing = jdbc.query(
             "SELECT " + PAYMENT_COLS + " FROM payment WHERE idempotency_key = ?", PAYMENT_MAPPER, idempotencyKey
         );

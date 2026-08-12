@@ -2,6 +2,7 @@ package com.schoolsoft.platform.web;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -35,6 +36,20 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> forbidden(ForbiddenException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
             .body(ApiError.of("forbidden", ex.getMessage()));
+    }
+
+    /**
+     * A constraint the application did not pre-check — an academic-year overlap
+     * racing another writer, a duplicate natural key, a trigger refusing a term
+     * outside its year. The database is the authority; the caller gets a 409
+     * with the reason rather than a 500 with "Unexpected error".
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> conflict(DataIntegrityViolationException ex) {
+        String detail = ex.getMostSpecificCause().getMessage();
+        log.warn("Constraint violation: {}", detail);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ApiError.of("constraint_violation", detail));
     }
 
     @ExceptionHandler(Exception.class)

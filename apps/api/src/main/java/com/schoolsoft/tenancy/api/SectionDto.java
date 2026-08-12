@@ -12,5 +12,6 @@ public record SectionDto(
     String name,
     UUID curriculumId,
     String strategyCode,
-    Integer capacity
+    Integer capacity,
+    UUID campusId
 ) {}

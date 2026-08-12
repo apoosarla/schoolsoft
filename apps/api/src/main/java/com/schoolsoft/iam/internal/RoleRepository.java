@@ -113,20 +113,40 @@ public class RoleRepository {
         );
     }
 
-    public void assignRole(UUID staffId, UUID schoolId, String roleCode) {
+    /**
+     * Grants a role over a scope. {@code scopeType} is {@code school} for the
+     * ordinary case and {@code campus} for an admin who runs one campus of a
+     * multi-campus school — {@link com.schoolsoft.iam.api.Authz#campusScopeOfCurrentUser()}
+     * turns the latter into the filter every campus-aware list applies (GAP-24).
+     */
+    public void assignRole(UUID staffId, UUID schoolId, String roleCode, String scopeType, UUID scopeId) {
+        String scope = scopeType == null || scopeType.isBlank() ? "school" : scopeType;
+        UUID target = "school".equals(scope) ? schoolId : scopeId;
+        if (target == null) {
+            throw new IllegalArgumentException("A " + scope + "-scoped grant needs a scopeId");
+        }
+        if ("campus".equals(scope)) {
+            Integer belongs = jdbc.queryForObject(
+                "SELECT count(*) FROM campus WHERE id = ? AND school_id = ?", Integer.class, target, schoolId);
+            if (belongs == null || belongs == 0) {
+                throw new IllegalArgumentException("Campus " + target + " is not in school " + schoolId);
+            }
+        }
         jdbc.update(
             "INSERT INTO staff_role (id, staff_id, role_code, scope_type, scope_id) " +
-            "VALUES (gen_random_uuid(), ?, ?, 'school', ?) " +
+            "VALUES (gen_random_uuid(), ?, ?, ?, ?) " +
             "ON CONFLICT (staff_id, role_code, scope_type, scope_id) DO UPDATE SET revoked_at = NULL",
-            staffId, roleCode, schoolId
+            staffId, roleCode, scope, target
         );
     }
 
-    public void unassignRole(UUID staffId, UUID schoolId, String roleCode) {
+    public void unassignRole(UUID staffId, UUID schoolId, String roleCode, String scopeType, UUID scopeId) {
+        String scope = scopeType == null || scopeType.isBlank() ? "school" : scopeType;
+        UUID target = "school".equals(scope) ? schoolId : scopeId;
         jdbc.update(
             "UPDATE staff_role SET revoked_at = now() " +
-            "WHERE staff_id = ? AND role_code = ? AND scope_type = 'school' AND scope_id = ? AND revoked_at IS NULL",
-            staffId, roleCode, schoolId
+            "WHERE staff_id = ? AND role_code = ? AND scope_type = ? AND scope_id = ? AND revoked_at IS NULL",
+            staffId, roleCode, scope, target
         );
     }
 

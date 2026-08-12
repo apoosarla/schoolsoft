@@ -1,5 +1,6 @@
 package com.schoolsoft.device.internal;
 
+import com.schoolsoft.attendance.api.AttendanceMarking;
 import com.schoolsoft.device.api.DeviceDto;
 import com.schoolsoft.platform.web.NotFoundException;
 import java.nio.charset.StandardCharsets;
@@ -19,19 +20,28 @@ import org.springframework.stereotype.Repository;
  * pattern (§11), the caller (a school-side biometric/RFID bridge) has already
  * resolved the raw device read to a student/staff id — this repository does
  * not own a card/fingerprint-to-person mapping table, only the resulting
- * attendance write. Mirrors the direct-SQL-against-shared-tables convention
- * already used by AdmissionsRepository rather than adding a Java dependency
- * on the attendance module's internal package.
+ * attendance write.
+ *
+ * Student events go through {@link AttendanceMarking} rather than a direct
+ * INSERT: a gate punch is attendance, and the closed-year and working-day rules
+ * that govern a teacher's mark have to govern it too. Writing the row here
+ * instead is what made the two paths drift apart in the first place.
  */
 @Repository
 public class DeviceRepository {
 
     private final JdbcTemplate jdbc;
-    public DeviceRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final AttendanceMarking attendance;
+
+    public DeviceRepository(JdbcTemplate jdbc, AttendanceMarking attendance) {
+        this.jdbc = jdbc;
+        this.attendance = attendance;
+    }
 
     private static final RowMapper<DeviceDto> MAPPER = (rs, i) -> new DeviceDto(
         UUID.fromString(rs.getString("id")),
         UUID.fromString(rs.getString("school_id")),
+        rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id")),
         rs.getString("kind"),
         rs.getString("vendor"),
         rs.getString("model"),
@@ -43,20 +53,39 @@ public class DeviceRepository {
     );
 
     private static final String COLS =
-        "id, school_id, kind, vendor, model, serial_no, location, assigned_vehicle_id, last_seen_at, is_active";
+        "id, school_id, campus_id, kind, vendor, model, serial_no, location, assigned_vehicle_id, " +
+        "last_seen_at, is_active";
 
-    public List<DeviceDto> list(UUID schoolId, String kind) {
-        String sql = "SELECT " + COLS + " FROM device WHERE school_id = ?" + (kind == null ? "" : " AND kind = ?") + " ORDER BY location";
-        return kind == null ? jdbc.query(sql, MAPPER, schoolId) : jdbc.query(sql, MAPPER, schoolId, kind);
+    public List<DeviceDto> list(UUID schoolId, String kind, UUID campusId) {
+        StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM device WHERE school_id = ?");
+        List<Object> args = new java.util.ArrayList<>();
+        args.add(schoolId);
+        if (kind != null) {
+            sql.append(" AND kind = ?");
+            args.add(kind);
+        }
+        if (campusId != null) {
+            sql.append(" AND campus_id = ?");
+            args.add(campusId);
+        }
+        sql.append(" ORDER BY location");
+        return jdbc.query(sql.toString(), MAPPER, args.toArray());
     }
 
+    /**
+     * A device is registered to one campus. When the caller does not name one
+     * the school's primary campus stands in (the trigger in V018 does the
+     * defaulting), which keeps single-campus schools from having to care.
+     */
     public DeviceDto register(
-        UUID schoolId, String kind, String vendor, String model, String serialNo, String location, String apiKey
+        UUID schoolId, UUID campusId, String kind, String vendor, String model, String serialNo,
+        String location, String apiKey
     ) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO device (id, school_id, kind, vendor, model, serial_no, location, api_key_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            id, schoolId, kind, vendor, model, serialNo, location, sha256(apiKey)
+            "INSERT INTO device (id, school_id, campus_id, kind, vendor, model, serial_no, location, api_key_hash) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            id, schoolId, campusId, kind, vendor, model, serialNo, location, sha256(apiKey)
         );
         return jdbc.queryForObject("SELECT " + COLS + " FROM device WHERE id = ?", MAPPER, id);
     }
@@ -70,13 +99,7 @@ public class DeviceRepository {
     /** Biometric or RFID event for a student — writes a day-level {@code attendance_record}. */
     public DeviceDto ingestStudentEvent(UUID deviceId, UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate, String source) {
         DeviceDto device = touchAndGet(deviceId);
-        jdbc.update(
-            "INSERT INTO attendance_record (id, school_id, student_id, section_id, on_date, status, source) " +
-            "VALUES (?, ?, ?, ?, ?, 'present', ?) " +
-            "ON CONFLICT (student_id, on_date) WHERE period_no IS NULL DO UPDATE SET " +
-            "  status = 'present', source = EXCLUDED.source, marked_at = now()",
-            UUID.randomUUID(), schoolId, studentId, sectionId, Date.valueOf(onDate), source
-        );
+        attendance.markDay(schoolId, studentId, sectionId, onDate, "present", source);
         return device;
     }
 

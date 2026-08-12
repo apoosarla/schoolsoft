@@ -866,7 +866,12 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
 
 ### Lifecycle-blocking (nothing above them can be certified)
 
-- **GAP-01 — No school calendar / holiday master.** There is no
+- **GAP-01 — No school calendar / holiday master.** ✅ **Closed 2026-08-12
+  (Phase 1).** `working_day_pattern` + `school_calendar` (V016), grade- and
+  campus-scoped, with `WorkingDayService` as the single authority; attendance
+  refuses a non-working day, closures void the day's marks and notify
+  guardians, the timetable day view and fee due dates read the same calendar.
+  Original finding: There is no
   `holiday`/`calendar` table anywhere in the chain migrations (only
   `admission_event` and `announcement`). Consequence is wide: attendance
   percentages have no working-day denominator, the timetable renders periods
@@ -938,7 +943,10 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   attendance. This is a daily-operations blocker for any school. Blocks
   TT-08, STF-03.
 
-- **GAP-14 — No closed-year lock.** `academic_year` has only `is_current`;
+- **GAP-14 — No closed-year lock.** ✅ **Closed 2026-08-12 (Phase 1).**
+  `academic_year.status` (planning | active | closed) with `AcademicYearGuard`
+  on the attendance, marks and fee write paths, and an audited
+  reopen-with-reason. Original finding: `academic_year` has only `is_current`;
   prior-year attendance, marks, and invoices remain editable indefinitely,
   with no reopen-with-approval path. Blocks YEC-08, GRAD-05.
 
@@ -948,7 +956,11 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   enforce it (with an explicit over-capacity override + reason). Blocks
   ACAD-06, YEC-05.
 
-- **GAP-25 — No AY / term date validation.** Terms are not constrained to sit
+- **GAP-25 — No AY / term date validation.** ✅ **Closed 2026-08-12
+  (Phase 1).** Terms are checked against their year and each other (API
+  pre-check for the message, trigger + `EXCLUDE USING gist` for the
+  guarantee); academic years cannot overlap. Original finding: Terms are not
+  constrained to sit
   inside their academic year, and two academic years may overlap. Only
   `ends_on > starts_on` is enforced. Blocks ACAD-02/03.
 
@@ -970,7 +982,11 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   changes, mark unlock, fee waiver / concession grants, and role grants —
   actor, before/after, reason. Blocks SEC-08, ASMT-07, FEE-10, STF-04.
 
-- **GAP-24 — Campus is decorative.** The `campus` table exists, but
+- **GAP-24 — Campus is decorative.** ✅ **Closed 2026-08-12 (Phase 1).**
+  `campus_id` on `section`, `staff`, `timetable_slot` and `device`
+  (V017 backfill → V018 NOT NULL + same-school triggers), campus-scoped role
+  grants, and campus filtering on the section, staff and device lists.
+  Original finding: The `campus` table exists, but
   `section`, `staff`, and `timetable_slot` carry no `campus_id`. Campus-scoped
   timetables, attendance, holidays, and campus-admin roles are therefore
   impossible in a multi-campus school. Blocks TEN-07, CAL-06.
@@ -1111,11 +1127,12 @@ several are security-relevant.
   guard, so simultaneous payments lose an update and can over-credit; there is
   no advance-payment path (FEE-17).
 
-- **GAP-39 — Attendance accepts impossible dates.** No validation against a
-  future date or a date outside the student's enrolment window (ATT-12), and a
-  replayed device backlog overwrites a manual correction because no source
-  precedence rule exists (ATT-08). Offline teacher marking has no conflict
-  surface at all (ATT-09).
+- **GAP-39 — Attendance accepts impossible dates.** ⚠️ **Partly closed
+  2026-08-12 (Phase 1):** the write now refuses a future date (in the school's
+  own timezone) and a date outside the student's enrolment window (ATT-12).
+  Still open: a replayed device backlog overwrites a manual correction because
+  no source precedence rule exists (ATT-08), and offline teacher marking has no
+  conflict surface at all (ATT-09).
 
 - **GAP-40 — Timetable reads ignore effective dates.** Slots carry
   `effective_from`/`effective_to`; `forSection`/`forTeacher` select every row,
