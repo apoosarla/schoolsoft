@@ -2,7 +2,7 @@
   "name": "@schoolsoft/driver-app",
   "version": "0.1.0",
   "private": true,
-  "description": "Driver app — OTP login, route/vehicle selection, trip start/end with live GPS ping (schoolsoft-design.md §15).",
+  "description": "Driver app \u2014 OTP login, route/vehicle selection, trip start/end with live GPS ping (schoolsoft-design.md \u00a715).",
   "scripts": {
     "dev": "next dev -p 3005",
     "build": "next build",
@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@schoolsoft/api-client": "*",
     "next": "^14.2.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

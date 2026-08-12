@@ -1,0 +1,79 @@
+name: Certification
+
+# The gate for docs/certification-test-scenarios.md. P1 scenarios block the
+# merge; P2/P3 run afterwards and only report. A scenario blocked by a product
+# gap is @Disabled naming that gap, so a red build here means a regression, not
+# unfinished work — the unfinished work is the disabled list, published as an
+# artifact by the P1 job.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  p1-gate:
+    name: P1 scenarios (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # Testcontainers starts its own Postgres against the runner's Docker
+      # daemon; no service container is declared here on purpose, so the same
+      # command works locally.
+      - name: Run P1 certification scenarios
+        working-directory: apps/api
+        run: ./mvnw --batch-mode test -Dgroups=P1,harness
+
+      - name: Publish certification status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: certification-status
+          path: |
+            apps/api/target/certification-status.md
+            apps/api/target/surefire-reports/
+
+  p2-p3-report:
+    name: P2/P3 scenarios (report only)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Run P2/P3 certification scenarios
+        working-directory: apps/api
+        run: ./mvnw --batch-mode test -Dgroups=P2,P3
+
+  frontends:
+    name: Frontend typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck every app and the shared client
+        run: |
+          for workspace in packages/api-client apps/admin-web apps/hq-web apps/public-site \
+                           apps/parent-app apps/teacher-app apps/driver-app; do
+            echo "== $workspace"
+            (cd "$workspace" && npx tsc --noEmit)
+          done

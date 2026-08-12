@@ -129,6 +129,20 @@
       <artifactId>spring-security-test</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <!-- Certification suite: Testcontainers Postgres. When
+         SCHOOLSOFT_TEST_DB_URL is set, CertDatabase uses that server instead
+         and no container is started (see CertDatabase). -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -136,6 +150,20 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- The CI gate runs `-Dgroups=P1`; P2/P3 are report-only. Without
+               this, a run that selects a tag no class carries would fail the
+               build rather than report zero tests. -->
+          <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
+          <!-- One JVM for the whole suite: the certification fixture is seeded
+               once against a single database. -->
+          <forkCount>1</forkCount>
+          <reuseForks>true</reuseForks>
+        </configuration>
       </plugin>
     </plugins>
   </build>

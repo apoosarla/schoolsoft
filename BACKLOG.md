@@ -775,17 +775,17 @@ are different claims:
 
 ## Open items
 
-- **Session expiry isn't handled.** Letting a session sit overnight and
-  reopening a page (found on `parent-app`, but every app shares the same
-  `apiFetch` pattern so likely universal) surfaces the real gap: the
-  access token expires, the API correctly 403s, and the app just... sits
-  there — an empty error banner and a permanent "Loading…", no redirect to
-  `/login`, no attempt at the refresh-token flow `POST /v1/auth/refresh`
-  already supports (see the platform-admin login entry above, which
-  exercises refresh for `hq-web`). Worth a shared fix: on a 401/403,
-  either transparently refresh and retry once, or clear the session and
-  bounce to `/login` — ideally in the shared `packages/api-client`
-  transport so every app gets it at once rather than six separate patches.
+- ~~**Session expiry isn't handled.**~~ Fixed 2026-08-12 as part of Phase 0.
+  Two halves. Server: `TenantResolverFilter` answered an expired token with
+  **403** (it used `sendError`, which re-dispatches through `/error` and is
+  then rejected as an anonymous request) — it now writes a 401 with a
+  `token_expired` code, which is what a client can key a refresh on. Client:
+  `packages/api-client`'s transport does the 401 → refresh → replay itself,
+  single-flighted so a screen firing six requests spends one refresh token,
+  and falls back to clearing the session and bouncing to `/login`. All six
+  frontends now take their transport from that package instead of six copies
+  of `apiFetch` (their DTO and endpoint wrappers still live per app).
+  Certified by SEC-02.
 
 
 - **Remaining frontend surfaces — mostly closed out.** All six frontends
@@ -1049,6 +1049,122 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
 
 _(No GAP-28: session expiry / token refresh is already an Open item above and
 is referenced by scenario SEC-02 rather than duplicated here.)_
+
+---
+
+## Gaps found by running the certification suite (2026-08-12)
+
+The Phase 0 harness (`apps/api/src/test/java/com/schoolsoft/certification/`)
+turned the catalogue into 205 executable scenarios against a seeded two-school
+chain. 43 pass today; the remaining 162 are `@Disabled` naming what blocks
+them. Most name one of GAP-01..30 above. The gaps below are what only showed
+up once the scenarios were actually run — they are *not* in that list, and
+several are security-relevant.
+
+`docs/certification-status.md` (generated) is the full per-scenario map.
+
+### Security-relevant (P1 scenarios, no gap id previously)
+
+- **GAP-31 — Authorization stops at the school boundary.** Row-level security
+  scopes reads to `school_id` and nothing narrower. A teacher's token reads any
+  section, student, or mark in the school (STF-05); a guardian's token reads
+  every student in the school, not their own children (SEC-10). Needs a
+  teacher-scope predicate over `section_subject_teacher` / `staff_role` and a
+  guardian-scope predicate over `guardian_student`, applied in the repositories
+  rather than per-controller.
+
+- **GAP-32 — Screen access is advisory.** `/v1/iam/me/screens` reports what the
+  UI should show, but no endpoint checks it: a hand-crafted call to any module
+  succeeds for any authenticated staff account regardless of role grants
+  (SEC-03).
+
+- **GAP-33 — OTP has no rate limit and a permanent dev bypass.** `OtpStore`
+  accepts the literal code `000000` unconditionally — its own doc comment says
+  the bypass is gated on a property, and it is not — and nothing throttles
+  repeated verify attempts (SEC-01).
+
+- **GAP-34 — Platform-admin actions are unaudited.** `audit_log` lives in the
+  chain schema and `ChainAdminController` writes nothing, so chain provisioning
+  and cross-chain reads leave no trail (SEC-06).
+
+### Correctness
+
+- **GAP-35 — Notification producers are unwired.** `NotificationService` and
+  `DomainEvents` exist and have no callers anywhere: no absence alert, no
+  admission acknowledgement, no boarding notification, no emergency fan-out
+  (ADM-01/14, ATT-03, COMM-06, TRN-03). GAP-21 covers preferences and delivery
+  management on top of a pipeline that nothing currently feeds.
+
+- **GAP-36 — Dates are derived in the JVM's zone, not the school's.**
+  `school.timezone` is stored and never read; `DeviceController` and
+  `EnrolmentRepository.transfer` call `LocalDate.now()`. On a UTC server a
+  23:55 IST event lands on the next day (NFR-08).
+
+- **GAP-37 — Assessment lifecycle and report-card locks are not enforced.**
+  `enterMark` upserts regardless of the assessment being `locked` (ASMT-06),
+  `generateReportCard` always inserts, so a locked card can be superseded
+  silently (ASMT-12), and component weights are never validated against the
+  assessment total (ASMT-03).
+
+- **GAP-38 — Invoice totals are computed by read-modify-write.**
+  `recordPayment` reads `invoice.paid` and writes back `paid + amount` with no
+  guard, so simultaneous payments lose an update and can over-credit; there is
+  no advance-payment path (FEE-17).
+
+- **GAP-39 — Attendance accepts impossible dates.** No validation against a
+  future date or a date outside the student's enrolment window (ATT-12), and a
+  replayed device backlog overwrites a manual correction because no source
+  precedence rule exists (ATT-08). Offline teacher marking has no conflict
+  surface at all (ATT-09).
+
+- **GAP-40 — Timetable reads ignore effective dates.** Slots carry
+  `effective_from`/`effective_to`; `forSection`/`forTeacher` select every row,
+  so a mid-year revision rewrites history instead of superseding it from a date
+  (TT-05). There is also no day view and no after-hours suppression for the
+  parent/student view (TT-07).
+
+- **GAP-41 — No admissions state machine on the server.**
+  `AdmissionsRepository.transition` writes any target state, so `lead →
+  enrolled` is accepted (ADM-05). Conversion to a student creates no guardian
+  and links none, leaving the family without a login (ADM-10), and an applicant
+  cannot be invoiced at `fee_pending` because `fee_invoice.student_id` is NOT
+  NULL (ADM-13).
+
+### Missing surfaces (endpoints the scenarios expect and nothing provides)
+
+- **GAP-42 — Fee structure and concession have no API.** `fee_structure`,
+  `fee_structure_line` and `fee_concession` exist in the schema with no
+  endpoint, and invoice creation consults neither, so a school cannot define
+  next year's fees or apply a concession as a visible line (FEE-01, FEE-03).
+  GST is stored per line but never computed from `fee_head.gst_rate_pct`
+  (FEE-13).
+
+- **GAP-43 — No operational reports.** No day-book / collection report
+  (FEE-14), no outstanding-dues report (FEE-15), no chronic-absence report
+  (ATT-11), no admissions funnel analytics (ADM-15), and no setup-readiness
+  report for sections missing a primary teacher (ACAD-07).
+
+- **GAP-44 — Staff records are read-only.** No staff-creation endpoint, and
+  `assignSectionSubjectTeacher` accepts any staff id without checking for a
+  teaching role (STF-01).
+
+- **GAP-45 — Odds and ends surfaced by individual scenarios.** No event/RSVP
+  entity (CAL-08); no section-delete endpoint (TT-10); assignment submissions
+  carry no late flag (LMS-02); quiz attempts are scored by the caller rather
+  than auto-scored, with no reattempt policy (LMS-04); transport check-in
+  carries no client event id, so an offline replay cannot be de-duplicated
+  (TRN-07); no trip reassignment on breakdown (TRN-08); a failed board-export
+  job is terminal because `process()` accepts only `queued` (INT-01); device
+  heartbeat is recorded but nothing alerts on an offline device (DEV-03) and
+  ingestion trusts the `schoolId` in the request body rather than the device's
+  registration (DEV-04); no alerting path carries tenant context (NFR-10).
+
+_Fixed while building the harness: an expired or malformed bearer token
+returned **403** rather than 401, because `TenantResolverFilter` used
+`sendError`, which re-dispatches through `/error` and is then rejected as an
+anonymous request. Clients key their refresh on 401, so this made transparent
+refresh impossible. The filter now writes the 401 (and a `token_expired` code)
+directly._
 
 ---
 

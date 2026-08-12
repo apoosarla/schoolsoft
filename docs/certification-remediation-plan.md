@@ -29,6 +29,31 @@ Without this, the 150 scenarios are prose and nothing below is measurable.
 **Exit:** the suite runs green on today's capability set, with ~60 scenarios
 disabled and each one naming its gap.
 
+### Status — landed 2026-08-12
+
+Built: `CertificationFixture` (one chain, two schools, a full prior academic
+year of history, optional 2,000-student bulk seed behind
+`-Dschoolsoft.cert.bulk-students`), `AbstractCertificationTest` (Testcontainers
+Postgres, or an external server via `SCHOOLSOFT_TEST_DB_URL`), one test class
+per CERT area, `CatalogueSyncTest` (the catalogue and the suite fail the build
+if they drift, and it generates `docs/certification-status.md`), and the
+`.github/workflows/certification.yml` gate — P1 blocking, P2/P3 report-only.
+
+Session expiry is closed: the API returned **403** for an expired token
+(`sendError` re-dispatches through `/error`, which the security chain rejects
+anonymously), so no client could key a refresh on it. It now returns 401 with a
+`token_expired` code, and `packages/api-client` does a single-flighted
+401 → refresh → replay. All six frontends now share that transport.
+
+The estimate of "~60 disabled" was optimistic. Of 205 catalogue scenarios,
+**43 pass and 162 are disabled** — and 15 new gaps (GAP-31..45 in `BACKLOG.md`)
+surfaced that the document-only review had missed, four of them
+security-relevant: authorization stops at the school boundary (a teacher reads
+any teacher's data, a guardian reads any child's), screen access is advisory
+only, OTP has no rate limit and a permanent `000000` bypass, and platform-admin
+actions are unaudited. Those four are worth pulling ahead of the phase order
+below.
+
 ---
 
 ## Phase 1 — Temporal foundation

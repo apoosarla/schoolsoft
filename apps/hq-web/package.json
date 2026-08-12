@@ -2,7 +2,7 @@
   "name": "@schoolsoft/hq-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Chain HQ Console — tenant/school onboarding, cross-school dashboards (schoolsoft-design.md §15).",
+  "description": "Chain HQ Console \u2014 tenant/school onboarding, cross-school dashboards (schoolsoft-design.md \u00a715).",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@schoolsoft/api-client": "*",
     "next": "^14.2.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

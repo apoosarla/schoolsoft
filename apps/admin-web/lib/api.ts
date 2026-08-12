@@ -9,6 +9,10 @@
  * OTP code "000000" (OtpStore's dev bypass).
  */
 
+import { createApiClient } from "@schoolsoft/api-client";
+
+export { ApiError } from "@schoolsoft/api-client";
+
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
 const SESSION_KEY = "schoolsoft_admin_session";
 
@@ -43,43 +47,26 @@ export function clearSession(): void {
   window.localStorage.removeItem(SESSION_KEY);
 }
 
-export class ApiError extends Error {
-  status: number;
-  code?: string;
-  constructor(status: number, message: string, code?: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+/**
+ * Transport comes from @schoolsoft/api-client: one implementation of bearer
+ * auth, error mapping, and the 401 → refresh → replay dance, shared by every
+ * app instead of six copies that drift.
+ */
+const client = createApiClient({
+  baseUrl: API_BASE,
+  getAccessToken: () => getSession()?.accessToken ?? null,
+  getRefreshToken: () => getSession()?.refreshToken ?? null,
+  onTokensRefreshed: ({ accessToken, refreshToken }) => {
+    const current = getSession();
+    if (current) setSession({ ...current, accessToken, refreshToken });
+  },
+  onSessionExpired: () => {
+    clearSession();
+    if (typeof window !== "undefined") window.location.href = "/login";
+  },
+});
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const session = getSession();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(session ? { Authorization: `Bearer ${session.accessToken}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  if (!res.ok) {
-    let message = res.statusText;
-    let code: string | undefined;
-    try {
-      const body = await res.json();
-      message = body.message ?? message;
-      code = body.code;
-    } catch {
-      // response wasn't JSON — fall back to statusText
-    }
-    throw new ApiError(res.status, message, code);
-  }
-
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
-}
+const apiFetch = client.apiFetch;
 
 export async function startOtp(identifier: string, chainSlug: string): Promise<void> {
   await apiFetch<{ status: string }>("/v1/auth/otp/start", {

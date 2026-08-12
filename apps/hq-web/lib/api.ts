@@ -9,8 +9,13 @@
  * below are unchanged from before this flow existed.
  */
 
+import { createApiClient } from "@schoolsoft/api-client";
+
+export { ApiError } from "@schoolsoft/api-client";
+
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
 const TOKEN_KEY = "schoolsoft_hq_platform_admin_token";
+const REFRESH_KEY = "schoolsoft_hq_platform_admin_refresh";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -23,49 +28,42 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(REFRESH_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(REFRESH_KEY);
+}
+
+export function setRefreshToken(token: string): void {
+  window.localStorage.setItem(REFRESH_KEY, token);
 }
 
 export function isLoggedIn(): boolean {
   return !!getToken();
 }
 
-export class ApiError extends Error {
-  status: number;
-  code?: string;
-  constructor(status: number, message: string, code?: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+/**
+ * Transport comes from @schoolsoft/api-client, so the platform console gets the
+ * same 401 → refresh → replay behaviour as the chain-scoped apps rather than
+ * dropping the operator at a dead screen when a 15-minute access token lapses.
+ */
+const client = createApiClient({
+  baseUrl: API_BASE,
+  getAccessToken: () => getToken(),
+  getRefreshToken: () => getRefreshToken(),
+  onTokensRefreshed: ({ accessToken, refreshToken }) => {
+    setToken(accessToken);
+    setRefreshToken(refreshToken);
+  },
+  onSessionExpired: () => {
+    clearToken();
+    if (typeof window !== "undefined") window.location.href = "/login";
+  },
+});
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  if (!res.ok) {
-    let message = res.statusText;
-    let code: string | undefined;
-    try {
-      const body = await res.json();
-      message = body.message ?? message;
-      code = body.code;
-    } catch {
-      // response wasn't JSON (e.g. network-level error page) — fall back to statusText
-    }
-    throw new ApiError(res.status, message, code);
-  }
-
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
-}
+const apiFetch = client.apiFetch;
 
 export async function startPlatformOtp(email: string): Promise<void> {
   await apiFetch<{ status: string }>("/v1/auth/platform-admin/otp/start", {
@@ -75,11 +73,15 @@ export async function startPlatformOtp(email: string): Promise<void> {
 }
 
 export async function verifyPlatformOtp(email: string, code: string): Promise<void> {
-  const res = await apiFetch<{ accessToken: string }>("/v1/auth/platform-admin/otp/verify", {
-    method: "POST",
-    body: JSON.stringify({ email, code }),
-  });
+  const res = await apiFetch<{ accessToken: string; refreshToken: string }>(
+    "/v1/auth/platform-admin/otp/verify",
+    {
+      method: "POST",
+      body: JSON.stringify({ email, code }),
+    }
+  );
   setToken(res.accessToken);
+  setRefreshToken(res.refreshToken);
 }
 
 export type ChainDto = {

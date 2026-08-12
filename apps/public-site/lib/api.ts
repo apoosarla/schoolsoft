@@ -5,45 +5,22 @@
  * SCHOOL_SLUG below) since there's no directory-of-schools concept yet.
  */
 
+import { createApiClient } from "@schoolsoft/api-client";
+
+export { ApiError } from "@schoolsoft/api-client";
+
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
 
 export const CHAIN_SLUG = "smoketest";
 export const SCHOOL_SLUG = "oakridge-hyd";
 
-export class ApiError extends Error {
-  status: number;
-  code?: string;
-  constructor(status: number, message: string, code?: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+/** Transport comes from @schoolsoft/api-client; this app never holds a token. */
+const client = createApiClient({
+  baseUrl: API_BASE,
+  getAccessToken: () => null,
+});
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  if (!res.ok) {
-    let message = res.statusText;
-    let code: string | undefined;
-    try {
-      const body = await res.json();
-      message = body.message ?? message;
-      code = body.code;
-    } catch {
-      // response wasn't JSON — fall back to statusText
-    }
-    throw new ApiError(res.status, message, code);
-  }
-
-  return (await res.json()) as T;
-}
+const apiFetch = client.apiFetch;
 
 export type PublicSchoolDto = {
   id: string;

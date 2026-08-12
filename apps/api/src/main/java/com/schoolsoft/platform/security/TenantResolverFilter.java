@@ -2,6 +2,7 @@ package com.schoolsoft.platform.security;
 
 import com.schoolsoft.platform.tenancy.TenantContext;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -49,13 +50,13 @@ public class TenantResolverFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String auth = req.getHeader("Authorization");
         if (auth == null || !auth.startsWith("Bearer ")) {
-            res.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Missing bearer token");
+            unauthorized(res, "missing_token", "Missing bearer token");
             return;
         }
         try {
             Claims c = jwt.parse(auth.substring(7));
             if (!"access".equals(c.get("typ", String.class))) {
-                res.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Wrong token type");
+                unauthorized(res, "wrong_token_type", "Wrong token type");
                 return;
             }
             String cid = c.get("cid", String.class);
@@ -75,10 +76,25 @@ public class TenantResolverFilter extends OncePerRequestFilter {
 
             chain.doFilter(req, res);
         } catch (JwtException ex) {
-            res.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Bad token: " + ex.getMessage());
+            // Expiry is the common case and the one every client keys its refresh on.
+            String code = (ex instanceof ExpiredJwtException) ? "token_expired" : "bad_token";
+            unauthorized(res, code, "Bad token: " + ex.getMessage());
         } finally {
             TenantContext.clear();
             SecurityContextHolder.clearContext();
         }
+    }
+
+    /**
+     * Writes the 401 body directly rather than calling
+     * {@code HttpServletResponse#sendError}: sendError re-dispatches through
+     * {@code /error}, which the security chain then rejects as an anonymous
+     * request and rewrites to 403 — turning "your token expired, refresh it"
+     * into "you may not do this", which no client can act on.
+     */
+    private void unauthorized(HttpServletResponse res, String code, String message) throws IOException {
+        res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        res.setContentType("application/json");
+        res.getWriter().write("{\"code\":\"" + code + "\",\"message\":\"" + message.replace("\"", "'") + "\"}");
     }
 }

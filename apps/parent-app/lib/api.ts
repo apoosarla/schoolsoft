@@ -58,6 +58,15 @@ export function clearSession(): void {
 const client = createApiClient({
   baseUrl: API_BASE,
   getAccessToken: () => getSession()?.accessToken ?? null,
+  getRefreshToken: () => getSession()?.refreshToken ?? null,
+  onTokensRefreshed: ({ accessToken, refreshToken }) => {
+    const current = getSession();
+    if (current) setSession({ ...current, accessToken, refreshToken });
+  },
+  onSessionExpired: () => {
+    clearSession();
+    if (typeof window !== "undefined") window.location.href = "/login";
+  },
 });
 
 const auth = createAuthApi(client);
