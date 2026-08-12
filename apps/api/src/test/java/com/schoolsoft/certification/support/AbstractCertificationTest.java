@@ -238,4 +238,84 @@ public abstract class AbstractCertificationTest {
     protected UUID firstStudentIn(UUID sectionId) {
         return studentsIn(sectionId).get(0);
     }
+
+    // ------------------------------------------------------- elective blocks
+
+    /**
+     * A Cambridge-style option block on a school's focus section: two subjects
+     * offered as electives, an {@code elective_group} that lets a student pick
+     * exactly one, and two students who pick differently. Used by every
+     * scenario that has to prove the system follows a student's subject set
+     * rather than their section's (ACAD-09, ASMT-13, INT-02).
+     */
+    protected record ElectiveBlock(
+        UUID sectionId, UUID groupId, UUID subjectA, UUID subjectB,
+        UUID studentA, UUID studentB, UUID enrolmentA, UUID enrolmentB
+    ) {}
+
+    protected ElectiveBlock createElectiveBlock(SchoolSeed school, String prefix) {
+        String token = principalToken(school);
+        UUID sectionId = currentFocusSection(school);
+
+        UUID subjectA = UUID.fromString(post("/v1/tenancy/schools/" + school.id() + "/subjects",
+            java.util.Map.of("code", prefix + "-A", "name", prefix + " option A"), token)
+            .getBody().get("id").asText());
+        UUID subjectB = UUID.fromString(post("/v1/tenancy/schools/" + school.id() + "/subjects",
+            java.util.Map.of("code", prefix + "-B", "name", prefix + " option B"), token)
+            .getBody().get("id").asText());
+
+        post("/v1/tenancy/sections/" + sectionId + "/teachers", body(
+            "subjectId", subjectA, "teacherStaffId", school.teacherStaffIds().get(0),
+            "isPrimary", false, "isElective", true), token);
+        post("/v1/tenancy/sections/" + sectionId + "/teachers", body(
+            "subjectId", subjectB, "teacherStaffId", school.teacherStaffIds().get(1),
+            "isPrimary", false, "isElective", true), token);
+
+        UUID groupId = UUID.fromString(post("/v1/tenancy/schools/" + school.id() + "/elective-groups", body(
+            "academicYearId", school.currentAy().id(),
+            "gradeId", gradeOf(school, school.focusGradeCode()),
+            "code", prefix, "name", prefix + " option block",
+            "minPicks", 1, "maxPicks", 1,
+            "subjectIds", List.of(subjectA, subjectB)), token).getBody().get("id").asText());
+
+        List<UUID> students = studentsIn(sectionId);
+        UUID studentA = students.get(students.size() - 2);
+        UUID studentB = students.get(students.size() - 1);
+        UUID enrolmentA = enrolmentOf(studentA);
+        UUID enrolmentB = enrolmentOf(studentB);
+
+        post("/v1/enrolment/" + enrolmentA + "/elections", body(
+            "subjectId", subjectA, "electiveGroupId", groupId,
+            "effectiveFrom", school.currentAy().startsOn().toString()), token);
+        post("/v1/enrolment/" + enrolmentB + "/elections", body(
+            "subjectId", subjectB, "electiveGroupId", groupId,
+            "effectiveFrom", school.currentAy().startsOn().toString()), token);
+
+        return new ElectiveBlock(sectionId, groupId, subjectA, subjectB,
+            studentA, studentB, enrolmentA, enrolmentB);
+    }
+
+    protected void deleteElectiveBlock(ElectiveBlock block) {
+        inChainDo(jdbc -> {
+            jdbc.update("DELETE FROM student_subject WHERE elective_group_id = ?", block.groupId());
+            jdbc.update("DELETE FROM elective_group_option WHERE elective_group_id = ?", block.groupId());
+            jdbc.update("DELETE FROM elective_group WHERE id = ?", block.groupId());
+            jdbc.update("DELETE FROM timetable_slot WHERE subject_id IN (?, ?)",
+                block.subjectA(), block.subjectB());
+            jdbc.update("DELETE FROM mark WHERE assessment_component_id IN (" +
+                "SELECT ac.id FROM assessment_component ac JOIN assessment a ON a.id = ac.assessment_id " +
+                "WHERE a.subject_id IN (?, ?))", block.subjectA(), block.subjectB());
+            jdbc.update("DELETE FROM assessment_component WHERE assessment_id IN (" +
+                "SELECT id FROM assessment WHERE subject_id IN (?, ?))", block.subjectA(), block.subjectB());
+            jdbc.update("DELETE FROM assessment WHERE subject_id IN (?, ?)", block.subjectA(), block.subjectB());
+            jdbc.update("DELETE FROM section_subject_teacher WHERE subject_id IN (?, ?)",
+                block.subjectA(), block.subjectB());
+            jdbc.update("DELETE FROM subject WHERE id IN (?, ?)", block.subjectA(), block.subjectB());
+        });
+    }
+
+    protected UUID enrolmentOf(UUID studentId) {
+        return queryOne("SELECT id FROM enrolment WHERE student_id = ? AND status = 'active'",
+            UUID.class, studentId);
+    }
 }

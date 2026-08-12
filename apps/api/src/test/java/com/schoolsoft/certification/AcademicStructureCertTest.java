@@ -137,9 +137,40 @@ class AcademicStructureCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-10 — section.capacity is stored but never checked at enrolment or admission offer, "
-        + "and there is no over-capacity override with a reason (Phase 2).")
     void cert_ACAD_06_capacityBlocksOrFlagsTheOverCapacityEnrolment() {
+        String token = principalToken(cbse());
+        UUID sectionId = UUID.fromString(post("/v1/tenancy/schools/" + cbse().id() + "/sections", body(
+            "gradeId", gradeOf(cbse(), cbse().focusGradeCode()), "academicYearId", cbse().currentAy().id(),
+            "code", "CAP", "name", "Grade 5-CAP", "strategyCode", cbse().strategyCode(),
+            "capacity", 2), token).getBody().get("id").asText());
+
+        UUID first = createStudent();
+        UUID second = createStudent();
+        UUID third = createStudent();
+        try {
+            assertThat(enrol(first, sectionId, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(enrol(second, sectionId, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            var full = enrol(third, sectionId, null);
+            assertThat(full.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(full.getBody().get("message").asText()).contains("Section is full");
+            assertThat(count("SELECT count(*) FROM enrolment WHERE section_id = ? AND status = 'active'",
+                sectionId)).isEqualTo(2);
+
+            // The override is allowed, but it has to say why — and the reason
+            // stays on the enrolment.
+            var overridden = enrol(third, sectionId, "Sibling of an existing student; principal approved");
+            assertThat(overridden.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(queryOne("SELECT over_capacity_reason FROM enrolment WHERE student_id = ?",
+                String.class, third)).contains("principal approved");
+        } finally {
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM enrolment WHERE section_id = ?", sectionId);
+                jdbc.update("DELETE FROM student WHERE id IN (?, ?, ?)", first, second, third);
+                jdbc.update("DELETE FROM number_series WHERE scope_id = ?", sectionId);
+                jdbc.update("DELETE FROM section WHERE id = ?", sectionId);
+            });
+        }
     }
 
     @Test @Tag("P2")
@@ -184,14 +215,90 @@ class AcademicStructureCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-05 — subjects bind to sections only; there is no student_subject election, so marks, "
-        + "timetable and report cards cannot follow a student's own subject set (Phase 2).")
     void cert_ACAD_09_studentElectiveSubjectSetDrivesMarksTimetableAndReportCard() {
+        String token = principalToken(cie());
+        var block = createElectiveBlock(cie(), "ACAD09");
+        try {
+            // Each student's subject set carries their own option, not both.
+            var setA = get("/v1/enrolment/" + block.enrolmentA() + "/subjects", token).getBody();
+            var setB = get("/v1/enrolment/" + block.enrolmentB() + "/subjects", token).getBody();
+            assertThat(subjectIdsOf(setA)).contains(block.subjectA().toString())
+                .doesNotContain(block.subjectB().toString());
+            assertThat(subjectIdsOf(setB)).contains(block.subjectB().toString())
+                .doesNotContain(block.subjectA().toString());
+            // The section's compulsory subjects are in both.
+            assertThat(subjectIdsOf(setA)).contains(subjectOf(cie(), cie().subjectCodes().get(0)).toString());
+
+            // The timetable follows the same rule: an option period appears only
+            // for the student who takes it.
+            post("/v1/timetable/slots", body(
+                "sectionId", block.sectionId(), "subjectId", block.subjectA(),
+                "teacherStaffId", cie().teacherStaffIds().get(0), "dayOfWeek", 4, "periodNo", 7,
+                "startsAt", "14:00:00", "endsAt", "14:45:00", "room", "ACAD09-A",
+                "effectiveFrom", cie().currentAy().startsOn().toString()), token);
+            post("/v1/timetable/slots", body(
+                "sectionId", block.sectionId(), "subjectId", block.subjectB(),
+                "teacherStaffId", cie().teacherStaffIds().get(1), "dayOfWeek", 4, "periodNo", 7,
+                "startsAt", "14:00:00", "endsAt", "14:45:00", "room", "ACAD09-B",
+                "effectiveFrom", cie().currentAy().startsOn().toString()), token);
+
+            var weekA = get("/v1/timetable/students/" + block.studentA(), token).getBody();
+            assertThat(subjectIdsOf(weekA)).contains(block.subjectA().toString())
+                .doesNotContain(block.subjectB().toString());
+
+            // And marks: one for a subject the student does not take is refused
+            // rather than quietly stored against them.
+            UUID assessmentId = UUID.fromString(post("/v1/assessment", body(
+                "schoolId", cie().id(), "sectionId", block.sectionId(), "subjectId", block.subjectB(),
+                "termId", termOf(cie(), cie().currentAy().code(), "T1"),
+                "strategyCode", cie().strategyCode(), "name", "Option B paper",
+                "assessmentType", "Component", "maxMarks", 50.0, "weightPct", 100.0,
+                "scheduledOn", "2026-07-15"), token).getBody().get("id").asText());
+            UUID componentId = UUID.fromString(post("/v1/assessment/" + assessmentId + "/components", body(
+                "code", "PAPER", "name", "Paper", "maxMarks", 50.0, "weightPct", 100.0,
+                "sortOrder", 1), token).getBody().get("id").asText());
+
+            var wrongStudent = post("/v1/assessment/components/" + componentId + "/marks", body(
+                "schoolId", cie().id(), "studentId", block.studentA(), "rawMarks", 40.0,
+                "enteredByStaffId", cie().teacherStaffIds().get(1)), token);
+            assertThat(wrongStudent.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(wrongStudent.getBody().get("message").asText()).contains("does not take subject");
+
+            var rightStudent = post("/v1/assessment/components/" + componentId + "/marks", body(
+                "schoolId", cie().id(), "studentId", block.studentB(), "rawMarks", 40.0,
+                "enteredByStaffId", cie().teacherStaffIds().get(1)), token);
+            assertThat(rightStudent.getStatusCode()).isEqualTo(HttpStatus.OK);
+        } finally {
+            deleteElectiveBlock(block);
+        }
     }
 
     @Test @Tag("P1")
     @Disabled("GAP-01 — no working-day pattern or calendar master, so nothing computes a working-day "
         + "denominator or shifts a due date (Phase 1).")
     void cert_ACAD_10_workingDayPatternIsHonouredEverywhere() {
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private java.util.List<String> subjectIdsOf(com.fasterxml.jackson.databind.JsonNode rows) {
+        return rows.findValuesAsText("subjectId");
+    }
+
+    private UUID createStudent() {
+        var created = post("/v1/people/students", body(
+            "schoolId", cbse().id(), "firstName", "Capacity", "lastName", "Candidate",
+            "dob", "2015-03-03", "gender", "female"), principalToken(cbse()));
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return UUID.fromString(created.getBody().get("id").asText());
+    }
+
+    private org.springframework.http.ResponseEntity<com.fasterxml.jackson.databind.JsonNode> enrol(
+        UUID studentId, UUID sectionId, String overCapacityReason
+    ) {
+        return post("/v1/enrolment", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", sectionId,
+            "academicYearId", cbse().currentAy().id(), "startsOn", "2026-08-01",
+            "overCapacityReason", overCapacityReason), principalToken(cbse()));
     }
 }

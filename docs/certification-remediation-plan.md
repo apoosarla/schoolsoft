@@ -154,6 +154,50 @@ expensive the longer real data sits on top of them.
 
 **Certifies:** ACAD-06/09, ENR-02, ASMT-13, TT-01/03/04, INT-02, YEC-05.
 
+### Status — landed 2026-08-12
+
+`V019__student_subjects_and_identity.sql` carries all four gaps, because they
+are one shape change: who studies what, what they are called, how many fit, and
+when the day's periods run.
+
+- **`SubjectSetResolver`** is the rule, in one place: *a student's subject set
+  = the section's compulsory subjects + that student's elections*.
+  `section_subject_teacher.is_elective` separates the two, `elective_group`
+  holds the option block with its pick count, and `student_subject` records
+  the choice effective-dated so a mid-year change does not rewrite the marks
+  earned before it. Marks entry refuses a subject the student does not take,
+  `/v1/timetable/students/{id}` filters the section's week to their own
+  periods, the report-card payload carries their subjects, and a board export
+  lists each candidate's real option block.
+- **`NumberSeries`** issues admission and roll numbers under `SELECT … FOR
+  UPDATE`, with a partial unique index making roll numbers unique among a
+  section's active enrolments. Renumbering after a transfer is an explicit
+  endpoint, not a side effect — it changes what is written in every child's
+  exercise book.
+- **`SectionCapacity`** refuses a seat the section does not have, on both the
+  enrolment and admission-conversion paths, and takes an explicit
+  `overCapacityReason` that is stored on the enrolment.
+- **Bell schedules** (`bell_schedule` + `bell_period`, bound to grades) drive
+  slot times through `timetable_slot.period_id`; a trigger keeps the legacy
+  time columns in step, and a break refuses to hold a lesson. Room clashes are
+  now checked alongside teacher clashes, and publish-time warnings surface
+  teachers over `staff.max_weekly_periods`.
+
+Three things worth recording:
+
+- The roll-number index needed the migration to **refuse rather than
+  renumber**: which of two children keeps roll 12 is a school's decision. The
+  migration lists the collisions and stops.
+- A generated roll number has to start **past** whatever the section already
+  holds by hand, and skip anything typed in since — a seeded fixture found this
+  immediately.
+- Board export gained a **real schema check** even though the adapter is still
+  a stub: a candidate with no name, date of birth or subjects fails the job
+  here rather than at the board.
+
+**Executable scenarios: 58 → 66.** Newly passing: ACAD-06/09, ENR-02, ASMT-13,
+TT-01/03/04, INT-02. YEC-05 still needs Phase 6's reshuffle.
+
 ---
 
 ## Phase 3 — Daily-operations correctness

@@ -903,7 +903,11 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   while history stays queryable. Blocks XFER-01..08, COMM-08, TRN-09,
   LIB-05, GRAD-02.
 
-- **GAP-05 — No student-level subject election.**
+- **GAP-05 — No student-level subject election.** ✅ **Closed 2026-08-12
+  (Phase 2).** `elective_group` + `student_subject` (V019) with
+  `SubjectSetResolver` as the single rule (section's compulsory subjects + the
+  student's elections); marks entry, the student timetable, report cards and
+  board exports all read it. Original finding:
   `section_subject_teacher` binds subjects to a *section* only, so IGCSE /
   A-level option blocks and Class 11 streams cannot be represented. Marks
   entry, timetable, report cards, and board exports all currently assume a
@@ -950,8 +954,11 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   prior-year attendance, marks, and invoices remain editable indefinitely,
   with no reopen-with-approval path. Blocks YEC-08, GRAD-05.
 
-- **GAP-10 — `section.capacity` is decorative.** Stored and selected, never
-  checked. `capacity` appears in Java only for `vehicle` and one `SELECT` in
+- **GAP-10 — `section.capacity` is decorative.** ✅ **Closed 2026-08-12
+  (Phase 2).** `SectionCapacity` refuses a seat the section does not have on
+  both the enrolment and admission-conversion paths, and records
+  `enrolment.over_capacity_reason` when a school admits anyway. Original
+  finding: Stored and selected, never checked. `capacity` appears in Java only for `vehicle` and one `SELECT` in
   `SchoolRepository`. Enrolment and admission-offer paths both need to
   enforce it (with an explicit over-capacity override + reason). Blocks
   ACAD-06, YEC-05.
@@ -964,12 +971,20 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   inside their academic year, and two academic years may overlap. Only
   `ends_on > starts_on` is enforced. Blocks ACAD-02/03.
 
-- **GAP-26 — No admission / roll number policy.** `enrolment.roll_no` is free
+- **GAP-26 — No admission / roll number policy.** ✅ **Closed 2026-08-12
+  (Phase 2).** `number_series` + `NumberSeries` issue admission and roll
+  numbers under a row lock, a partial unique index makes a section's roll
+  numbers unique, and `POST /v1/enrolment/sections/{id}/renumber` re-sequences
+  after a transfer. Original finding: `enrolment.roll_no` is free
   text with no uniqueness constraint and no generator; admission numbers have
   no scheme at all. Renumbering after a section transfer is undefined.
   Blocks ENR-02.
 
 - **GAP-12 — Timetable: room clash unchecked, no bell-schedule master.**
+  ✅ **Closed 2026-08-12 (Phase 2).** `bell_schedule` + `bell_period` per grade
+  band with slots referencing a period (times follow the bell, breaks refuse
+  lessons), a room-clash check alongside the teacher one, and publish-time
+  warnings for teachers over `staff.max_weekly_periods`. Original finding:
   `TimetableRepository`'s clash query is teacher-only, so two sections can be
   put in the same room in the same period. Each slot also carries its own
   free-text `starts_at`/`ends_at`, so there is no period/bell master to

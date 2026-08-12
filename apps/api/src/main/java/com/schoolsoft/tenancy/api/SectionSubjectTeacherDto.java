@@ -9,5 +9,7 @@ public record SectionSubjectTeacherDto(
     String subjectName,
     UUID teacherStaffId,
     String teacherName,
-    boolean isPrimary
+    boolean isPrimary,
+    /** True when the section is taught this subject only to the students who elected it. */
+    boolean isElective
 ) {}

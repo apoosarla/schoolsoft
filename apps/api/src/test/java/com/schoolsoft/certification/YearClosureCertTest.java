@@ -42,8 +42,8 @@ class YearClosureCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("GAP-02 + GAP-10 — no reshuffle rules, and capacity is not enforced anywhere (Phases 2 "
-        + "and 6).")
+    @Disabled("GAP-02 — capacity is enforced as of Phase 2, but there are no reshuffle rules to apply it "
+        + "to: allocation across sections arrives with rollover (Phase 6).")
     void cert_YEC_05_sectionReshuffleRespectsCapacityAndSiblingPolicy() {
     }
 

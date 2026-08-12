@@ -4,6 +4,7 @@ import com.schoolsoft.iam.api.Authz;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.AcademicYearDto;
 import com.schoolsoft.tenancy.api.CampusDto;
+import com.schoolsoft.tenancy.api.ElectiveGroupDto;
 import com.schoolsoft.tenancy.api.GradeDto;
 import com.schoolsoft.tenancy.api.SchoolDto;
 import com.schoolsoft.tenancy.api.SectionDto;
@@ -393,14 +394,15 @@ public class SchoolRepository {
         rs.getString("subject_name"),
         UUID.fromString(rs.getString("teacher_staff_id")),
         rs.getString("teacher_name"),
-        rs.getBoolean("is_primary")
+        rs.getBoolean("is_primary"),
+        rs.getBoolean("is_elective")
     );
 
     public List<SectionSubjectTeacherDto> listSectionSubjectTeachers(UUID sectionId) {
         return jdbc.query(
             "SELECT sst.id, sst.section_id, sst.subject_id, sub.name AS subject_name, " +
             "       sst.teacher_staff_id, (st.first_name || ' ' || COALESCE(st.last_name, '')) AS teacher_name, " +
-            "       sst.is_primary " +
+            "       sst.is_primary, sst.is_elective " +
             "FROM section_subject_teacher sst " +
             "JOIN subject sub ON sub.id = sst.subject_id " +
             "JOIN staff st ON st.id = sst.teacher_staff_id " +
@@ -410,23 +412,96 @@ public class SchoolRepository {
     }
 
     public SectionSubjectTeacherDto assignSectionSubjectTeacher(
-        UUID sectionId, UUID subjectId, UUID teacherStaffId, boolean isPrimary
+        UUID sectionId, UUID subjectId, UUID teacherStaffId, boolean isPrimary, boolean isElective
     ) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO section_subject_teacher (id, section_id, subject_id, teacher_staff_id, is_primary) " +
-            "VALUES (?, ?, ?, ?, ?)",
-            id, sectionId, subjectId, teacherStaffId, isPrimary
+            "INSERT INTO section_subject_teacher (id, section_id, subject_id, teacher_staff_id, is_primary, " +
+            "  is_elective) VALUES (?, ?, ?, ?, ?, ?) " +
+            "ON CONFLICT (section_id, subject_id, teacher_staff_id) DO UPDATE SET " +
+            "  is_primary = EXCLUDED.is_primary, is_elective = EXCLUDED.is_elective",
+            id, sectionId, subjectId, teacherStaffId, isPrimary, isElective
         );
+        id = jdbc.queryForObject(
+            "SELECT id FROM section_subject_teacher WHERE section_id = ? AND subject_id = ? " +
+            "  AND teacher_staff_id = ?", UUID.class, sectionId, subjectId, teacherStaffId);
         return jdbc.queryForObject(
             "SELECT sst.id, sst.section_id, sst.subject_id, sub.name AS subject_name, " +
             "       sst.teacher_staff_id, (st.first_name || ' ' || COALESCE(st.last_name, '')) AS teacher_name, " +
-            "       sst.is_primary " +
+            "       sst.is_primary, sst.is_elective " +
             "FROM section_subject_teacher sst " +
             "JOIN subject sub ON sub.id = sst.subject_id " +
             "JOIN staff st ON st.id = sst.teacher_staff_id " +
             "WHERE sst.id = ?",
             SST, id
         );
+    }
+    // -------------------------- Elective groups --------------------------
+
+    /**
+     * Option blocks a grade offers in a year, each with its subjects. Read by
+     * the admin UI when a student's options are entered, and by
+     * {@code SubjectSetResolver}'s callers to show what is still unchosen.
+     */
+    public List<ElectiveGroupDto> listElectiveGroups(UUID schoolId, UUID academicYearId, UUID gradeId) {
+        StringBuilder sql = new StringBuilder(
+            "SELECT id, school_id, academic_year_id, grade_id, code, name, min_picks, max_picks " +
+            "FROM elective_group WHERE school_id = ?");
+        List<Object> args = new ArrayList<>();
+        args.add(schoolId);
+        if (academicYearId != null) { sql.append(" AND academic_year_id = ?"); args.add(academicYearId); }
+        if (gradeId != null) { sql.append(" AND grade_id = ?"); args.add(gradeId); }
+        sql.append(" ORDER BY code");
+
+        return jdbc.query(sql.toString(), (rs, i) -> {
+            UUID id = UUID.fromString(rs.getString("id"));
+            return new ElectiveGroupDto(
+                id,
+                UUID.fromString(rs.getString("school_id")),
+                UUID.fromString(rs.getString("academic_year_id")),
+                UUID.fromString(rs.getString("grade_id")),
+                rs.getString("code"),
+                rs.getString("name"),
+                rs.getInt("min_picks"),
+                rs.getInt("max_picks"),
+                listElectiveOptions(id)
+            );
+        }, args.toArray());
+    }
+
+    private List<ElectiveGroupDto.Option> listElectiveOptions(UUID electiveGroupId) {
+        return jdbc.query(
+            "SELECT o.subject_id, s.code, s.name, o.capacity FROM elective_group_option o " +
+            "JOIN subject s ON s.id = o.subject_id WHERE o.elective_group_id = ? ORDER BY s.code",
+            (rs, i) -> new ElectiveGroupDto.Option(
+                UUID.fromString(rs.getString("subject_id")), rs.getString("code"), rs.getString("name"),
+                (Integer) rs.getObject("capacity")),
+            electiveGroupId);
+    }
+
+    public ElectiveGroupDto createElectiveGroup(
+        UUID schoolId, UUID academicYearId, UUID gradeId, String code, String name,
+        int minPicks, int maxPicks, List<UUID> subjectIds
+    ) {
+        if (maxPicks < minPicks) {
+            throw new IllegalArgumentException("maxPicks must be at least minPicks");
+        }
+        if (subjectIds.size() < maxPicks) {
+            throw new IllegalArgumentException(
+                "Elective group " + code + " offers " + subjectIds.size() + " subject(s) but allows "
+                + maxPicks + " pick(s)");
+        }
+        UUID id = UUID.randomUUID();
+        jdbc.update(
+            "INSERT INTO elective_group (id, school_id, academic_year_id, grade_id, code, name, " +
+            "  min_picks, max_picks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            id, schoolId, academicYearId, gradeId, code, name, minPicks, maxPicks);
+        for (UUID subjectId : subjectIds) {
+            jdbc.update(
+                "INSERT INTO elective_group_option (elective_group_id, subject_id) VALUES (?, ?) " +
+                "ON CONFLICT DO NOTHING", id, subjectId);
+        }
+        return listElectiveGroups(schoolId, academicYearId, gradeId).stream()
+            .filter(g -> g.id().equals(id)).findFirst().orElseThrow();
     }
 }

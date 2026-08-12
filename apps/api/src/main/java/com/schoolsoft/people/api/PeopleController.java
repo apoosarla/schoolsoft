@@ -2,6 +2,7 @@ package com.schoolsoft.people.api;
 
 import com.schoolsoft.people.internal.PeopleRepository;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
@@ -31,8 +32,9 @@ public class PeopleController {
     }
 
     public record CreateStudentRequest(
-        @NotBlank UUID schoolId,
-        @NotBlank String admissionNo,
+        @NotNull UUID schoolId,
+        /** Optional — the school's admission-number series issues one when omitted. */
+        String admissionNo,
         @NotBlank String firstName,
         String middleName,
         String lastName,

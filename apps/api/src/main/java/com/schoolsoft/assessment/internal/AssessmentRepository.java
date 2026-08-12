@@ -5,6 +5,8 @@ import com.schoolsoft.assessment.api.AssessmentComponentDto;
 import com.schoolsoft.assessment.api.AssessmentDto;
 import com.schoolsoft.assessment.api.MarkDto;
 import com.schoolsoft.assessment.api.ReportCardDto;
+import com.schoolsoft.enrolment.api.StudentSubjectDto;
+import com.schoolsoft.enrolment.api.SubjectSetResolver;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.AcademicYearGuard;
 import java.sql.Date;
@@ -23,10 +25,13 @@ public class AssessmentRepository {
 
     private final JdbcTemplate jdbc;
     private final AcademicYearGuard academicYears;
+    private final SubjectSetResolver subjectSets;
     private final ObjectMapper json;
 
-    public AssessmentRepository(JdbcTemplate jdbc, ObjectMapper json, AcademicYearGuard academicYears) {
+    public AssessmentRepository(JdbcTemplate jdbc, ObjectMapper json, AcademicYearGuard academicYears,
+                               SubjectSetResolver subjectSets) {
         this.academicYears = academicYears;
+        this.subjectSets = subjectSets;
         this.jdbc = jdbc;
         this.json = json;
     }
@@ -148,6 +153,22 @@ public class AssessmentRepository {
         String gradeLetter, String remarks, boolean isAbsent, UUID enteredByStaffId
     ) {
         academicYears.requireOpenForAssessmentComponent(assessmentComponentId);
+
+        // A mark only means something if the student takes the subject. With
+        // electives, the section no longer answers that — the student's own
+        // subject set does (GAP-05).
+        var subjectAndDate = jdbc.query(
+            "SELECT a.subject_id, COALESCE(a.scheduled_on, CURRENT_DATE) AS on_date " +
+            "FROM assessment a JOIN assessment_component ac ON ac.assessment_id = a.id WHERE ac.id = ?",
+            (rs, i) -> new Object[]{ UUID.fromString(rs.getString("subject_id")),
+                                     rs.getDate("on_date").toLocalDate() },
+            assessmentComponentId);
+        if (subjectAndDate.isEmpty()) {
+            throw new NotFoundException("Assessment component not found: " + assessmentComponentId);
+        }
+        subjectSets.requireStudies(studentId, (UUID) subjectAndDate.get(0)[0],
+            (LocalDate) subjectAndDate.get(0)[1]);
+
         UUID id = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO mark (id, school_id, assessment_component_id, student_id, raw_marks, grade_letter, remarks, is_absent, entered_by_staff_id) " +
@@ -187,15 +208,23 @@ public class AssessmentRepository {
         );
     }
 
+    /**
+     * The payload carries the student's own subject set, not their section's
+     * (ASMT-13). Two students in one section with different option blocks get
+     * different report cards, which is the whole point of the election model.
+     */
     public ReportCardDto generateReportCard(
         UUID schoolId, UUID studentId, UUID academicYearId, UUID termId,
         String strategyCode, String templateCode, Map<String, Object> payload
     ) {
         UUID id = UUID.randomUUID();
         try {
+            var enriched = new java.util.LinkedHashMap<String, Object>(payload == null ? Map.of() : payload);
+            enriched.put("subjects", subjectsForReportCard(studentId, academicYearId, termId));
+
             PGobject payloadJson = new PGobject();
             payloadJson.setType("jsonb");
-            payloadJson.setValue(json.writeValueAsString(payload == null ? Map.of() : payload));
+            payloadJson.setValue(json.writeValueAsString(enriched));
             jdbc.update(
                 "INSERT INTO report_card (id, school_id, student_id, academic_year_id, term_id, strategy_code, template_code, payload) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -211,5 +240,36 @@ public class AssessmentRepository {
         int updated = jdbc.update("UPDATE report_card SET is_locked = TRUE WHERE id = ?", id);
         if (updated == 0) throw new NotFoundException("Report card not found: " + id);
         return jdbc.queryForObject("SELECT " + REPORT_CARD_COLS + " FROM report_card WHERE id = ?", REPORT_CARD_MAPPER, id);
+    }
+
+    /**
+     * Resolved as of the term's end (or the year's), so a card issued after a
+     * mid-year option change still lists the subjects that term was taught in.
+     */
+    private List<Map<String, Object>> subjectsForReportCard(UUID studentId, UUID academicYearId, UUID termId) {
+        LocalDate asOf = null;
+        if (termId != null) {
+            var dates = jdbc.query("SELECT ends_on FROM term WHERE id = ?",
+                (rs, i) -> rs.getDate("ends_on").toLocalDate(), termId);
+            if (!dates.isEmpty()) asOf = dates.get(0);
+        }
+        if (asOf == null && academicYearId != null) {
+            var dates = jdbc.query("SELECT ends_on FROM academic_year WHERE id = ?",
+                (rs, i) -> rs.getDate("ends_on").toLocalDate(), academicYearId);
+            if (!dates.isEmpty()) asOf = dates.get(0);
+        }
+        LocalDate today = LocalDate.now();
+        if (asOf == null || asOf.isAfter(today)) asOf = today;
+
+        List<Map<String, Object>> rows = new java.util.ArrayList<>();
+        for (StudentSubjectDto subject : subjectSets.forStudent(studentId, asOf)) {
+            rows.add(Map.of(
+                "subjectId", subject.subjectId().toString(),
+                "code", subject.subjectCode(),
+                "name", subject.subjectName(),
+                "origin", subject.origin()
+            ));
+        }
+        return rows;
     }
 }

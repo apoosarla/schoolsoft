@@ -111,9 +111,42 @@ class AssessmentCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-05 — no student_subject election, so a report card cannot show a student's own "
-        + "subject set (Phase 2).")
     void cert_ASMT_13_reportCardShowsTheStudentsOwnElectiveSet() {
+        String token = principalToken(cie());
+        var block = createElectiveBlock(cie(), "ASMT13");
+        try {
+            var cardA = post("/v1/assessment/report-cards", body(
+                "schoolId", cie().id(), "studentId", block.studentA(),
+                "academicYearId", cie().currentAy().id(),
+                "termId", termOf(cie(), cie().currentAy().code(), "T1"),
+                "strategyCode", cie().strategyCode(), "templateCode", "CIE-DEFAULT",
+                "payload", Map.of("remarks", "Steady progress")), token);
+            assertThat(cardA.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            var cardB = post("/v1/assessment/report-cards", body(
+                "schoolId", cie().id(), "studentId", block.studentB(),
+                "academicYearId", cie().currentAy().id(),
+                "termId", termOf(cie(), cie().currentAy().code(), "T1"),
+                "strategyCode", cie().strategyCode(), "templateCode", "CIE-DEFAULT",
+                "payload", Map.of("remarks", "Steady progress")), token);
+            assertThat(cardB.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            String payloadA = queryOne("SELECT payload::text FROM report_card WHERE id = ?", String.class,
+                UUID.fromString(cardA.getBody().get("id").asText()));
+            String payloadB = queryOne("SELECT payload::text FROM report_card WHERE id = ?", String.class,
+                UUID.fromString(cardB.getBody().get("id").asText()));
+
+            // Each card carries that student's own option, and not the other's.
+            assertThat(payloadA).contains("ASMT13-A").doesNotContain("ASMT13-B");
+            assertThat(payloadB).contains("ASMT13-B").doesNotContain("ASMT13-A");
+            // The caller's own payload survives alongside the resolved subjects.
+            assertThat(payloadA).contains("Steady progress");
+        } finally {
+            inChainDo(jdbc -> jdbc.update(
+                "DELETE FROM report_card WHERE student_id IN (?, ?) AND template_code = 'CIE-DEFAULT'",
+                block.studentA(), block.studentB()));
+            deleteElectiveBlock(block);
+        }
     }
 
     @Test @Tag("P2")

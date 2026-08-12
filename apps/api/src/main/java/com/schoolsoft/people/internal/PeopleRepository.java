@@ -6,6 +6,7 @@ import com.schoolsoft.people.api.PeopleController;
 import com.schoolsoft.people.api.StaffDto;
 import com.schoolsoft.people.api.StudentDto;
 import com.schoolsoft.people.api.UserDirectoryEntryDto;
+import com.schoolsoft.tenancy.api.NumberSeries;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -21,9 +22,12 @@ public class PeopleRepository {
 
     private final JdbcTemplate jdbc;
     private final Authz authz;
-    public PeopleRepository(JdbcTemplate jdbc, Authz authz) {
+    private final NumberSeries numbers;
+
+    public PeopleRepository(JdbcTemplate jdbc, Authz authz, NumberSeries numbers) {
         this.jdbc = jdbc;
         this.authz = authz;
+        this.numbers = numbers;
     }
 
     private static final RowMapper<StudentDto> STUDENT = (rs, i) -> new StudentDto(
@@ -80,13 +84,17 @@ public class PeopleRepository {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
+    /** Admission number omitted → the school's series issues one (GAP-26). */
     public StudentDto createStudent(PeopleController.CreateStudentRequest req) {
         UUID id = UUID.randomUUID();
         Date dob = req.dob() == null ? null : Date.valueOf(LocalDate.parse(req.dob()));
+        String admissionNo = req.admissionNo() == null || req.admissionNo().isBlank()
+            ? numbers.next(req.schoolId(), NumberSeries.Kind.admission, null, "ADM{YY}{SEQ:4}", null)
+            : req.admissionNo();
         jdbc.update(
             "INSERT INTO student (id, school_id, admission_no, first_name, middle_name, last_name, dob, gender) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            id, req.schoolId(), req.admissionNo(), req.firstName(), req.middleName(), req.lastName(), dob, req.gender()
+            id, req.schoolId(), admissionNo, req.firstName(), req.middleName(), req.lastName(), dob, req.gender()
         );
         return findStudent(id).orElseThrow();
     }

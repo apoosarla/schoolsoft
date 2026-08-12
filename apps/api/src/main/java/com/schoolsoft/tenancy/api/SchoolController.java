@@ -173,10 +173,42 @@ public class SchoolController {
         return repo.listSectionSubjectTeachers(sectionId);
     }
 
-    public record AssignTeacherRequest(@NotNull UUID subjectId, @NotNull UUID teacherStaffId, boolean isPrimary) {}
+    /**
+     * {@code isElective} marks a subject the section is taught but only its
+     * electing students take — the flag {@code SubjectSetResolver} reads to
+     * tell a section-wide subject from an option (GAP-05).
+     */
+    public record AssignTeacherRequest(
+        @NotNull UUID subjectId, @NotNull UUID teacherStaffId, boolean isPrimary, boolean isElective
+    ) {}
 
     @PostMapping("/sections/{sectionId}/teachers")
     public SectionSubjectTeacherDto assignTeacher(@PathVariable UUID sectionId, @RequestBody AssignTeacherRequest req) {
-        return repo.assignSectionSubjectTeacher(sectionId, req.subjectId(), req.teacherStaffId(), req.isPrimary());
+        return repo.assignSectionSubjectTeacher(
+            sectionId, req.subjectId(), req.teacherStaffId(), req.isPrimary(), req.isElective());
+    }
+
+    // -------------------------- Elective groups --------------------------
+
+    @GetMapping("/schools/{schoolId}/elective-groups")
+    public List<ElectiveGroupDto> electiveGroups(
+        @PathVariable UUID schoolId,
+        @RequestParam(required = false) UUID academicYearId,
+        @RequestParam(required = false) UUID gradeId
+    ) {
+        return repo.listElectiveGroups(schoolId, academicYearId, gradeId);
+    }
+
+    public record CreateElectiveGroupRequest(
+        @NotNull UUID academicYearId, @NotNull UUID gradeId, @NotBlank String code, @NotBlank String name,
+        int minPicks, int maxPicks, @NotNull List<UUID> subjectIds
+    ) {}
+
+    @PostMapping("/schools/{schoolId}/elective-groups")
+    public ElectiveGroupDto createElectiveGroup(
+        @PathVariable UUID schoolId, @RequestBody CreateElectiveGroupRequest req
+    ) {
+        return repo.createElectiveGroup(schoolId, req.academicYearId(), req.gradeId(), req.code(), req.name(),
+            req.minPicks() == 0 ? 1 : req.minPicks(), req.maxPicks() == 0 ? 1 : req.maxPicks(), req.subjectIds());
     }
 }

@@ -3,6 +3,8 @@ package com.schoolsoft.admissions.internal;
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.admissions.api.AdmissionEventDto;
 import com.schoolsoft.platform.web.NotFoundException;
+import com.schoolsoft.tenancy.api.NumberSeries;
+import com.schoolsoft.tenancy.api.SectionCapacity;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
@@ -16,7 +18,14 @@ import org.springframework.stereotype.Repository;
 public class AdmissionsRepository {
 
     private final JdbcTemplate jdbc;
-    public AdmissionsRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final SectionCapacity capacity;
+    private final NumberSeries numbers;
+
+    public AdmissionsRepository(JdbcTemplate jdbc, SectionCapacity capacity, NumberSeries numbers) {
+        this.jdbc = jdbc;
+        this.capacity = capacity;
+        this.numbers = numbers;
+    }
 
     private static final RowMapper<AdmissionApplicationDto> MAPPER = (rs, i) -> new AdmissionApplicationDto(
         UUID.fromString(rs.getString("id")),
@@ -132,18 +141,33 @@ public class AdmissionsRepository {
      * joining section/grade) rather than introducing a Java dependency.
      */
     public UUID convertToStudent(UUID applicationId, UUID sectionId, String rollNo) {
+        return convertToStudent(applicationId, sectionId, rollNo, null);
+    }
+
+    /**
+     * An offer against a full section is the same over-capacity decision as a
+     * direct enrolment, so it goes through the same check (GAP-10), and the
+     * admission and roll numbers come from the school's series (GAP-26) rather
+     * than reusing the application number.
+     */
+    public UUID convertToStudent(UUID applicationId, UUID sectionId, String rollNo, String overCapacityReason) {
         var app = find(applicationId).orElseThrow(() -> new NotFoundException("Application not found: " + applicationId));
+        String override = capacity.reserveSeat(sectionId, overCapacityReason);
         UUID studentId = UUID.randomUUID();
+        String admissionNo = numbers.next(app.schoolId(), NumberSeries.Kind.admission, null, "ADM{YY}{SEQ:4}", null);
+        String roll = rollNo == null || rollNo.isBlank()
+            ? numbers.next(app.schoolId(), NumberSeries.Kind.roll, sectionId, "{SEQ:2}", null)
+            : rollNo;
         jdbc.update(
             "INSERT INTO student (id, school_id, admission_no, first_name, middle_name, last_name, dob, gender, status) " +
             "VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'active')",
-            studentId, app.schoolId(), app.applicationNo(), app.applicantFirstName(), app.applicantLastName(),
+            studentId, app.schoolId(), admissionNo, app.applicantFirstName(), app.applicantLastName(),
             app.applicantDob() == null ? null : Date.valueOf(app.applicantDob()), app.applicantGender()
         );
         jdbc.update(
-            "INSERT INTO enrolment (id, school_id, student_id, section_id, academic_year_id, starts_on, status, roll_no) " +
-            "VALUES (?, ?, ?, ?, ?, CURRENT_DATE, 'active', ?)",
-            UUID.randomUUID(), app.schoolId(), studentId, sectionId, app.academicYearId(), rollNo
+            "INSERT INTO enrolment (id, school_id, student_id, section_id, academic_year_id, starts_on, status, " +
+            "  roll_no, over_capacity_reason) VALUES (?, ?, ?, ?, ?, CURRENT_DATE, 'active', ?, ?)",
+            UUID.randomUUID(), app.schoolId(), studentId, sectionId, app.academicYearId(), roll, override
         );
         jdbc.update(
             "UPDATE admission_application SET state = 'enrolled', converted_student_id = ?, updated_at = now() WHERE id = ?",
