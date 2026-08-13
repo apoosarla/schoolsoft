@@ -94,12 +94,112 @@ export type ReportCardDto = {
   id: string;
   schoolId: string;
   studentId: string;
+  sectionId: string | null;
   academicYearId: string;
   termId: string | null;
   strategyCode: string;
   templateCode: string;
+  status: string;
+  version: number;
   isLocked: boolean;
+  gradeScaleCode: string | null;
+  totalMarks: number | null;
+  totalMaxMarks: number | null;
+  overallPct: number | null;
+  overallGrade: string | null;
+  classRank: number | null;
+  classSize: number | null;
+  percentile: number | null;
+  attendanceWorkingDays: number | null;
+  attendancePresentDays: number | null;
+  attendancePct: number | null;
+  promotionDecision: string | null;
+  teacherRemarks: string | null;
+  principalRemarks: string | null;
+  enrolledFrom: string | null;
+  termsAttended: number | null;
+  termsInYear: number | null;
+  coverageNote: string | null;
+  publishedAt: string | null;
   generatedAt: string;
+};
+
+export type ReportCardSubjectRow = {
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  origin: string;
+  marksObtained: number | null;
+  maxMarks: number | null;
+  percentage: number | null;
+  gradeLetter: string | null;
+  /** marked | absent | medical_leave | exempt | not_assessed */
+  resultStatus: string;
+  /** What the row prints — "AB" for an absence, never a zero. */
+  display: string;
+  passing: boolean | null;
+  remarks: string | null;
+  sortOrder: number;
+};
+
+export type ReportCardCoScholasticRow = {
+  areaCode: string;
+  areaName: string;
+  rating: string;
+  remarks: string | null;
+  sortOrder: number;
+};
+
+export type ReportCardDetailDto = {
+  card: ReportCardDto;
+  subjects: ReportCardSubjectRow[];
+  coScholastic: ReportCardCoScholasticRow[];
+  payload: Record<string, unknown>;
+};
+
+export type ExamScheduleDto = {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  termId: string | null;
+  code: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+  status: string;
+  publishedAt: string | null;
+  sessionCount: number;
+};
+
+export type ExamSessionDto = {
+  id: string;
+  examScheduleId: string;
+  schoolId: string;
+  gradeId: string;
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  paperCode: string;
+  name: string;
+  onDate: string;
+  startsAt: string;
+  endsAt: string;
+  room: string | null;
+  invigilatorStaffId: string | null;
+  maxMarks: number | null;
+  assessmentId: string | null;
+};
+
+export type HallTicketDto = {
+  id: string;
+  examScheduleId: string;
+  studentId: string;
+  studentName: string;
+  admissionNo: string;
+  ticketNo: string;
+  seatNo: string | null;
+  issuedAt: string;
+  sessions: ExamSessionDto[];
 };
 
 export type AssessmentDto = {
@@ -134,7 +234,11 @@ export type MarkDto = {
   rawMarks: number | null;
   gradeLetter: string | null;
   remarks: string | null;
+  /** entered | pending | absent | medical_leave | exempt — a blank is not a zero. */
+  status: string;
+  /** Derived from status, kept for callers written before it existed. */
   isAbsent: boolean;
+  revisionCount: number;
 };
 
 export type AssignmentDto = {

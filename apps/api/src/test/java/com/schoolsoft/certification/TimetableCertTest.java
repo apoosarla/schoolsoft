@@ -326,9 +326,56 @@ class TimetableCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-06 + GAP-01 — there is no exam timetable entity and no calendar to mark an exam week "
-        + "with, so the regular timetable cannot be suppressed (Phases 1 and 5).")
     void cert_TT_09_examWeekReplacesTheRegularTimetable() {
+        String token = principalToken(cbse());
+        UUID sectionId = currentFocusSection(cbse());
+        UUID gradeId = gradeOf(cbse(), cbse().focusGradeCode());
+        String examDate = "2026-09-15";                      // a Tuesday inside Term 1
+
+        // Before the exam week, the section's Tuesday is an ordinary teaching day.
+        var ordinary = get("/v1/timetable/sections/" + sectionId + "/day?date=" + examDate, token);
+        assertThat(ordinary.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(ordinary.getBody().get("working").asBoolean()).isTrue();
+        assertThat(ordinary.getBody().get("examDay").asBoolean()).isFalse();
+        assertThat(ordinary.getBody().get("slots").size()).isGreaterThan(0);
+
+        UUID scheduleId = UUID.fromString(post("/v1/exams/schedules", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(),
+            "termId", termOf(cbse(), cbse().currentAy().code(), "T1"),
+            "code", "CERT-TT09", "name", "Term 1 examinations",
+            "startsOn", examDate, "endsOn", "2026-09-18"), token).getBody().get("id").asText());
+        try {
+            post("/v1/exams/schedules/" + scheduleId + "/sessions", body(
+                "gradeId", gradeId, "subjectId", subjectOf(cbse(), "ENG"), "paperCode", "P1",
+                "name", "English Paper 1", "onDate", examDate,
+                "startsAt", "09:30:00", "endsAt", "11:30:00", "room", "Hall A",
+                "invigilatorStaffId", cbse().teacherStaffIds().get(4), "maxMarks", 80.0), token);
+
+            // A draft schedule must not blank anybody's day — the exams officer
+            // is still moving papers around.
+            assertThat(get("/v1/timetable/sections/" + sectionId + "/day?date=" + examDate, token)
+                .getBody().get("examDay").asBoolean()).isFalse();
+
+            assertThat(post("/v1/exams/schedules/" + scheduleId + "/publish", null, token).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+            var examDay = get("/v1/timetable/sections/" + sectionId + "/day?date=" + examDate, token).getBody();
+            assertThat(examDay.get("examDay").asBoolean()).isTrue();
+            assertThat(examDay.get("calendarKind").asText()).isEqualTo("exam_day");
+            // The regular periods are suppressed rather than shown alongside:
+            // the class is not going to its lessons that morning.
+            assertThat(examDay.get("slots")).isEmpty();
+            assertThat(examDay.get("examSessions")).hasSize(1);
+            assertThat(examDay.get("examSessions").get(0).get("name").asText()).isEqualTo("English Paper 1");
+            assertThat(examDay.get("examSessions").get(0).get("room").asText()).isEqualTo("Hall A");
+            assertThat(examDay.get("reason").asText()).contains("Exam day");
+
+            // A Tuesday outside the exam week is untouched.
+            assertThat(get("/v1/timetable/sections/" + sectionId + "/day?date=2026-09-29", token)
+                .getBody().get("slots").size()).isGreaterThan(0);
+        } finally {
+            inChainDo(jdbc -> jdbc.update("DELETE FROM exam_schedule WHERE id = ?", scheduleId));
+        }
     }
 
     @Test @Tag("P2")

@@ -21,8 +21,8 @@ class GraduationCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("Board integration is a stub adapter and there is no transcript to merge results onto "
-        + "(GAP-13, Phase 5; adapters remain credential-blocked).")
+    @Disabled("Phase 5 gives the report card a content model and a graduate promotion decision, but a "
+        + "transcript spanning years is Phase 7's, and the board adapters remain credential-blocked.")
     void cert_GRAD_03_boardResultsAreMergedOntoTheFinalTranscript() {
     }
 

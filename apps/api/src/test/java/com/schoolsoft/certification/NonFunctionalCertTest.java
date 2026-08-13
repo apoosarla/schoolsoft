@@ -26,8 +26,8 @@ class NonFunctionalCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("Perf profile: report-card publication for 2,000 students needs the bulk seed and the "
-        + "report-card content model of GAP-13 (Phase 5).")
+    @Disabled("Perf profile: the report-card content model landed in Phase 5, so this now needs only the "
+        + "bulk seed (-Dschoolsoft.cert.bulk-students=2000) and an agreed p95 target.")
     void cert_NFR_02_reportCardPublicationForTwoThousandStudentsStaysInWindow() {
     }
 

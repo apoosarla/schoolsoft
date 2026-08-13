@@ -43,6 +43,22 @@ public class SubjectSetResolver {
         return enrolmentId == null ? List.of() : repo.resolveForEnrolment(enrolmentId, date);
     }
 
+    /**
+     * Every active student in a grade with the subjects they take, in one
+     * query — for callers that have to reason about a cohort rather than a
+     * child, exam clash detection being the first of them (ASMT-09).
+     */
+    public java.util.Map<UUID, java.util.Set<UUID>> subjectsByStudentInGrade(
+        UUID gradeId, UUID academicYearId, LocalDate onDate
+    ) {
+        var byStudent = new java.util.LinkedHashMap<UUID, java.util.Set<UUID>>();
+        for (StudentSubjectDto row : repo.resolveForGrade(gradeId, academicYearId,
+                onDate == null ? LocalDate.now() : onDate)) {
+            byStudent.computeIfAbsent(row.studentId(), k -> new java.util.LinkedHashSet<>()).add(row.subjectId());
+        }
+        return byStudent;
+    }
+
     public boolean studies(UUID studentId, UUID subjectId, LocalDate onDate) {
         return forStudent(studentId, onDate).stream().anyMatch(s -> s.subjectId().equals(subjectId));
     }

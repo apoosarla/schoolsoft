@@ -11,12 +11,16 @@ import type {
   AssignmentDto,
   AssignmentSubmissionDto,
   AttendanceRecordDto,
+  ExamScheduleDto,
+  ExamSessionDto,
   FeeInvoiceDto,
   FeeInvoiceLineDto,
+  HallTicketDto,
   MarkDto,
   MessageDto,
   MessageThreadDto,
   PaymentDto,
+  ReportCardDetailDto,
   ReportCardDto,
   SectionTeacherDto,
   StudentDto,
@@ -113,6 +117,21 @@ export function createAssessmentApi(client: ApiClient) {
     },
     marksForComponent(componentId: string): Promise<MarkDto[]> {
       return client.apiFetch<MarkDto[]>(`/v1/assessment/components/${componentId}/marks`);
+    },
+    reportCard(id: string): Promise<ReportCardDetailDto> {
+      return client.apiFetch<ReportCardDetailDto>(`/v1/assessment/report-cards/${id}`);
+    },
+    examSchedules(schoolId: string, academicYearId?: string): Promise<ExamScheduleDto[]> {
+      const year = academicYearId ? `&academicYearId=${academicYearId}` : "";
+      return client.apiFetch<ExamScheduleDto[]>(`/v1/exams/schedules?schoolId=${schoolId}${year}`);
+    },
+    examSessions(examScheduleId: string): Promise<ExamSessionDto[]> {
+      return client.apiFetch<ExamSessionDto[]>(`/v1/exams/schedules/${examScheduleId}/sessions`);
+    },
+    hallTicket(examScheduleId: string, studentId: string): Promise<HallTicketDto> {
+      return client.apiFetch<HallTicketDto>(
+        `/v1/exams/schedules/${examScheduleId}/hall-tickets/${studentId}`,
+      );
     },
   };
 }

@@ -21,5 +21,19 @@ public record SectionDayDto(
     String reason,
     String calendarKind,
     List<TimetableSlotDto> slots,
-    List<TimetableCoverDto> covers
-) {}
+    List<TimetableCoverDto> covers,
+    boolean examDay,
+    List<com.schoolsoft.assessment.api.ExamSessionDto> examSessions
+) {
+    /**
+     * An ordinary day: no exam sitting, so the class timetable stands.
+     *
+     * During an exam week it does not — the papers replace the periods rather
+     * than sitting alongside them, and a section shown both would send a class
+     * to a lesson that is not happening (TT-09).
+     */
+    public static SectionDayDto teaching(LocalDate date, boolean working, String reason, String calendarKind,
+                                         List<TimetableSlotDto> slots, List<TimetableCoverDto> covers) {
+        return new SectionDayDto(date, working, reason, calendarKind, slots, covers, false, List.of());
+    }
+}

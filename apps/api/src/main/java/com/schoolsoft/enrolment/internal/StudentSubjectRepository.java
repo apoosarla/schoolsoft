@@ -66,6 +66,39 @@ public class StudentSubjectRepository {
         return jdbc.query(RESOLVE_SQL, MAPPER, enrolmentId, enrolmentId, Date.valueOf(onDate));
     }
 
+    /**
+     * The same rule for a whole grade in one query. Exam clash detection has to
+     * ask "what does each of these two hundred children sit?", and asking one
+     * child at a time is two hundred round trips for a screen the exams officer
+     * refreshes while editing.
+     */
+    private static final String RESOLVE_GRADE_SQL =
+        "SELECT NULL::text AS id, e.id::text AS enrolment_id, e.student_id::text AS student_id, " +
+        "       sub.id::text AS subject_id, sub.code AS subject_code, sub.name AS subject_name, " +
+        "       'compulsory' AS origin, NULL::text AS elective_group_id, NULL::text AS elective_group_code, " +
+        "       'elected' AS status, e.starts_on AS effective_from, e.ends_on AS effective_to " +
+        "FROM enrolment e " +
+        "JOIN section s ON s.id = e.section_id AND s.grade_id = ? AND s.academic_year_id = ? " +
+        "JOIN section_subject_teacher sst ON sst.section_id = e.section_id AND NOT sst.is_elective " +
+        "JOIN subject sub ON sub.id = sst.subject_id " +
+        "WHERE e.status = 'active' " +
+        "UNION " +
+        "SELECT ss.id::text, ss.enrolment_id::text, e.student_id::text, sub.id::text, sub.code, sub.name, " +
+        "       'elective', ss.elective_group_id::text, eg.code, ss.status, ss.effective_from, ss.effective_to " +
+        "FROM student_subject ss " +
+        "JOIN enrolment e ON e.id = ss.enrolment_id AND e.status = 'active' " +
+        "JOIN section s ON s.id = e.section_id AND s.grade_id = ? AND s.academic_year_id = ? " +
+        "JOIN subject sub ON sub.id = ss.subject_id " +
+        "LEFT JOIN elective_group eg ON eg.id = ss.elective_group_id " +
+        "WHERE ss.status = 'elected' " +
+        "  AND (? BETWEEN ss.effective_from AND COALESCE(ss.effective_to, 'infinity'::date)) " +
+        "ORDER BY student_id, subject_code";
+
+    public List<StudentSubjectDto> resolveForGrade(UUID gradeId, UUID academicYearId, LocalDate onDate) {
+        return jdbc.query(RESOLVE_GRADE_SQL, MAPPER,
+            gradeId, academicYearId, gradeId, academicYearId, Date.valueOf(onDate));
+    }
+
     /** The enrolment a student holds on a date — elections hang off enrolments, not students. */
     public UUID enrolmentIdFor(UUID studentId, LocalDate onDate) {
         var rows = jdbc.query(

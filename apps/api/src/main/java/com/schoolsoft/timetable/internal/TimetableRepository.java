@@ -25,13 +25,16 @@ public class TimetableRepository {
     private final WorkingDayService workingDays;
     private final SubjectSetResolver subjectSets;
     private final CoverRepository covers;
+    private final com.schoolsoft.assessment.api.ExamSchedules exams;
 
     public TimetableRepository(JdbcTemplate jdbc, WorkingDayService workingDays,
-                              SubjectSetResolver subjectSets, CoverRepository covers) {
+                              SubjectSetResolver subjectSets, CoverRepository covers,
+                              com.schoolsoft.assessment.api.ExamSchedules exams) {
         this.jdbc = jdbc;
         this.workingDays = workingDays;
         this.subjectSets = subjectSets;
         this.covers = covers;
+        this.exams = exams;
     }
 
     private static final RowMapper<TimetableSlotDto> MAPPER = (rs, i) -> new TimetableSlotDto(
@@ -103,7 +106,18 @@ public class TimetableRepository {
 
         var status = workingDays.statusOf(scope.get(0)[0], date, scope.get(0)[1], scope.get(0)[2]);
         if (!status.working()) {
-            return new SectionDayDto(date, false, status.reason(), status.calendarKind(), List.of(), List.of());
+            return SectionDayDto.teaching(date, false, status.reason(), status.calendarKind(), List.of(), List.of());
+        }
+
+        // An exam sitting replaces the day's lessons rather than joining them:
+        // during exam week the class does not go to its periods, and a view
+        // showing both sends thirty children to a lesson nobody is teaching
+        // (TT-09).
+        var papers = exams.publishedSessionsForGradeOn(scope.get(0)[1], date);
+        if (!papers.isEmpty()) {
+            return new SectionDayDto(date, true,
+                "Exam day — the regular timetable is suspended", "exam_day",
+                List.of(), List.of(), true, papers);
         }
 
         // A date is known here, so the slot's effective window is applied — the
@@ -113,7 +127,7 @@ public class TimetableRepository {
             "  AND t.effective_from <= ? AND COALESCE(t.effective_to, 'infinity'::date) >= ? " +
             "ORDER BY t.period_no",
             MAPPER, sectionId, date.getDayOfWeek().getValue(), Date.valueOf(date), Date.valueOf(date));
-        return new SectionDayDto(date, true, status.reason(), status.calendarKind(), slots,
+        return SectionDayDto.teaching(date, true, status.reason(), status.calendarKind(), slots,
             covers.forSection(sectionId, date));
     }
 

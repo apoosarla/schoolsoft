@@ -362,7 +362,7 @@ credentials and FEE-16 on rollover.
 **Closes GAP-06, GAP-13, GAP-29.** Produces the promotion decision that
 Phase 6 consumes.
 
-`V020__exam_ops_and_report_cards.sql`
+`V022__exam_ops_and_report_cards.sql` (planned as V020; see the status note)
 
 - `exam_schedule` + `exam_session` — paper, date, period, room, invigilator.
   Clash detection runs over `student_subject` (Phase 2), so it catches the
@@ -382,6 +382,79 @@ Phase 6 consumes.
 - Templated renderer → PDF, per strategy.
 
 **Certifies:** ASMT-05/07/08/09/10/11/12/13/14, TT-09, GRAD-03 (partially).
+
+### Status — landed 2026-08-13
+
+`V022__exam_ops_and_report_cards.sql` (V020 went to Phase 4 and V021 to Phase 3,
+so the numbering moved again).
+
+- **`mark.status`** ∈ `entered | pending | absent | medical_leave | exempt`,
+  with a CHECK that only `entered` carries a number, and `is_absent` dropped
+  rather than kept alongside — two columns meaning nearly the same thing is how
+  they drift apart. `pending` is the fifth status the plan did not list: without
+  it a blank and a zero are still the same row, which was half the point of
+  ASMT-04.
+- **`mark_revision` + `mark_reevaluation`.** A parent raises a request against
+  their own child's mark; an exams authority decides it; `revised` supersedes
+  the mark and keeps the original, `upheld` and `rejected` change nothing and
+  are still recorded. Any change to an existing mark writes a revision, not
+  only a re-evaluation.
+- **`exam_schedule` / `exam_session` / `exam_hall_ticket`.** Sessions hang off
+  the grade, because a paper is set for a cohort; clash detection then runs over
+  each *student's* subject set, which is the clash a section timetable cannot
+  see. Publication is the gate — a draft may hold clashes while the exams
+  officer works, a published schedule may not — and hall tickets are issued
+  from it, re-runnable without renumbering the hall.
+- **Report card content model.** Subject rows, co-scholastic ratings, teacher
+  and principal remarks, attendance (from the attendance module, over
+  `WorkingDayService`'s denominator), rank, percentile, terms covered, and
+  `promotion_decision` ∈ `promote | detain | graduate` — all columns and rows,
+  because "which children have no promotion decision" is the first question of
+  closing a year and it cannot be asked of free-form JSON.
+- **`grade_scale` + `grade_band` and the strategy layer.** `CurriculumStrategy`
+  has four board-specific methods — grade boundaries, pass mark, what the cohort
+  is ranked on, and what the results imply about promotion — with everything
+  else (averaging, excluding absences, ordering) shared. CBSE prints an
+  aggregate percentage and ranks on it; Cambridge prints none and ranks on mean
+  grade point. A board without an implementation falls back to percentages
+  rather than failing on the day cards are printed.
+- **`assessment_policy`** holds the two decisions that are a school's and not
+  the code's: whether arrears withhold a report card (`release` by default) and
+  the tolerance on component weights.
+
+Six things the plan did not anticipate:
+
+- **The lifecycle was decorative.** `enterMark` upserted regardless of status,
+  so `locked` meant nothing at all. Marks now refuse a sealed assessment and
+  name the way back in — which also made ASMT-06 a real scenario rather than a
+  restatement of ASMT-04.
+- **The weight gate had to be narrower than "valid".** Blocking every invalid
+  assessment from opening for marking also blocks one that simply has no
+  components yet, which harms nobody — and it broke SEC-08's unlock probe. Only
+  the arithmetic blocks; the emptiness is reported by `/validation`.
+- **A closed year has to be checked before the lock is.** Reversing the two told
+  a caller inside a closed year to reopen an assessment, which would have ended
+  in the same refusal one step later.
+- **Report cards had no identity.** `generateReportCard` inserted a new row
+  every time, so a locked card could be superseded silently and a term could end
+  with two answers. One card per student per term per template, regeneration in
+  place with a version, and a 409 naming the unlock endpoint when it is sealed.
+- **A joiner's subjects resolve as of their first day, not today.** Subject sets
+  hang off the enrolment held on the date asked about, so a card drawn up before
+  a mid-year joiner starts came back with no subjects at all.
+- **Bulk entry cannot be all-or-nothing.** One typo in a class of forty must not
+  discard the other thirty-nine, and must not be stored either — so rows are
+  validated individually and the refusals come back named.
+
+Deliberately not done: the templated **PDF renderer**. The content model is what
+Phase 6 reads and what the certification suite can assert; the renderer is a
+frontend deliverable and stays on the parallel workstream, where the plan
+already puts it.
+
+**Executable scenarios: 90 → 104.** Newly passing: ASMT-02/03/04/05/06/07/08/
+09/10/11/12/14/15 and TT-09. GRAD-03 stays disabled — a transcript spanning
+years is Phase 7's, and the board adapters remain credential-blocked. Suite:
+208 run, 0 failures, 101 disabled.
 
 ---
 

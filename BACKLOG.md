@@ -914,7 +914,18 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   section-wide subject set. For a Cambridge school this is a launch blocker,
   not a nice-to-have. Blocks ACAD-09, ASMT-13, INT-02.
 
-- **GAP-06 — Exam operations missing.** `assessment.scheduled_on` is the
+- **GAP-06 — Exam operations missing.** ✅ **Closed 2026-08-13 (Phase 5).**
+  `exam_schedule` / `exam_session` / `exam_hall_ticket`: papers are set per
+  grade, clash detection runs over each student's own subject set (the clash a
+  section timetable cannot see), publication refuses while one stands, and hall
+  tickets list the papers that candidate actually sits. `mark.status` replaces
+  `is_absent` with `entered | pending | absent | medical_leave | exempt`, so a
+  blank, a zero and an absence are three different rows; `mark_revision` and
+  `mark_reevaluation` supersede a mark without discarding it; a sealed
+  assessment refuses writes, and reopening one needs an authorised role, a
+  reason and an audit row. A published exam schedule also suppresses the class
+  timetable for that day (TT-09). Original finding:
+  `assessment.scheduled_on` is the
   only scheduling field. No exam timetable entity, no per-student paper-clash
   detection, no room or invigilator allocation, no hall tickets. Also missing
   at the marks layer: `absent` / medical-leave semantics (today a blank and a
@@ -1088,14 +1099,30 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   slots and letting a parent book one (with double-booking prevention) does
   not. Blocks COMM-09.
 
-- **GAP-13 — Report card has no content model.** (Sharpens the existing Open
-  item.) Beyond the missing score payload: no attendance summary, no
+- **GAP-13 — Report card has no content model.** ✅ **Closed 2026-08-13
+  (Phase 5).** Subject rows (`report_card_subject`, each with a result status so
+  an absence prints AB rather than a zero), co-scholastic ratings, teacher and
+  principal remarks, an attendance summary taken from the attendance module's
+  own working-day denominator, the terms a card can honestly speak for, and
+  `promotion_decision` ∈ `promote | detain | graduate` — columns and rows, not
+  JSON, because "which children have no promotion decision" is Phase 6's first
+  question. Generation is idempotent per student/term/template: a locked card
+  refuses regeneration and names the unlock endpoint. The templated PDF renderer
+  remains on the frontend workstream. Original finding: (Sharpens the existing
+  Open item.) Beyond the missing score payload: no attendance summary, no
   co-scholastic ratings, no teacher remarks, no promotion decision — and the
   promotion decision is what YEC-03 reads to run bulk promotion, so this and
   GAP-02 are coupled. Blocks ASMT-10/14.
 
-- **GAP-29 — No rank / percentile / grade-boundary computation.** Needed on
-  report cards and for board preparation. Blocks ASMT-11.
+- **GAP-29 — No rank / percentile / grade-boundary computation.** ✅ **Closed
+  2026-08-13 (Phase 5).** `grade_scale` + `grade_band` hold each school's
+  boundaries (seeded from its board, editable), and `CurriculumStrategy` holds
+  the four things boards actually disagree about: the boundaries, the pass mark,
+  what the cohort is ranked on, and what results imply about promotion. CBSE
+  prints an aggregate percentage and ranks on it; Cambridge prints none and
+  ranks on mean grade point. Ranking is dense with ties sharing a place and is
+  recomputed for the whole cohort, so a rerun reproduces it exactly. Original
+  finding: Needed on report cards and for board preparation. Blocks ASMT-11.
 
 - **GAP-21 — No notification preferences or delivery management.** No
   per-guardian channel choice, quiet hours, category mute, or opt-out; no
