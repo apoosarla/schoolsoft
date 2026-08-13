@@ -189,10 +189,16 @@ export type SectionDto = {
   curriculumId: string | null;
   strategyCode: string;
   capacity: number | null;
+  campusId: string | null;
 };
 
-export function listSections(schoolId: string): Promise<SectionDto[]> {
-  return apiFetch<SectionDto[]>(`/v1/tenancy/schools/${schoolId}/sections`);
+export function listSections(schoolId: string, academicYearId?: string): Promise<SectionDto[]> {
+  const params = new URLSearchParams();
+  if (academicYearId) params.set("academicYearId", academicYearId);
+  const query = params.toString();
+  return apiFetch<SectionDto[]>(
+    `/v1/tenancy/schools/${schoolId}/sections${query ? `?${query}` : ""}`
+  );
 }
 
 export type EnrolmentDto = {
@@ -208,8 +214,8 @@ export type EnrolmentDto = {
   rollNo: string | null;
 };
 
-export function rosterForSection(sectionId: string): Promise<EnrolmentDto[]> {
-  return apiFetch<EnrolmentDto[]>(`/v1/enrolment/sections/${sectionId}`);
+export function rosterForSection(sectionId: string, activeOnly = true): Promise<EnrolmentDto[]> {
+  return apiFetch<EnrolmentDto[]>(`/v1/enrolment/sections/${sectionId}?activeOnly=${activeOnly}`);
 }
 
 export type AttendanceRecordDto = {
@@ -505,17 +511,22 @@ export function timetableForSection(sectionId: string): Promise<TimetableSlotDto
   return apiFetch<TimetableSlotDto[]>(`/v1/timetable/sections/${sectionId}`);
 }
 
+/**
+ * Give either `periodId` — the times then come from the grade's bell schedule
+ * and move with it — or explicit `startsAt`/`endsAt`.
+ */
 export function createTimetableSlot(req: {
   sectionId: string;
   subjectId: string;
   teacherStaffId: string;
   dayOfWeek: number;
   periodNo: number;
-  startsAt: string;
-  endsAt: string;
+  startsAt?: string;
+  endsAt?: string;
   room?: string;
   effectiveFrom: string;
   effectiveTo?: string;
+  periodId?: string;
 }): Promise<TimetableSlotDto> {
   return apiFetch<TimetableSlotDto>("/v1/timetable/slots", {
     method: "POST",
@@ -1761,6 +1772,594 @@ export function geofenceStatus(vehicleId: string, stopId: string): Promise<Geofe
   return apiFetch<GeofenceStatusDto>(`/v1/transport/geofence-status?${params.toString()}`);
 }
 
+// -------------------------- Structure: subjects, electives, roll numbers, bells (Phase 2) ---
+
+export function createSubject(
+  schoolId: string,
+  req: { code: string; name: string; boardCode?: string }
+): Promise<SubjectDto> {
+  return apiFetch<SubjectDto>(`/v1/tenancy/schools/${schoolId}/subjects`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * What a section is taught and by whom. `isElective` is the flag that separates
+ * a subject the whole section takes from an option only its electors take —
+ * the distinction `SubjectSetResolver` reads.
+ */
+export type SectionTeacherDto = {
+  id: string;
+  sectionId: string;
+  subjectId: string;
+  subjectName: string;
+  teacherStaffId: string;
+  teacherName: string;
+  isPrimary: boolean;
+  isElective: boolean;
+};
+
+export function listSectionTeachers(sectionId: string): Promise<SectionTeacherDto[]> {
+  return apiFetch<SectionTeacherDto[]>(`/v1/tenancy/sections/${sectionId}/teachers`);
+}
+
+export function assignSectionTeacher(
+  sectionId: string,
+  req: { subjectId: string; teacherStaffId: string; isPrimary: boolean; isElective: boolean }
+): Promise<SectionTeacherDto> {
+  return apiFetch<SectionTeacherDto>(`/v1/tenancy/sections/${sectionId}/teachers`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** An option block a grade offers — an IGCSE block, a Class 11 stream. */
+export type ElectiveGroupDto = {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  gradeId: string;
+  code: string;
+  name: string;
+  minPicks: number;
+  maxPicks: number;
+  options: { subjectId: string; subjectCode: string; subjectName: string; capacity: number | null }[];
+};
+
+export function listElectiveGroups(
+  schoolId: string,
+  academicYearId?: string,
+  gradeId?: string
+): Promise<ElectiveGroupDto[]> {
+  const params = new URLSearchParams();
+  if (academicYearId) params.set("academicYearId", academicYearId);
+  if (gradeId) params.set("gradeId", gradeId);
+  const query = params.toString();
+  return apiFetch<ElectiveGroupDto[]>(
+    `/v1/tenancy/schools/${schoolId}/elective-groups${query ? `?${query}` : ""}`
+  );
+}
+
+export function createElectiveGroup(
+  schoolId: string,
+  req: {
+    academicYearId: string;
+    gradeId: string;
+    code: string;
+    name: string;
+    minPicks: number;
+    maxPicks: number;
+    subjectIds: string[];
+  }
+): Promise<ElectiveGroupDto> {
+  return apiFetch<ElectiveGroupDto>(`/v1/tenancy/schools/${schoolId}/elective-groups`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * One subject a student studies. `origin` is `compulsory` when the section
+ * takes it as a whole and `elective` when the student chose it, so a screen can
+ * show which rows are the child's own decision.
+ */
+export type StudentSubjectDto = {
+  id: string;
+  enrolmentId: string;
+  studentId: string;
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  origin: string;
+  electiveGroupId: string | null;
+  electiveGroupCode: string | null;
+  status: string;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+};
+
+/** The resolved set: the section's compulsory subjects plus this student's elections. */
+export function subjectsForEnrolment(enrolmentId: string, onDate?: string): Promise<StudentSubjectDto[]> {
+  const query = onDate ? `?onDate=${onDate}` : "";
+  return apiFetch<StudentSubjectDto[]>(`/v1/enrolment/${enrolmentId}/subjects${query}`);
+}
+
+export function electionsForEnrolment(enrolmentId: string): Promise<StudentSubjectDto[]> {
+  return apiFetch<StudentSubjectDto[]>(`/v1/enrolment/${enrolmentId}/elections`);
+}
+
+export function electSubject(
+  enrolmentId: string,
+  req: { subjectId: string; electiveGroupId?: string; effectiveFrom?: string }
+): Promise<StudentSubjectDto> {
+  return apiFetch<StudentSubjectDto>(`/v1/enrolment/${enrolmentId}/elections`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Ends an election from a date; the marks earned under it stay. */
+export function dropElection(
+  enrolmentId: string,
+  req: { subjectId: string; effectiveTo?: string }
+): Promise<void> {
+  return apiFetch<void>(`/v1/enrolment/${enrolmentId}/elections/drop`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * `rollNo` left out, the section's number series issues the next one.
+ * `overCapacityReason` is required only when the section is already full.
+ */
+export function enrolStudent(req: {
+  schoolId: string;
+  studentId: string;
+  sectionId: string;
+  academicYearId: string;
+  startsOn: string;
+  rollNo?: string;
+  overCapacityReason?: string;
+}): Promise<EnrolmentDto> {
+  return apiFetch<EnrolmentDto>("/v1/enrolment", { method: "POST", body: JSON.stringify(req) });
+}
+
+export function transferEnrolment(
+  id: string,
+  req: { newSectionId: string; rollNo?: string; overCapacityReason?: string }
+): Promise<EnrolmentDto> {
+  return apiFetch<EnrolmentDto>(`/v1/enrolment/${id}/transfer`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * Re-sequences a section's roll numbers from 1 in admission order. Deliberately
+ * an explicit action: it changes what is written in every child's exercise book.
+ */
+export function renumberSection(sectionId: string): Promise<EnrolmentDto[]> {
+  return apiFetch<EnrolmentDto[]>(`/v1/enrolment/sections/${sectionId}/renumber`, { method: "POST" });
+}
+
+/**
+ * The school day for a grade band. A slot references a period rather than
+ * repeating its times, so moving the bell moves every affected lesson at once.
+ */
+export type BellScheduleDto = {
+  id: string;
+  schoolId: string;
+  campusId: string | null;
+  code: string;
+  name: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  gradeIds: string[];
+  periods: {
+    id: string;
+    periodNo: number;
+    label: string;
+    startsAt: string;
+    endsAt: string;
+    isBreak: boolean;
+  }[];
+};
+
+export function listBellSchedules(schoolId: string): Promise<BellScheduleDto[]> {
+  return apiFetch<BellScheduleDto[]>(`/v1/timetable/bell-schedules?schoolId=${schoolId}`);
+}
+
+/** The schedule a section follows, through its grade; 204 when its grade has none. */
+export function bellScheduleForSection(sectionId: string): Promise<BellScheduleDto | undefined> {
+  return apiFetch<BellScheduleDto | undefined>(`/v1/timetable/sections/${sectionId}/bell-schedule`);
+}
+
+export function createBellSchedule(req: {
+  schoolId: string;
+  campusId?: string;
+  code: string;
+  name: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  periods: { periodNo: number; label: string; startsAt: string; endsAt: string; isBreak: boolean }[];
+  gradeIds?: string[];
+}): Promise<BellScheduleDto> {
+  return apiFetch<BellScheduleDto>("/v1/timetable/bell-schedules", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Room clashes and teachers over their weekly load — advisory, not a block. */
+export function timetablePublishWarnings(
+  sectionId: string
+): Promise<{ sectionId: string; warnings: string[]; publishable: boolean }> {
+  return apiFetch<{ sectionId: string; warnings: string[]; publishable: boolean }>(
+    `/v1/timetable/sections/${sectionId}/publish-warnings`
+  );
+}
+
+// -------------------------- Fee engine: structures, runs, dunning, reports (Phase 4) ---
+
+export type FeeStructureDto = {
+  id: string;
+  schoolId: string;
+  gradeId: string;
+  academicYearId: string;
+  name: string;
+  schedule: Record<string, unknown> | null;
+  lines: {
+    id: string;
+    feeHeadId: string;
+    feeHeadCode: string;
+    feeHeadName: string;
+    amount: number;
+    gstRatePct: number;
+  }[];
+  total: number;
+};
+
+export function listFeeStructures(
+  schoolId: string,
+  academicYearId?: string,
+  gradeId?: string
+): Promise<FeeStructureDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (academicYearId) params.set("academicYearId", academicYearId);
+  if (gradeId) params.set("gradeId", gradeId);
+  return apiFetch<FeeStructureDto[]>(`/v1/fees/structures?${params.toString()}`);
+}
+
+export function createFeeStructure(req: {
+  schoolId: string;
+  gradeId: string;
+  academicYearId: string;
+  name: string;
+  schedule?: Record<string, unknown>;
+  lines: { feeHeadId: string; amount: number }[];
+}): Promise<FeeStructureDto> {
+  return apiFetch<FeeStructureDto>("/v1/fees/structures", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function replaceFeeStructureLines(
+  id: string,
+  lines: { feeHeadId: string; amount: number }[]
+): Promise<FeeStructureDto> {
+  return apiFetch<FeeStructureDto>(`/v1/fees/structures/${id}/lines`, {
+    method: "PUT",
+    body: JSON.stringify({ lines }),
+  });
+}
+
+/** Next year's structure is a copy — editing it must not touch this year's. */
+export function cloneFeeStructure(
+  id: string,
+  req: { targetAcademicYearId: string; name?: string }
+): Promise<FeeStructureDto> {
+  return apiFetch<FeeStructureDto>(`/v1/fees/structures/${id}/clone`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * `alreadyRun` is the point of the run record: billing a cycle twice is a no-op
+ * with the first run's numbers, not an error and not a second set of invoices.
+ */
+export type FeeRunResultDto = {
+  runId: string;
+  invoicesCreated: number;
+  studentsSkipped: number;
+  totalBilled: number;
+  alreadyRun: boolean;
+};
+
+export function generateInvoices(req: {
+  schoolId: string;
+  academicYearId: string;
+  gradeId?: string;
+  cycleLabel: string;
+  dueOn: string;
+  runByStaffId?: string;
+}): Promise<FeeRunResultDto> {
+  return apiFetch<FeeRunResultDto>("/v1/fees/generate", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type FeeScheduleRunDto = {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  cycleLabel: string;
+  gradeId: string | null;
+  gradeCode: string | null;
+  dueOn: string;
+  state: string;
+  invoicesCreated: number;
+  studentsSkipped: number;
+  totalBilled: number;
+  runByStaffId: string | null;
+  createdAt: string;
+};
+
+export function listFeeRuns(schoolId: string, academicYearId?: string): Promise<FeeScheduleRunDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (academicYearId) params.set("academicYearId", academicYearId);
+  return apiFetch<FeeScheduleRunDto[]>(`/v1/fees/runs?${params.toString()}`);
+}
+
+/**
+ * Everything that changes a bill after it was issued. A bounced cheque is a
+ * `reversal`, never a deleted payment — the school has to be able to show that
+ * the money arrived and went away again.
+ */
+export type FeeAdjustmentDto = {
+  id: string;
+  schoolId: string;
+  feeInvoiceId: string;
+  paymentId: string | null;
+  kind: string;
+  amount: number;
+  reason: string;
+  approvedByStaffId: string | null;
+  createdAt: string;
+};
+
+export const FEE_ADJUSTMENT_KINDS = [
+  "credit_note",
+  "waiver",
+  "charge",
+  "late_fee",
+  "reversal",
+  "refund",
+] as const;
+
+/** Which way each kind moves the bill, for the operator about to post one. */
+export const FEE_ADJUSTMENT_EFFECT: Record<string, string> = {
+  credit_note: "lowers what is owed",
+  waiver: "lowers what is owed, as a waiver",
+  charge: "raises what is owed",
+  late_fee: "raises what is owed, as a late fee",
+  reversal: "un-does a payment (a bounced cheque)",
+  refund: "pays money back out",
+};
+
+export function listAdjustments(invoiceId: string): Promise<FeeAdjustmentDto[]> {
+  return apiFetch<FeeAdjustmentDto[]>(`/v1/fees/invoices/${invoiceId}/adjustments`);
+}
+
+export function postAdjustment(
+  invoiceId: string,
+  req: {
+    schoolId: string;
+    kind: string;
+    amount: number;
+    reason: string;
+    paymentId?: string;
+    approvedByStaffId?: string;
+    feeHeadId?: string;
+  }
+): Promise<FeeAdjustmentDto> {
+  return apiFetch<FeeAdjustmentDto>(`/v1/fees/invoices/${invoiceId}/adjustments`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type ConcessionDto = {
+  id: string;
+  kind: string;
+  pct: number | null;
+  flatAmount: number | null;
+  appliesToHeadId: string | null;
+  notes: string | null;
+};
+
+export function listConcessions(studentId: string, academicYearId?: string): Promise<ConcessionDto[]> {
+  const params = new URLSearchParams({ studentId });
+  if (academicYearId) params.set("academicYearId", academicYearId);
+  return apiFetch<ConcessionDto[]>(`/v1/fees/concessions?${params.toString()}`);
+}
+
+/** A concession is a decision about one child's bill, so it records who approved it. */
+export function grantConcession(req: {
+  schoolId: string;
+  studentId: string;
+  academicYearId: string;
+  kind: string;
+  pct?: number;
+  flatAmount?: number;
+  appliesToHeadId?: string;
+  notes?: string;
+  approvedByStaffId?: string;
+}): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/v1/fees/concessions", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type SiblingPolicyDto = {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  nthChild: number;
+  pct: number;
+  appliesToHeadId: string | null;
+};
+
+export function listSiblingPolicies(
+  schoolId: string,
+  academicYearId?: string
+): Promise<SiblingPolicyDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (academicYearId) params.set("academicYearId", academicYearId);
+  return apiFetch<SiblingPolicyDto[]>(`/v1/fees/sibling-policies?${params.toString()}`);
+}
+
+export function upsertSiblingPolicy(req: {
+  schoolId: string;
+  academicYearId: string;
+  nthChild: number;
+  pct: number;
+  appliesToHeadId?: string;
+}): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/v1/fees/sibling-policies", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type DunningPolicyDto = {
+  id: string;
+  schoolId: string;
+  graceDays: number;
+  reminderDays: number[];
+  lateFeePct: number | null;
+  lateFeeFlat: number | null;
+  lateFeeHeadId: string | null;
+  isActive: boolean;
+};
+
+/** Undefined when the school has none — dunning then leaves its invoices alone. */
+export function getDunningPolicy(schoolId: string): Promise<DunningPolicyDto | undefined> {
+  return apiFetch<DunningPolicyDto | undefined>(`/v1/fees/dunning-policy?schoolId=${schoolId}`);
+}
+
+export function saveDunningPolicy(req: {
+  schoolId: string;
+  graceDays: number;
+  reminderDays: number[];
+  lateFeePct?: number;
+  lateFeeFlat?: number;
+  lateFeeHeadId?: string;
+}): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/v1/fees/dunning-policy", {
+    method: "PUT",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * One school's dunning pass for a chosen day. `dunning_event` is keyed on
+ * (invoice, kind, day), so running it twice does not write to a family twice.
+ */
+export type DunningResultDto = {
+  markedOverdue: number;
+  remindersSent: number;
+  lateFeesApplied: number;
+};
+
+export function runDunning(req: { schoolId: string; asOf?: string }): Promise<DunningResultDto> {
+  return apiFetch<DunningResultDto>("/v1/fees/dunning/run", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * What came in over a range. The collection total and the ledger's own bank
+ * movement are computed separately and returned together, so a mismatch shows
+ * up in the report rather than at year end.
+ */
+export type DayBookDto = {
+  from: string;
+  to: string;
+  collected: number;
+  refunded: number;
+  net: number;
+  ledgerNet: number;
+  reconciles: boolean;
+  byMethod: { method: string; count: number; amount: number }[];
+};
+
+export function feeDayBook(schoolId: string, from: string, to: string): Promise<DayBookDto> {
+  const params = new URLSearchParams({ schoolId, from, to });
+  return apiFetch<DayBookDto>(`/v1/fees/reports/day-book?${params.toString()}`);
+}
+
+export type OutstandingReportDto = {
+  totalOutstanding: number;
+  studentsWithDues: number;
+  byGrade: { gradeCode: string; students: number; balance: number }[];
+  students: {
+    studentId: string;
+    admissionNo: string;
+    name: string;
+    gradeCode: string | null;
+    sectionCode: string | null;
+    balance: number;
+    invoices: number;
+    oldestDueOn: string;
+  }[];
+};
+
+export function feeOutstanding(
+  schoolId: string,
+  filters?: { academicYearId?: string; gradeId?: string; sectionId?: string }
+): Promise<OutstandingReportDto> {
+  const params = new URLSearchParams({ schoolId });
+  if (filters?.academicYearId) params.set("academicYearId", filters.academicYearId);
+  if (filters?.gradeId) params.set("gradeId", filters.gradeId);
+  if (filters?.sectionId) params.set("sectionId", filters.sectionId);
+  return apiFetch<OutstandingReportDto>(`/v1/fees/reports/outstanding?${params.toString()}`);
+}
+
+export function studentDues(
+  studentId: string
+): Promise<{ studentId: string; balance: number; hasDues: boolean }> {
+  return apiFetch<{ studentId: string; balance: number; hasDues: boolean }>(
+    `/v1/fees/students/${studentId}/dues`
+  );
+}
+
+/** Groups a student with their siblings, by their shared guardian. */
+export function linkFamily(req: { schoolId: string; studentId: string }): Promise<{ familyId: string }> {
+  return apiFetch<{ familyId: string }>("/v1/fees/families/link", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function createCombinedFamilyInvoice(req: {
+  schoolId: string;
+  familyId: string;
+  cycleLabel: string;
+  dueOn: string;
+}): Promise<FeeInvoiceDto> {
+  return apiFetch<FeeInvoiceDto>("/v1/fees/families/combined-invoice", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
 // -------------------------- Roles & access --------------------------
 
 /** Every admin-web route that's gated by a role's screen_keys, plus "admin" for this Roles & Users screen itself. */
@@ -1771,6 +2370,7 @@ export const SCREEN_DEFS = [
   { key: "attendance", label: "Attendance", path: "/attendance" },
   { key: "fees", label: "Fees", path: "/fees" },
   { key: "calendar", label: "Calendar & Year", path: "/calendar" },
+  { key: "academics", label: "Academics", path: "/academics" },
   { key: "timetable", label: "Timetable", path: "/timetable" },
   { key: "assessment", label: "Assessment", path: "/assessment" },
   { key: "exams", label: "Exams", path: "/exams" },

@@ -116,6 +116,8 @@ const fees = createFeesApi(client);
 export const listInvoicesForStudent = fees.listInvoicesForStudent;
 export const listInvoiceLines = fees.listInvoiceLines;
 export const listPaymentsForInvoice = fees.listPaymentsForInvoice;
+export const adjustmentsForInvoice = fees.adjustmentsForInvoice;
+export const duesForStudent = fees.duesForStudent;
 
 const assessment = createAssessmentApi(client);
 export const reportCardsForStudent = assessment.reportCardsForStudent;

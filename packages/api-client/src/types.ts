@@ -78,6 +78,24 @@ export type FeeInvoiceLineDto = {
   gst: number;
 };
 
+/**
+ * A change to what is owed or what was paid, made after the invoice was
+ * issued. Kinds: credit_note | refund | waiver | late_fee | charge | reversal.
+ * A bounced cheque is a reversal, so the money arriving and going away again
+ * are both visible.
+ */
+export type FeeAdjustmentDto = {
+  id: string;
+  schoolId: string;
+  feeInvoiceId: string;
+  paymentId: string | null;
+  kind: string;
+  amount: number;
+  reason: string;
+  approvedByStaffId: string | null;
+  createdAt: string;
+};
+
 export type PaymentDto = {
   id: string;
   schoolId: string;

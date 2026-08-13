@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ApiError,
+  BellScheduleDto,
+  bellScheduleForSection,
   createTimetableSlot,
   deleteTimetableSlot,
   getSession,
@@ -18,6 +20,7 @@ import {
   StaffDto,
   SubjectDto,
   timetableForSection,
+  timetablePublishWarnings,
   TimetableSlotDto,
 } from "@/lib/api";
 
@@ -31,6 +34,7 @@ const emptyForm = {
   subjectId: "",
   teacherStaffId: "",
   dayOfWeek: "1",
+  periodId: "",
   periodNo: "1",
   startsAt: "09:00",
   endsAt: "09:45",
@@ -56,6 +60,8 @@ export default function TimetablePage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [dayDate, setDayDate] = useState(todayIso());
   const [day, setDay] = useState<SectionDayDto | null>(null);
+  const [bell, setBell] = useState<BellScheduleDto | null>(null);
+  const [warnings, setWarnings] = useState<string[] | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -86,6 +92,11 @@ export default function TimetablePage() {
       .then(setSlots)
       .catch((err) => setError(describeError(err)))
       .finally(() => setLoading(false));
+    // Room clashes and teachers over their weekly load: advisory at publish
+    // time, so they are shown beside the grid rather than blocking an edit.
+    timetablePublishWarnings(id)
+      .then((w) => setWarnings(w.warnings))
+      .catch(() => setWarnings(null));
   }
 
   useEffect(() => {
@@ -101,18 +112,36 @@ export default function TimetablePage() {
       .catch((err) => setError(describeError(err)));
   }, [sectionId, dayDate]);
 
+  // The section's bell schedule, through its grade. When it has one, a slot
+  // names a period instead of carrying its own times, so moving the bell moves
+  // every lesson hanging off it.
+  useEffect(() => {
+    if (!sectionId) return;
+    setBell(null);
+    bellScheduleForSection(sectionId)
+      .then((b) => {
+        setBell(b ?? null);
+        setForm((f) => ({ ...f, periodId: "" }));
+      })
+      .catch(() => setBell(null));
+  }, [sectionId]);
+
+  const teachingPeriods = bell?.periods.filter((p) => !p.isBreak) ?? [];
+
   async function onCreate() {
     setCreating(true);
     setError(null);
     try {
+      const period = teachingPeriods.find((p) => p.id === form.periodId);
       await createTimetableSlot({
         sectionId,
         subjectId: form.subjectId,
         teacherStaffId: form.teacherStaffId,
         dayOfWeek: Number(form.dayOfWeek),
-        periodNo: Number(form.periodNo),
-        startsAt: form.startsAt,
-        endsAt: form.endsAt,
+        periodNo: period ? period.periodNo : Number(form.periodNo),
+        periodId: period?.id,
+        startsAt: period ? undefined : form.startsAt,
+        endsAt: period ? undefined : form.endsAt,
         room: form.room || undefined,
         effectiveFrom: form.effectiveFrom,
         effectiveTo: form.effectiveTo || undefined,
@@ -186,20 +215,39 @@ export default function TimetablePage() {
                 </option>
               ))}
             </select>
-            <input
-              type="number"
-              min={1}
-              placeholder="Period"
-              value={form.periodNo}
-              onChange={(e) => setForm((f) => ({ ...f, periodNo: e.target.value }))}
-              style={{ maxWidth: 80 }}
-            />
-            <input
-              type="time"
-              value={form.startsAt}
-              onChange={(e) => setForm((f) => ({ ...f, startsAt: e.target.value }))}
-            />
-            <input type="time" value={form.endsAt} onChange={(e) => setForm((f) => ({ ...f, endsAt: e.target.value }))} />
+            {teachingPeriods.length > 0 ? (
+              <select value={form.periodId} onChange={(e) => setForm((f) => ({ ...f, periodId: e.target.value }))}>
+                <option value="">Own times…</option>
+                {teachingPeriods.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} ({p.startsAt.slice(0, 5)}–{p.endsAt.slice(0, 5)})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="number"
+                min={1}
+                placeholder="Period"
+                value={form.periodNo}
+                onChange={(e) => setForm((f) => ({ ...f, periodNo: e.target.value }))}
+                style={{ maxWidth: 80 }}
+              />
+            )}
+            {!form.periodId && (
+              <>
+                <input
+                  type="time"
+                  value={form.startsAt}
+                  onChange={(e) => setForm((f) => ({ ...f, startsAt: e.target.value }))}
+                />
+                <input
+                  type="time"
+                  value={form.endsAt}
+                  onChange={(e) => setForm((f) => ({ ...f, endsAt: e.target.value }))}
+                />
+              </>
+            )}
             <input
               placeholder="Room"
               value={form.room}
@@ -221,8 +269,25 @@ export default function TimetablePage() {
           </div>
         )}
 
+        {bell && (
+          <p className="hint">
+            Periods come from bell schedule <strong>{bell.name}</strong>, so moving a bell moves every lesson
+            on it. Breaks are not offered — one cannot hold a lesson.
+          </p>
+        )}
+
         {loading && <p className="hint">Loading…</p>}
         {error && <div className="error-banner">{error}</div>}
+        {warnings && warnings.length > 0 && (
+          <div className="warn-banner">
+            <strong>Publish warnings</strong>
+            <ul className="rejected-list" style={{ color: "inherit" }}>
+              {warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {slots && slots.length === 0 && <p className="hint">No timetable slots for this section yet.</p>}
 
         {slots && slots.length > 0 && (

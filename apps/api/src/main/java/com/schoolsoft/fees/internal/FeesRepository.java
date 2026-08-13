@@ -1,10 +1,13 @@
 package com.schoolsoft.fees.internal;
 
+import com.schoolsoft.fees.api.DunningPolicyDto;
 import com.schoolsoft.fees.api.FeeHeadDto;
 import com.schoolsoft.fees.api.FeeInvoiceDto;
 import com.schoolsoft.fees.api.FeeInvoiceLineDto;
+import com.schoolsoft.fees.api.FeeScheduleRunDto;
 import com.schoolsoft.fees.api.LedgerEntryDto;
 import com.schoolsoft.fees.api.PaymentDto;
+import com.schoolsoft.fees.api.SiblingPolicyDto;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.tenancy.api.AcademicYearGuard;
@@ -340,5 +343,76 @@ public class FeesRepository {
             "  is_active = TRUE",
             id, schoolId, graceDays, days, lateFeePct, lateFeeFlat, lateFeeHeadId);
         return jdbc.queryForObject("SELECT id FROM dunning_policy WHERE school_id = ?", UUID.class, schoolId);
+    }
+
+    /** Empty until a school sets one; the job then leaves that school alone. */
+    public Optional<DunningPolicyDto> findDunningPolicy(UUID schoolId) {
+        return jdbc.query(
+            "SELECT id, school_id, grace_days, reminder_days, late_fee_pct, late_fee_flat, " +
+            "  late_fee_head_id, is_active FROM dunning_policy WHERE school_id = ?",
+            (rs, i) -> new DunningPolicyDto(
+                UUID.fromString(rs.getString("id")),
+                UUID.fromString(rs.getString("school_id")),
+                rs.getInt("grace_days"),
+                List.of((Integer[]) rs.getArray("reminder_days").getArray()),
+                // NUMERIC arrives as BigDecimal, and both columns are nullable —
+                // a school may charge a percentage, a flat fee, or neither.
+                rs.getBigDecimal("late_fee_pct") == null ? null
+                    : rs.getBigDecimal("late_fee_pct").doubleValue(),
+                rs.getBigDecimal("late_fee_flat") == null ? null
+                    : rs.getBigDecimal("late_fee_flat").doubleValue(),
+                rs.getString("late_fee_head_id") == null ? null
+                    : UUID.fromString(rs.getString("late_fee_head_id")),
+                rs.getBoolean("is_active")),
+            schoolId).stream().findFirst();
+    }
+
+    public List<SiblingPolicyDto> listSiblingPolicies(UUID schoolId, UUID academicYearId) {
+        String sql = "SELECT id, school_id, academic_year_id, nth_child, pct, applies_to_head_id " +
+            "FROM sibling_concession_policy WHERE school_id = ?" +
+            (academicYearId == null ? "" : " AND academic_year_id = ?") + " ORDER BY nth_child";
+        Object[] args = academicYearId == null ? new Object[]{ schoolId }
+            : new Object[]{ schoolId, academicYearId };
+        return jdbc.query(sql, (rs, i) -> new SiblingPolicyDto(
+            UUID.fromString(rs.getString("id")),
+            UUID.fromString(rs.getString("school_id")),
+            UUID.fromString(rs.getString("academic_year_id")),
+            rs.getInt("nth_child"),
+            rs.getDouble("pct"),
+            rs.getString("applies_to_head_id") == null ? null
+                : UUID.fromString(rs.getString("applies_to_head_id"))),
+            args);
+    }
+
+    /**
+     * The billing runs so far. Because a run row is what makes a re-run a
+     * no-op, this list is also the answer to "has this cycle been billed".
+     */
+    public List<FeeScheduleRunDto> listScheduleRuns(UUID schoolId, UUID academicYearId) {
+        String sql =
+            "SELECT r.id, r.school_id, r.academic_year_id, r.cycle_label, r.grade_id, g.code AS grade_code, " +
+            "       r.due_on, r.state, r.invoices_created, r.students_skipped, r.total_billed, " +
+            "       r.run_by_staff_id, r.created_at " +
+            "FROM fee_schedule_run r LEFT JOIN grade g ON g.id = r.grade_id " +
+            "WHERE r.school_id = ?" + (academicYearId == null ? "" : " AND r.academic_year_id = ?") +
+            " ORDER BY r.created_at DESC";
+        Object[] args = academicYearId == null ? new Object[]{ schoolId }
+            : new Object[]{ schoolId, academicYearId };
+        return jdbc.query(sql, (rs, i) -> new FeeScheduleRunDto(
+            UUID.fromString(rs.getString("id")),
+            UUID.fromString(rs.getString("school_id")),
+            UUID.fromString(rs.getString("academic_year_id")),
+            rs.getString("cycle_label"),
+            rs.getString("grade_id") == null ? null : UUID.fromString(rs.getString("grade_id")),
+            rs.getString("grade_code"),
+            rs.getDate("due_on").toLocalDate(),
+            rs.getString("state"),
+            rs.getInt("invoices_created"),
+            rs.getInt("students_skipped"),
+            rs.getDouble("total_billed"),
+            rs.getString("run_by_staff_id") == null ? null
+                : UUID.fromString(rs.getString("run_by_staff_id")),
+            rs.getTimestamp("created_at").toInstant()),
+            args);
     }
 }

@@ -84,6 +84,20 @@ class FeesCertTest extends AbstractCertificationTest {
             assertThat(count("SELECT count(*) FROM fee_invoice WHERE cycle_label = ?", cycle))
                 .isEqualTo(invoiced);
 
+            // The run is listed, which is how an operator answers "has this cycle
+            // been billed" without reading invoices.
+            var runs = get("/v1/fees/runs?schoolId=" + cie().id()
+                + "&academicYearId=" + cie().currentAy().id(), token).getBody();
+            boolean listed = false;
+            for (var row : runs) {
+                if (cycle.equals(row.get("cycleLabel").asText())) {
+                    assertThat(row.get("invoicesCreated").asInt()).isEqualTo(createdCount);
+                    assertThat(row.get("state").asText()).isEqualTo("completed");
+                    listed = true;
+                }
+            }
+            assertThat(listed).isTrue();
+
             // And the database refuses it too, so a concurrent second run cannot
             // slip past the run record.
             UUID studentId = queryOne("SELECT student_id FROM fee_invoice WHERE cycle_label = ? LIMIT 1",
@@ -164,6 +178,11 @@ class FeesCertTest extends AbstractCertificationTest {
             // Both children are in the same household.
             assertThat(queryOne("SELECT family_id FROM student WHERE id = ?", UUID.class, siblings[1]))
                 .isEqualTo(familyId);
+
+            var policies = get("/v1/fees/sibling-policies?schoolId=" + cbse().id()
+                + "&academicYearId=" + cbse().currentAy().id(), token).getBody();
+            assertThat(policies.get(0).get("nthChild").asInt()).isEqualTo(2);
+            assertThat(policies.get(0).get("pct").asDouble()).isEqualTo(20.0);
 
             generate(cbse(), gradeOf(cbse(), gradeCodeOf(siblings[0])), cycle, "2026-09-10", token);
             generate(cbse(), gradeOf(cbse(), gradeCodeOf(siblings[1])), cycle, "2026-09-10", token);
@@ -313,6 +332,14 @@ class FeesCertTest extends AbstractCertificationTest {
             cbse().id());
 
         try {
+            // The cadence reads back, so an operator can see what a family will be
+            // sent before changing it.
+            var policy = get("/v1/fees/dunning-policy?schoolId=" + cbse().id(), token);
+            assertThat(policy.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(policy.getBody().get("graceDays").asInt()).isEqualTo(3);
+            assertThat(policy.getBody().get("reminderDays").toString()).isEqualTo("[1,7]");
+            assertThat(policy.getBody().hasNonNull("lateFeePct")).isFalse();   // no late fee configured
+
             var run = post("/v1/fees/dunning/run",
                 body("schoolId", cbse().id(), "asOf", "2026-08-12"), token);
             assertThat(run.getStatusCode()).isEqualTo(HttpStatus.OK);

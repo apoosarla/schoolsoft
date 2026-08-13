@@ -122,6 +122,13 @@ public class FeesController {
         return java.util.Map.of("id", id);
     }
 
+    @GetMapping("/sibling-policies")
+    public List<SiblingPolicyDto> siblingPolicies(
+        @RequestParam UUID schoolId, @RequestParam(required = false) UUID academicYearId
+    ) {
+        return repo.listSiblingPolicies(schoolId, academicYearId);
+    }
+
     public record DunningPolicyRequest(
         @NotNull UUID schoolId, int graceDays, List<Integer> reminderDays, Double lateFeePct,
         Double lateFeeFlat, UUID lateFeeHeadId
@@ -132,6 +139,14 @@ public class FeesController {
         UUID id = repo.upsertDunningPolicy(req.schoolId(), req.graceDays(), req.reminderDays(),
             req.lateFeePct(), req.lateFeeFlat(), req.lateFeeHeadId());
         return java.util.Map.of("id", id);
+    }
+
+    /** 204 when the school has none — dunning then leaves its invoices alone. */
+    @GetMapping("/dunning-policy")
+    public ResponseEntity<DunningPolicyDto> getDunningPolicy(@RequestParam UUID schoolId) {
+        return repo.findDunningPolicy(schoolId)
+            .map(ResponseEntity::ok)
+            .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     // -------------------------- Generation (FEE-02) --------------------------
@@ -145,6 +160,14 @@ public class FeesController {
     public FeeGenerationService.RunResult generate(@RequestBody GenerateRequest req) {
         return generation.generate(req.schoolId(), req.academicYearId(), req.gradeId(), req.cycleLabel(),
             req.dueOn(), req.runByStaffId());
+    }
+
+    /** What has been billed already, newest first — the answer to "did October run?". */
+    @GetMapping("/runs")
+    public List<FeeScheduleRunDto> runs(
+        @RequestParam UUID schoolId, @RequestParam(required = false) UUID academicYearId
+    ) {
+        return repo.listScheduleRuns(schoolId, academicYearId);
     }
 
     // -------------------------- Families (FEE-04, ADM-11) --------------------------

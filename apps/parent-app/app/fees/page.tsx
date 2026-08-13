@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  adjustmentsForInvoice,
   ApiError,
+  duesForStudent,
+  FeeAdjustmentDto,
   FeeInvoiceDto,
   FeeInvoiceLineDto,
   getSession,
@@ -15,6 +18,16 @@ import {
   StudentDto,
   studentsOfGuardian,
 } from "@/lib/api";
+
+/** What each kind means to the family, in their words rather than the ledger's. */
+const ADJUSTMENT_WORDING: Record<string, string> = {
+  credit_note: "Credit — reduces what is owed",
+  waiver: "Waived by the school",
+  charge: "Added charge",
+  late_fee: "Late fee",
+  reversal: "Payment reversed (a cheque did not clear)",
+  refund: "Refunded to you",
+};
 
 function inr(n: number): string {
   return n.toLocaleString(undefined, { style: "currency", currency: "INR", maximumFractionDigits: 2 });
@@ -29,6 +42,8 @@ export default function FeesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [lines, setLines] = useState<FeeInvoiceLineDto[] | null>(null);
   const [payments, setPayments] = useState<PaymentDto[] | null>(null);
+  const [adjustments, setAdjustments] = useState<FeeAdjustmentDto[] | null>(null);
+  const [dues, setDues] = useState<{ balance: number; hasDues: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -55,8 +70,12 @@ export default function FeesPage() {
   useEffect(() => {
     if (!activeId) return;
     setExpandedId(null);
+    setDues(null);
     listInvoicesForStudent(activeId)
       .then(setInvoices)
+      .catch((err) => setError(describeError(err)));
+    duesForStudent(activeId)
+      .then(setDues)
       .catch((err) => setError(describeError(err)));
   }, [activeId]);
 
@@ -68,9 +87,14 @@ export default function FeesPage() {
     setExpandedId(inv.id);
     setError(null);
     try {
-      const [il, p] = await Promise.all([listInvoiceLines(inv.id), listPaymentsForInvoice(inv.id)]);
+      const [il, p, adj] = await Promise.all([
+        listInvoiceLines(inv.id),
+        listPaymentsForInvoice(inv.id),
+        adjustmentsForInvoice(inv.id),
+      ]);
       setLines(il);
       setPayments(p);
+      setAdjustments(adj);
     } catch (err) {
       setError(describeError(err));
     }
@@ -118,6 +142,17 @@ export default function FeesPage() {
       {children && children.length === 0 && (
         <div className="panel">
           <p className="empty-note">No children linked to this account yet.</p>
+        </div>
+      )}
+
+      {dues && (
+        <div className="panel">
+          <h2>{dues.hasDues ? `Outstanding ${inr(dues.balance)}` : "Nothing outstanding"}</h2>
+          <p className="hint">
+            {dues.hasDues
+              ? "Across every unpaid invoice below, after any credit or waiver the school has applied."
+              : "Every invoice is settled."}
+          </p>
         </div>
       )}
 
@@ -206,6 +241,36 @@ export default function FeesPage() {
                 </table>
               ) : (
                 <p className="hint">No payments yet.</p>
+              )}
+
+              {adjustments && adjustments.length > 0 && (
+                <>
+                  <h2 style={{ marginTop: 16 }}>Changes since this bill was issued</h2>
+                  <p className="hint">
+                    Why the amount moved. Nothing here is deleted — a cheque that did not clear shows as a
+                    reversal, so the payment and its undoing are both on the record.
+                  </p>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>What</th>
+                        <th>Amount</th>
+                        <th>Reason</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adjustments.map((a) => (
+                        <tr key={a.id}>
+                          <td>{ADJUSTMENT_WORDING[a.kind] ?? a.kind}</td>
+                          <td>{inr(a.amount)}</td>
+                          <td>{a.reason}</td>
+                          <td>{a.createdAt.slice(0, 10)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
               )}
             </div>
           )}

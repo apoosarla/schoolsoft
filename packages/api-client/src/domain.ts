@@ -13,6 +13,7 @@ import type {
   AttendanceRecordDto,
   ExamScheduleDto,
   ExamSessionDto,
+  FeeAdjustmentDto,
   FeeInvoiceDto,
   FeeInvoiceLineDto,
   HallTicketDto,
@@ -101,6 +102,18 @@ export function createFeesApi(client: ApiClient) {
     },
     listPaymentsForInvoice(invoiceId: string): Promise<PaymentDto[]> {
       return client.apiFetch<PaymentDto[]>(`/v1/fees/invoices/${invoiceId}/payments`);
+    },
+    /**
+     * Why the amount owed moved after the bill was issued — a credit note, a
+     * waiver, a late fee, or the reversal of a cheque that bounced.
+     */
+    adjustmentsForInvoice(invoiceId: string): Promise<FeeAdjustmentDto[]> {
+      return client.apiFetch<FeeAdjustmentDto[]>(`/v1/fees/invoices/${invoiceId}/adjustments`);
+    },
+    duesForStudent(studentId: string): Promise<{ studentId: string; balance: number; hasDues: boolean }> {
+      return client.apiFetch<{ studentId: string; balance: number; hasDues: boolean }>(
+        `/v1/fees/students/${studentId}/dues`
+      );
     },
   };
 }

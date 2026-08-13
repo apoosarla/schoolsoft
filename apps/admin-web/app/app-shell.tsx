@@ -39,6 +39,13 @@ const ICON: Record<string, JSX.Element> = {
       <path d="M9 5.5V12.5M11 6.9C11 6 10.1 5.5 9 5.5C7.9 5.5 7 6 7 6.9C7 8.6 11 7.7 11 9.9C11 10.9 10.1 11.5 9 11.5C7.9 11.5 7 10.9 7 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   ),
+  academics: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path d="M9 2.4L16 5.6L9 8.8L2 5.6L9 2.4Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M4.6 7.2V11.6C4.6 12.9 6.6 13.9 9 13.9C11.4 13.9 13.4 12.9 13.4 11.6V7.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M16 5.6V9.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
   timetable: (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <rect x="2.3" y="3" width="13.4" height="12.2" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
