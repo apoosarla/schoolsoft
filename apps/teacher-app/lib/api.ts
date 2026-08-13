@@ -141,6 +141,45 @@ export function timetableForTeacher(teacherStaffId: string): Promise<TimetableSl
   return apiFetch<TimetableSlotDto[]>(`/v1/timetable/teachers/${teacherStaffId}`);
 }
 
+export type TimetableCoverDto = {
+  id: string;
+  slotId: string;
+  sectionId: string;
+  sectionLabel: string;
+  subjectName: string;
+  onDate: string;
+  periodNo: number;
+  startsAt: string;
+  endsAt: string;
+  room: string | null;
+  absentStaffId: string;
+  absentStaffName: string;
+  substituteStaffId: string;
+  substituteStaffName: string;
+  reason: string | null;
+  cancelled: boolean;
+};
+
+/**
+ * One date, resolved: the school calendar decides whether it is a school day
+ * at all, cover given away is removed from the teacher's own periods, and
+ * cover taken on is added. That is the list a teacher's morning actually is —
+ * a week view can answer none of it.
+ */
+export type TeacherDayDto = {
+  teacherStaffId: string;
+  date: string;
+  working: boolean;
+  reason: string | null;
+  slots: TimetableSlotDto[];
+  covering: TimetableCoverDto[];
+  coveredForThem: TimetableCoverDto[];
+};
+
+export function teacherDay(teacherStaffId: string, date: string): Promise<TeacherDayDto> {
+  return apiFetch<TeacherDayDto>(`/v1/timetable/teachers/${teacherStaffId}/day?date=${date}`);
+}
+
 export type EnrolmentDto = {
   id: string;
   schoolId: string;
@@ -253,18 +292,43 @@ export type MarkDto = {
   rawMarks: number | null;
   gradeLetter: string | null;
   remarks: string | null;
+  /** entered | pending | absent | medical_leave | exempt. */
+  status: string;
   isAbsent: boolean;
+  revisionCount: number;
 };
+
+/**
+ * What a teacher picks when there will be no number. `entered` is implied by
+ * typing a mark, and `pending` is the paper nobody has marked yet — which is
+ * the state a blank box actually means, and not a zero.
+ */
+export const MARK_STATUSES = ["entered", "pending", "absent", "medical_leave", "exempt"] as const;
 
 export function marksForComponent(componentId: string): Promise<MarkDto[]> {
   return apiFetch<MarkDto[]>(`/v1/assessment/components/${componentId}/marks`);
 }
 
-export function enterMark(
-  componentId: string,
-  req: { schoolId: string; studentId: string; rawMarks?: number; isAbsent: boolean }
-): Promise<MarkDto> {
-  return apiFetch<MarkDto>(`/v1/assessment/components/${componentId}/marks`, {
+export type BulkMarkResult = {
+  componentId: string;
+  accepted: number;
+  marks: MarkDto[];
+  rejected: { studentId: string; reason: string }[];
+};
+
+/**
+ * The whole section in one call. Rows are validated individually, so a mark
+ * above the paper's maximum is refused and named while the rest are saved —
+ * which matters most on a phone, where retyping forty marks is the worst
+ * possible outcome.
+ */
+export function enterMarksInBulk(req: {
+  schoolId: string;
+  componentId: string;
+  entries: { studentId: string; rawMarks?: number; status?: string }[];
+  enteredByStaffId?: string;
+}): Promise<BulkMarkResult> {
+  return apiFetch<BulkMarkResult>("/v1/assessment/marks/bulk", {
     method: "POST",
     body: JSON.stringify(req),
   });

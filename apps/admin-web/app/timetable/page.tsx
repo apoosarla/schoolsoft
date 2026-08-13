@@ -11,6 +11,8 @@ import {
   listSections,
   listStaff,
   listSubjects,
+  SectionDayDto,
+  sectionDay,
   SectionDto,
   Session,
   StaffDto,
@@ -52,6 +54,8 @@ export default function TimetablePage() {
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [dayDate, setDayDate] = useState(todayIso());
+  const [day, setDay] = useState<SectionDayDto | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -88,6 +92,14 @@ export default function TimetablePage() {
     if (!sectionId) return;
     refresh(sectionId);
   }, [sectionId]);
+
+  useEffect(() => {
+    if (!sectionId) return;
+    setDay(null);
+    sectionDay(sectionId, dayDate)
+      .then(setDay)
+      .catch((err) => setError(describeError(err)));
+  }, [sectionId, dayDate]);
 
   async function onCreate() {
     setCreating(true);
@@ -250,6 +262,96 @@ export default function TimetablePage() {
                     </tr>
                   );
                 })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* ------------------------------------------------------ one date */}
+      <div className="panel">
+        <h2>What happens on a date</h2>
+        <p className="hint">
+          The week above is the plan. This is the day itself: the school calendar decides whether there is
+          school at all, an exam week replaces the periods, and cover names who is actually taking the class.
+        </p>
+        <div className="form-row">
+          <input type="date" value={dayDate} onChange={(e) => setDayDate(e.target.value)} />
+        </div>
+
+        {day && !day.working && (
+          <p className="hint">School closed — {day.reason ?? "not a working day"}.</p>
+        )}
+
+        {day?.working && day.examDay && (
+          <>
+            <div className="warn-banner">
+              Exam day: the regular timetable is suspended and these papers run instead.
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Paper</th>
+                  <th>Room</th>
+                </tr>
+              </thead>
+              <tbody>
+                {day.examSessions.map((s) => (
+                  <tr key={s.id}>
+                    <td>
+                      {s.startsAt.slice(0, 5)}–{s.endsAt.slice(0, 5)}
+                    </td>
+                    <td>
+                      {s.subjectCode} · {s.name}
+                    </td>
+                    <td>{s.room ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {day?.working && !day.examDay && (
+          <table>
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th>Time</th>
+                <th>Subject</th>
+                <th>Taken by</th>
+                <th>Room</th>
+              </tr>
+            </thead>
+            <tbody>
+              {day.slots.map((slot) => {
+                const cover = day.covers.find((c) => c.slotId === slot.id && !c.cancelled);
+                const teacher = staff?.find((s) => s.id === slot.teacherStaffId);
+                return (
+                  <tr key={slot.id}>
+                    <td>{slot.periodNo}</td>
+                    <td>
+                      {slot.startsAt.slice(0, 5)}–{slot.endsAt.slice(0, 5)}
+                    </td>
+                    <td>{slot.subjectName}</td>
+                    <td>
+                      {cover
+                        ? `${cover.substituteStaffName} (covering for ${cover.absentStaffName})`
+                        : teacher
+                          ? `${teacher.firstName} ${teacher.lastName ?? ""}`
+                          : "—"}
+                    </td>
+                    <td>{slot.room ?? "—"}</td>
+                  </tr>
+                );
+              })}
+              {day.slots.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="hint">
+                    Nothing timetabled for this section on that date.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         )}

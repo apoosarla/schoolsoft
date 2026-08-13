@@ -9,8 +9,12 @@ import {
   ASSESSMENT_TYPES,
   AssessmentComponentDto,
   AssessmentDto,
+  AssessmentValidationDto,
+  BulkMarkResult,
   createAssessment,
-  enterMark,
+  enterMarksInBulk,
+  generateReportCardsForSection,
+  getMe,
   getSession,
   hasScreen,
   listAssessmentComponents,
@@ -19,12 +23,25 @@ import {
   listSections,
   listStudents,
   listSubjects,
+  listTerms,
+  lockReportCard,
+  MARK_STATUSES,
   MarkDto,
+  PROMOTION_DECISIONS,
+  publishReportCard,
+  reportCardDetail,
+  ReportCardDetailDto,
+  ReportCardDto,
+  reportCardsForStudent,
   SectionDto,
   Session,
   setAssessmentStatus,
+  setPromotionDecision,
   StudentDto,
   SubjectDto,
+  TermDto,
+  unlockReportCard,
+  validateAssessment,
 } from "@/lib/api";
 
 const emptyAssessmentForm = {
@@ -58,10 +75,23 @@ export default function AssessmentPage() {
   const [creatingComponent, setCreatingComponent] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
 
+  const [validation, setValidation] = useState<AssessmentValidationDto | null>(null);
+
   const [selectedComponent, setSelectedComponent] = useState<AssessmentComponentDto | null>(null);
   const [roster, setRoster] = useState<StudentDto[] | null>(null);
-  const [marks, setMarks] = useState<Record<string, { rawMarks: string; isAbsent: boolean }>>({});
+  /** A mark is a number *or* a reason there is none — never a silent blank. */
+  const [marks, setMarks] = useState<Record<string, { rawMarks: string; status: string; revisions: number }>>({});
   const [savingAll, setSavingAll] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkMarkResult | null>(null);
+
+  const [staffId, setStaffId] = useState("");
+  const [terms, setTerms] = useState<TermDto[] | null>(null);
+  const [termId, setTermId] = useState("");
+  const [templateCode, setTemplateCode] = useState("TERM-REPORT");
+  const [cards, setCards] = useState<ReportCardDto[] | null>(null);
+  const [cardDetail, setCardDetail] = useState<ReportCardDetailDto | null>(null);
+  const [cardsBusy, setCardsBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -74,6 +104,9 @@ export default function AssessmentPage() {
       return;
     }
     setSessionState(s);
+    getMe()
+      .then((me) => setStaffId(me.subjectId))
+      .catch(() => setStaffId(""));
     Promise.all([listSections(s.schoolId), listSubjects(s.schoolId)])
       .then(([secs, subs]) => {
         setSections(secs);
@@ -83,6 +116,18 @@ export default function AssessmentPage() {
       })
       .catch((err) => setError(describeError(err)));
   }, [router]);
+
+  // Report cards are per term, so the section's year decides the choices.
+  useEffect(() => {
+    const section = sections?.find((s) => s.id === sectionId);
+    if (!section) return;
+    listTerms(section.academicYearId)
+      .then((ts) => {
+        setTerms(ts);
+        setTermId((current) => (ts.some((t) => t.id === current) ? current : ts[0]?.id ?? ""));
+      })
+      .catch(() => setTerms([]));
+  }, [sections, sectionId]);
 
   function refreshAssessments(id: string) {
     setError(null);
@@ -128,9 +173,12 @@ export default function AssessmentPage() {
   async function selectAssessment(a: AssessmentDto) {
     setSelectedAssessment(a);
     setSelectedComponent(null);
+    setBulkResult(null);
     setError(null);
     try {
-      setComponents(await listAssessmentComponents(a.id));
+      const [comps, check] = await Promise.all([listAssessmentComponents(a.id), validateAssessment(a.id)]);
+      setComponents(comps);
+      setValidation(check);
     } catch (err) {
       setError(describeError(err));
     }
@@ -175,6 +223,7 @@ export default function AssessmentPage() {
       setComponentForm(emptyComponentForm);
       setShowComponentForm(false);
       setComponents(await listAssessmentComponents(selectedAssessment.id));
+      setValidation(await validateAssessment(selectedAssessment.id));
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -185,6 +234,7 @@ export default function AssessmentPage() {
   async function selectComponent(c: AssessmentComponentDto) {
     if (!session || !selectedAssessment) return;
     setSelectedComponent(c);
+    setBulkResult(null);
     setError(null);
     try {
       const [students, existing] = await Promise.all([
@@ -192,36 +242,78 @@ export default function AssessmentPage() {
         listMarksForComponent(c.id),
       ]);
       setRoster(students);
-      const initial: Record<string, { rawMarks: string; isAbsent: boolean }> = {};
-      for (const s of students) {
-        const m = existing.find((e) => e.studentId === s.id);
-        initial[s.id] = { rawMarks: m?.rawMarks?.toString() ?? "", isAbsent: m?.isAbsent ?? false };
-      }
-      setMarks(initial);
+      setMarks(markStateFrom(students, existing));
     } catch (err) {
       setError(describeError(err));
     }
   }
 
+  /**
+   * One bulk call rather than a request per child. The endpoint validates each
+   * row on its own, so a mark above the maximum comes back named while the rest
+   * are stored — which is the behaviour a teacher entering forty marks needs.
+   */
   async function onSaveAllMarks() {
     if (!session || !selectedComponent || !roster) return;
     setSavingAll(true);
     setError(null);
+    setBulkResult(null);
     try {
-      for (const s of roster) {
-        const m = marks[s.id];
-        await enterMark(selectedComponent.id, {
-          schoolId: session.schoolId,
-          studentId: s.id,
-          rawMarks: m.isAbsent || m.rawMarks === "" ? undefined : Number(m.rawMarks),
-          isAbsent: m.isAbsent,
-        });
-      }
+      const result = await enterMarksInBulk({
+        schoolId: session.schoolId,
+        componentId: selectedComponent.id,
+        enteredByStaffId: staffId || undefined,
+        entries: roster.map((s) => {
+          const m = marks[s.id];
+          const status = m?.status ?? "pending";
+          return {
+            studentId: s.id,
+            status,
+            rawMarks: status === "entered" && m?.rawMarks !== "" ? Number(m.rawMarks) : undefined,
+          };
+        }),
+      });
+      setBulkResult(result);
+      const refreshed = await listMarksForComponent(selectedComponent.id);
+      setMarks(markStateFrom(roster, refreshed));
     } catch (err) {
       setError(describeError(err));
     } finally {
       setSavingAll(false);
     }
+  }
+
+  // -------------------------------------------------------- report cards
+
+  async function runCards(action: () => Promise<void>) {
+    setCardsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setCardsBusy(false);
+    }
+  }
+
+  async function refreshCards() {
+    if (!roster || roster.length === 0) return;
+    const lists = await Promise.all(roster.map((s) => reportCardsForStudent(s.id).catch(() => [])));
+    const wanted = lists
+      .flat()
+      .filter((c) => c.templateCode === templateCode && (termId ? c.termId === termId : true));
+    setCards(wanted);
+  }
+
+  /** Loads the section roster even when no component is open — cards are per section. */
+  async function ensureRoster(): Promise<StudentDto[]> {
+    if (roster && roster.length > 0) return roster;
+    if (!session) return [];
+    const students = await listStudents(session.schoolId, undefined, sectionId);
+    setRoster(students);
+    return students;
   }
 
   if (!session) return null;
@@ -406,6 +498,12 @@ export default function AssessmentPage() {
             </div>
           )}
 
+          {validation && !validation.valid && (
+            <div className="warn-banner">
+              This assessment cannot open for marking yet: {validation.issues.join("; ")}.
+            </div>
+          )}
+
           {components && components.length === 0 && <p className="hint">No components yet.</p>}
           {components && components.length > 0 && (
             <table>
@@ -451,6 +549,29 @@ export default function AssessmentPage() {
               {savingAll ? "Saving…" : "Save all"}
             </button>
           </div>
+          <p className="hint">
+            Typing a mark records it as entered — zero included. Leave it blank and pick a reason instead:
+            an unmarked paper is <em>pending</em>, and an absence is never a nought.
+          </p>
+
+          {bulkResult && (
+            <>
+              <p className="hint">{bulkResult.accepted} mark(s) saved.</p>
+              {bulkResult.rejected.length > 0 && (
+                <div className="warn-banner">
+                  {bulkResult.rejected.length} row(s) refused and not stored:
+                  <ul className="rejected-list">
+                    {bulkResult.rejected.map((r) => (
+                      <li key={r.studentId}>
+                        {studentLabel(roster, r.studentId)} — {r.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+
           {roster.length === 0 && <p className="hint">No students in this section.</p>}
           {roster.length > 0 && (
             <table>
@@ -459,49 +580,381 @@ export default function AssessmentPage() {
                   <th>Roll no.</th>
                   <th>Name</th>
                   <th>Marks</th>
-                  <th>Absent</th>
+                  <th>Status</th>
+                  <th>History</th>
                 </tr>
               </thead>
               <tbody>
                 {roster
                   .slice()
                   .sort((a, b) => (a.rollNo ?? "").localeCompare(b.rollNo ?? ""))
-                  .map((s) => (
-                    <tr key={s.id}>
-                      <td>{s.rollNo ?? "—"}</td>
-                      <td>
-                        {s.firstName} {s.lastName ?? ""}
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          max={selectedComponent.maxMarks}
-                          value={marks[s.id]?.rawMarks ?? ""}
-                          disabled={marks[s.id]?.isAbsent}
-                          onChange={(e) =>
-                            setMarks((m) => ({ ...m, [s.id]: { ...m[s.id], rawMarks: e.target.value } }))
-                          }
-                          style={{ maxWidth: 90 }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={marks[s.id]?.isAbsent ?? false}
-                          onChange={(e) =>
-                            setMarks((m) => ({ ...m, [s.id]: { ...m[s.id], isAbsent: e.target.checked } }))
-                          }
-                        />
-                      </td>
-                    </tr>
-                  ))}
+                  .map((s) => {
+                    const mark = marks[s.id] ?? { rawMarks: "", status: "pending", revisions: 0 };
+                    return (
+                      <tr key={s.id}>
+                        <td>{s.rollNo ?? "—"}</td>
+                        <td>
+                          {s.firstName} {s.lastName ?? ""}
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            max={selectedComponent.maxMarks}
+                            value={mark.rawMarks}
+                            disabled={mark.status !== "entered" && mark.status !== "pending"}
+                            onChange={(e) =>
+                              setMarks((m) => ({
+                                ...m,
+                                [s.id]: {
+                                  ...mark,
+                                  rawMarks: e.target.value,
+                                  // Typing a number is what makes it an entered mark.
+                                  status: e.target.value === "" ? "pending" : "entered",
+                                },
+                              }))
+                            }
+                            className="mark-cell"
+                          />
+                        </td>
+                        <td>
+                          <select
+                            value={mark.status}
+                            onChange={(e) =>
+                              setMarks((m) => ({
+                                ...m,
+                                [s.id]: {
+                                  ...mark,
+                                  status: e.target.value,
+                                  rawMarks: e.target.value === "entered" ? mark.rawMarks : "",
+                                },
+                              }))
+                            }
+                          >
+                            {MARK_STATUSES.map((st) => (
+                              <option key={st} value={st}>
+                                {st.replace("_", " ")}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>{mark.revisions > 0 ? `${mark.revisions} revision(s)` : "—"}</td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           )}
         </div>
       )}
+
+      {/* ---------------------------------------------------- report cards */}
+      <div className="panel">
+        <h2>Report cards</h2>
+        <p className="hint">
+          Built from the marks entered above: each student&apos;s own subjects, absences shown as AB rather
+          than nought, attendance over the school-calendar denominator, rank across the section, and the
+          promotion decision the year-end rollover reads.
+        </p>
+        {notice && <div className="notice-banner">{notice}</div>}
+
+        <div className="form-row">
+          <select value={termId} onChange={(e) => setTermId(e.target.value)}>
+            <option value="">Whole year</option>
+            {terms?.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          <input
+            placeholder="Template code"
+            value={templateCode}
+            onChange={(e) => setTemplateCode(e.target.value)}
+          />
+          <button
+            type="button"
+            disabled={cardsBusy || !sectionId}
+            onClick={() =>
+              runCards(async () => {
+                const section = sections?.find((s) => s.id === sectionId);
+                if (!session || !section) return;
+                await ensureRoster();
+                const generated = await generateReportCardsForSection({
+                  schoolId: session.schoolId,
+                  sectionId,
+                  academicYearId: section.academicYearId,
+                  termId: termId || undefined,
+                  strategyCode: section.strategyCode,
+                  templateCode,
+                });
+                setCards(generated);
+                setNotice(`${generated.length} card(s) generated and ranked.`);
+              })
+            }
+          >
+            Generate for section
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={cardsBusy}
+            onClick={() =>
+              runCards(async () => {
+                await ensureRoster();
+                await refreshCards();
+              })
+            }
+          >
+            Refresh
+          </button>
+        </div>
+
+        {cards && cards.length > 0 && (
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Marks</th>
+                <th>%</th>
+                <th>Grade</th>
+                <th>Rank</th>
+                <th>Attendance</th>
+                <th>Promotion</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {cards.map((c) => (
+                <tr key={c.id}>
+                  <td>{studentLabel(roster, c.studentId)}</td>
+                  <td>
+                    {c.totalMarks ?? "—"}
+                    {c.totalMaxMarks ? ` / ${c.totalMaxMarks}` : ""}
+                  </td>
+                  <td>{c.overallPct ?? "—"}</td>
+                  <td>{c.overallGrade ?? "—"}</td>
+                  <td>{c.classRank ? `${c.classRank} of ${c.classSize}` : "—"}</td>
+                  <td>{c.attendancePct != null ? `${c.attendancePct}%` : "—"}</td>
+                  <td>
+                    <select
+                      value={c.promotionDecision ?? ""}
+                      disabled={cardsBusy || c.status === "published"}
+                      onChange={(e) =>
+                        runCards(async () => {
+                          await setPromotionDecision(c.id, e.target.value);
+                          await refreshCards();
+                        })
+                      }
+                    >
+                      <option value="">—</option>
+                      {PROMOTION_DECISIONS.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <span className={"badge " + (c.status === "published" ? "badge-active" : "")}>{c.status}</span>
+                  </td>
+                  <td>
+                    <div className="form-row inline">
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={cardsBusy}
+                        onClick={() => runCards(async () => setCardDetail(await reportCardDetail(c.id)))}
+                      >
+                        View
+                      </button>
+                      {c.status === "draft" && (
+                        <button
+                          type="button"
+                          disabled={cardsBusy}
+                          onClick={() =>
+                            runCards(async () => {
+                              await lockReportCard(c.id);
+                              await refreshCards();
+                            })
+                          }
+                        >
+                          Lock
+                        </button>
+                      )}
+                      {c.status === "locked" && (
+                        <button
+                          type="button"
+                          disabled={cardsBusy}
+                          onClick={() =>
+                            runCards(async () => {
+                              await publishReportCard(c.id);
+                              setNotice("Published — the family can now see it in the parent app.");
+                              await refreshCards();
+                            })
+                          }
+                        >
+                          Publish
+                        </button>
+                      )}
+                      {c.status !== "draft" && (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={cardsBusy}
+                          onClick={() =>
+                            runCards(async () => {
+                              const reason = window.prompt("Why is this card being unlocked?")?.trim();
+                              if (!reason) return;
+                              await unlockReportCard(c.id, reason);
+                              await refreshCards();
+                            })
+                          }
+                        >
+                          Unlock
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {cards && cards.length === 0 && (
+          <p className="hint">No cards for this term and template yet.</p>
+        )}
+      </div>
+
+      {cardDetail && (
+        <div className="panel">
+          <div className="form-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h2>
+              {studentLabel(roster, cardDetail.card.studentId)} — version {cardDetail.card.version}
+            </h2>
+            <button type="button" className="secondary" onClick={() => setCardDetail(null)}>
+              Close
+            </button>
+          </div>
+
+          {cardDetail.card.coverageNote && <div className="warn-banner">{cardDetail.card.coverageNote}</div>}
+
+          <div className="stat-grid" style={{ marginBottom: 14 }}>
+            <div className="stat-tile">
+              <div className="value">{cardDetail.card.overallGrade ?? "—"}</div>
+              <div className="label">
+                Overall{cardDetail.card.overallPct != null ? ` · ${cardDetail.card.overallPct}%` : ""}
+              </div>
+            </div>
+            <div className="stat-tile">
+              <div className="value">
+                {cardDetail.card.classRank ? `#${cardDetail.card.classRank}` : "—"}
+              </div>
+              <div className="label">
+                Rank of {cardDetail.card.classSize ?? "—"}
+                {cardDetail.card.percentile != null ? ` · ${cardDetail.card.percentile} pct` : ""}
+              </div>
+            </div>
+            <div className="stat-tile">
+              <div className="value">
+                {cardDetail.card.attendancePct != null ? `${cardDetail.card.attendancePct}%` : "—"}
+              </div>
+              <div className="label">
+                Attendance · {cardDetail.card.attendancePresentDays ?? "—"} of{" "}
+                {cardDetail.card.attendanceWorkingDays ?? "—"} days
+              </div>
+            </div>
+            <div className="stat-tile">
+              <div className="value">{cardDetail.card.promotionDecision ?? "—"}</div>
+              <div className="label">
+                Promotion · terms {cardDetail.card.termsAttended ?? "—"}/{cardDetail.card.termsInYear ?? "—"}
+              </div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Subject</th>
+                <th>Origin</th>
+                <th>Marks</th>
+                <th>%</th>
+                <th>Grade</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cardDetail.subjects.map((row) => (
+                <tr key={row.subjectId}>
+                  <td>
+                    {row.subjectCode} — {row.subjectName}
+                  </td>
+                  <td>{row.origin}</td>
+                  <td>{row.display}</td>
+                  <td>{row.percentage ?? "—"}</td>
+                  <td>{row.gradeLetter ?? "—"}</td>
+                  <td>
+                    {row.resultStatus === "marked"
+                      ? row.passing
+                        ? "pass"
+                        : "below pass mark"
+                      : row.resultStatus.replace("_", " ")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {cardDetail.coScholastic.length > 0 && (
+            <table style={{ marginTop: 14 }}>
+              <thead>
+                <tr>
+                  <th>Co-scholastic area</th>
+                  <th>Rating</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cardDetail.coScholastic.map((area) => (
+                  <tr key={area.areaCode}>
+                    <td>{area.areaName}</td>
+                    <td>{area.rating}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {cardDetail.card.teacherRemarks && (
+            <p className="hint" style={{ marginTop: 12 }}>
+              Teacher: {cardDetail.card.teacherRemarks}
+            </p>
+          )}
+        </div>
+      )}
     </main>
   );
+}
+
+/** Existing marks, mapped into the editor's shape: a number, or a reason there is none. */
+function markStateFrom(
+  students: StudentDto[],
+  existing: MarkDto[]
+): Record<string, { rawMarks: string; status: string; revisions: number }> {
+  const state: Record<string, { rawMarks: string; status: string; revisions: number }> = {};
+  for (const s of students) {
+    const m = existing.find((e) => e.studentId === s.id);
+    state[s.id] = {
+      rawMarks: m?.rawMarks?.toString() ?? "",
+      status: m?.status ?? "pending",
+      revisions: m?.revisionCount ?? 0,
+    };
+  }
+  return state;
+}
+
+function studentLabel(roster: StudentDto[] | null, studentId: string): string {
+  const student = roster?.find((s) => s.id === studentId);
+  return student ? `${student.firstName} ${student.lastName ?? ""}`.trim() : studentId.slice(0, 8);
 }
 
 function describeError(err: unknown): string {

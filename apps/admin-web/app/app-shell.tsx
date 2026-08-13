@@ -54,6 +54,23 @@ const ICON: Record<string, JSX.Element> = {
       <path d="M6.5 12.4H11.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   ),
+  calendar: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <rect x="2.3" y="3.2" width="13.4" height="12" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M2.3 7H15.7" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5.8 1.8V4.4M12.2 1.8V4.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="6.2" cy="10.2" r="1.1" fill="currentColor" />
+      <path d="M9.4 10.2H13" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M5.2 13.2H12.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  ),
+  exams: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path d="M3.2 3.4C3.2 2.9 3.6 2.5 4.1 2.5H12L15 5.5V15C15 15.5 14.6 15.9 14.1 15.9H4.1C3.6 15.9 3.2 15.5 3.2 15V3.4Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M11.8 2.6V5.6H14.8" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M5.9 9.2H12.1M5.9 12.2H10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
   lms: (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <path d="M9 4.3C7.8 3.3 5.9 2.9 3 3V13.4C5.9 13.3 7.8 13.7 9 14.7C10.2 13.7 12.1 13.3 15 13.4V3C12.1 2.9 10.2 3.3 9 4.3Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />

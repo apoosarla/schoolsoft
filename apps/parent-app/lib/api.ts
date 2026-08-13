@@ -119,9 +119,12 @@ export const listPaymentsForInvoice = fees.listPaymentsForInvoice;
 
 const assessment = createAssessmentApi(client);
 export const reportCardsForStudent = assessment.reportCardsForStudent;
+export const reportCard = assessment.reportCard;
 export const assessmentsForSection = assessment.assessmentsForSection;
 export const componentsForAssessment = assessment.componentsForAssessment;
 export const marksForComponent = assessment.marksForComponent;
+export const requestReevaluation = assessment.requestReevaluation;
+export const reevaluationsForStudent = assessment.reevaluationsForStudent;
 
 const lms = createLmsApi(client);
 export const assignmentsForSection = lms.assignmentsForSection;

@@ -157,6 +157,18 @@ export type ReportCardDetailDto = {
   payload: Record<string, unknown>;
 };
 
+export type MarkReevaluationDto = {
+  id: string;
+  markId: string;
+  studentId: string;
+  reason: string;
+  requestedAt: string;
+  /** pending | upheld | revised | rejected — a request is kept whatever the outcome. */
+  status: string;
+  decidedAt: string | null;
+  decisionNote: string | null;
+};
+
 export type ExamScheduleDto = {
   id: string;
   schoolId: string;

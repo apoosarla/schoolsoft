@@ -17,6 +17,7 @@ import type {
   FeeInvoiceLineDto,
   HallTicketDto,
   MarkDto,
+  MarkReevaluationDto,
   MessageDto,
   MessageThreadDto,
   PaymentDto,
@@ -120,6 +121,21 @@ export function createAssessmentApi(client: ApiClient) {
     },
     reportCard(id: string): Promise<ReportCardDetailDto> {
       return client.apiFetch<ReportCardDetailDto>(`/v1/assessment/report-cards/${id}`);
+    },
+    /**
+     * A family asking for a paper to be looked at again. The school decides it;
+     * a revised mark supersedes the original and keeps it.
+     */
+    requestReevaluation(markId: string, reason: string): Promise<MarkReevaluationDto> {
+      return client.apiFetch<MarkReevaluationDto>(`/v1/assessment/marks/${markId}/re-evaluations`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+    },
+    reevaluationsForStudent(studentId: string): Promise<MarkReevaluationDto[]> {
+      return client.apiFetch<MarkReevaluationDto[]>(
+        `/v1/assessment/re-evaluations?studentId=${studentId}`,
+      );
     },
     examSchedules(schoolId: string, academicYearId?: string): Promise<ExamScheduleDto[]> {
       const year = academicYearId ? `&academicYearId=${academicYearId}` : "";

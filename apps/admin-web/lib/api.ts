@@ -116,6 +116,24 @@ export function getMyScreens(): Promise<{ screenKeys: string[]; roleCodes: strin
   return apiFetch<{ screenKeys: string[]; roleCodes: string[] }>("/v1/iam/me/screens");
 }
 
+/**
+ * The person behind the login. The JWT carries only `user_account.id`, and
+ * several endpoints want the staff row itself — a leave decision records the
+ * approver, a closure records who declared it — so screens that act *as* the
+ * signed-in staff member resolve it once here.
+ */
+export type MeDto = {
+  userAccountId: string;
+  subjectType: string;
+  /** The staff/guardian/student row id; empty string when the account has none. */
+  subjectId: string;
+  schoolId: string;
+};
+
+export function getMe(): Promise<MeDto> {
+  return apiFetch<MeDto>("/v1/iam/me");
+}
+
 export function hasScreen(session: Session | null, screenKey: string): boolean {
   if (!session) return false;
   if (screenKey === "dashboard") return true;
@@ -231,6 +249,11 @@ export type AcademicYearDto = {
   startsOn: string;
   endsOn: string;
   isCurrent: boolean;
+  /** planning | active | closed — a closed year refuses writes to its records. */
+  status: string;
+  closedAt: string | null;
+  reopenedAt: string | null;
+  reopenReason: string | null;
 };
 
 export function listAcademicYears(schoolId: string): Promise<AcademicYearDto[]> {
@@ -596,8 +619,18 @@ export type MarkDto = {
   rawMarks: number | null;
   gradeLetter: string | null;
   remarks: string | null;
+  /** entered | pending | absent | medical_leave | exempt — a blank is not a zero. */
+  status: string;
   isAbsent: boolean;
+  revisionCount: number;
 };
+
+/**
+ * The statuses a teacher picks between. `entered` is implied by typing a mark,
+ * so the picker offers the four that mean "there will be no number, and here
+ * is why".
+ */
+export const MARK_STATUSES = ["entered", "pending", "absent", "medical_leave", "exempt"] as const;
 
 export function listMarksForComponent(componentId: string): Promise<MarkDto[]> {
   return apiFetch<MarkDto[]>(`/v1/assessment/components/${componentId}/marks`);
@@ -609,9 +642,11 @@ export function enterMark(
     schoolId: string;
     studentId: string;
     rawMarks?: number;
+    status?: string;
     gradeLetter?: string;
     remarks?: string;
-    isAbsent: boolean;
+    isAbsent?: boolean;
+    reason?: string;
     enteredByStaffId?: string;
   }
 ): Promise<MarkDto> {
@@ -619,6 +654,689 @@ export function enterMark(
     method: "POST",
     body: JSON.stringify(req),
   });
+}
+
+export type BulkMarkEntry = {
+  studentId: string;
+  rawMarks?: number;
+  status?: string;
+  gradeLetter?: string;
+  remarks?: string;
+};
+
+/**
+ * What the bulk endpoint did and what it refused. A mark above the component
+ * maximum comes back in `rejected` with the reason; the rest are stored, so a
+ * single typo does not throw away a whole section's entry.
+ */
+export type BulkMarkResult = {
+  componentId: string;
+  accepted: number;
+  marks: MarkDto[];
+  rejected: { studentId: string; reason: string }[];
+};
+
+export function enterMarksInBulk(req: {
+  schoolId: string;
+  componentId: string;
+  entries: BulkMarkEntry[];
+  enteredByStaffId?: string;
+  reason?: string;
+}): Promise<BulkMarkResult> {
+  return apiFetch<BulkMarkResult>("/v1/assessment/marks/bulk", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type AssessmentValidationDto = {
+  assessmentId: string;
+  valid: boolean;
+  issues: string[];
+};
+
+export function validateAssessment(assessmentId: string): Promise<AssessmentValidationDto> {
+  return apiFetch<AssessmentValidationDto>(`/v1/assessment/${assessmentId}/validation`);
+}
+
+export type MarkRevisionDto = {
+  id: string;
+  markId: string;
+  revisionNo: number;
+  kind: string;
+  oldRawMarks: number | null;
+  oldStatus: string;
+  newRawMarks: number | null;
+  newStatus: string;
+  reason: string;
+  changedAt: string;
+};
+
+export function listMarkRevisions(markId: string): Promise<MarkRevisionDto[]> {
+  return apiFetch<MarkRevisionDto[]>(`/v1/assessment/marks/${markId}/revisions`);
+}
+
+export type MarkReevaluationDto = {
+  id: string;
+  markId: string;
+  studentId: string;
+  reason: string;
+  requestedAt: string;
+  status: string;
+  decidedAt: string | null;
+  decisionNote: string | null;
+};
+
+export function listReevaluations(studentId: string): Promise<MarkReevaluationDto[]> {
+  return apiFetch<MarkReevaluationDto[]>(`/v1/assessment/re-evaluations?studentId=${studentId}`);
+}
+
+export function decideReevaluation(
+  id: string,
+  req: { outcome: string; newRawMarks?: number; reason: string }
+): Promise<MarkReevaluationDto> {
+  return apiFetch<MarkReevaluationDto>(`/v1/assessment/re-evaluations/${id}/decide`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+// -------------------------- Report cards (Phase 5) --------------------------
+
+export type ReportCardDto = {
+  id: string;
+  schoolId: string;
+  studentId: string;
+  sectionId: string | null;
+  academicYearId: string;
+  termId: string | null;
+  strategyCode: string;
+  templateCode: string;
+  status: string;
+  version: number;
+  isLocked: boolean;
+  gradeScaleCode: string | null;
+  totalMarks: number | null;
+  totalMaxMarks: number | null;
+  overallPct: number | null;
+  overallGrade: string | null;
+  classRank: number | null;
+  classSize: number | null;
+  percentile: number | null;
+  attendanceWorkingDays: number | null;
+  attendancePresentDays: number | null;
+  attendancePct: number | null;
+  promotionDecision: string | null;
+  teacherRemarks: string | null;
+  principalRemarks: string | null;
+  enrolledFrom: string | null;
+  termsAttended: number | null;
+  termsInYear: number | null;
+  coverageNote: string | null;
+  publishedAt: string | null;
+  generatedAt: string;
+};
+
+export type ReportCardSubjectRow = {
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  origin: string;
+  marksObtained: number | null;
+  maxMarks: number | null;
+  percentage: number | null;
+  gradeLetter: string | null;
+  resultStatus: string;
+  /** What the row prints — "AB" for an absence, never a zero. */
+  display: string;
+  passing: boolean | null;
+  remarks: string | null;
+  sortOrder: number;
+};
+
+export type ReportCardDetailDto = {
+  card: ReportCardDto;
+  subjects: ReportCardSubjectRow[];
+  coScholastic: { areaCode: string; areaName: string; rating: string; remarks: string | null; sortOrder: number }[];
+  payload: Record<string, unknown>;
+};
+
+export const PROMOTION_DECISIONS = ["promote", "detain", "graduate"] as const;
+
+export function reportCardsForStudent(studentId: string): Promise<ReportCardDto[]> {
+  return apiFetch<ReportCardDto[]>(`/v1/assessment/report-cards/students/${studentId}`);
+}
+
+export function reportCardDetail(id: string): Promise<ReportCardDetailDto> {
+  return apiFetch<ReportCardDetailDto>(`/v1/assessment/report-cards/${id}`);
+}
+
+export function generateReportCard(req: {
+  schoolId: string;
+  studentId: string;
+  academicYearId: string;
+  termId?: string;
+  strategyCode: string;
+  templateCode: string;
+  teacherRemarks?: string;
+  principalRemarks?: string;
+  promotionDecision?: string;
+  coScholastic?: { areaCode: string; areaName: string; rating: string; remarks?: string; sortOrder: number }[];
+}): Promise<ReportCardDto> {
+  return apiFetch<ReportCardDto>("/v1/assessment/report-cards", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Generates the whole section in one run, which is also what ranks it. */
+export function generateReportCardsForSection(req: {
+  schoolId: string;
+  sectionId: string;
+  academicYearId: string;
+  termId?: string;
+  strategyCode: string;
+  templateCode: string;
+}): Promise<ReportCardDto[]> {
+  return apiFetch<ReportCardDto[]>("/v1/assessment/report-cards/sections", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function lockReportCard(id: string): Promise<ReportCardDto> {
+  return apiFetch<ReportCardDto>(`/v1/assessment/report-cards/${id}/lock`, { method: "POST" });
+}
+
+export function unlockReportCard(id: string, reason: string): Promise<ReportCardDto> {
+  return apiFetch<ReportCardDto>(`/v1/assessment/report-cards/${id}/unlock`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function publishReportCard(id: string): Promise<ReportCardDto> {
+  return apiFetch<ReportCardDto>(`/v1/assessment/report-cards/${id}/publish`, { method: "POST" });
+}
+
+export function setPromotionDecision(id: string, decision: string): Promise<ReportCardDto> {
+  return apiFetch<ReportCardDto>(`/v1/assessment/report-cards/${id}/promotion`, {
+    method: "POST",
+    body: JSON.stringify({ decision }),
+  });
+}
+
+export type AssessmentPolicyDto = {
+  schoolId: string;
+  duesBlockPolicy: string;
+  duesBlockThreshold: number;
+  weightTolerancePct: number;
+};
+
+export function getAssessmentPolicy(schoolId: string): Promise<AssessmentPolicyDto> {
+  return apiFetch<AssessmentPolicyDto>(`/v1/assessment/policy?schoolId=${schoolId}`);
+}
+
+export function setAssessmentPolicy(req: {
+  schoolId: string;
+  duesBlockPolicy?: string;
+  duesBlockThreshold?: number;
+  weightTolerancePct?: number;
+}): Promise<AssessmentPolicyDto> {
+  return apiFetch<AssessmentPolicyDto>("/v1/assessment/policy", {
+    method: "PUT",
+    body: JSON.stringify(req),
+  });
+}
+
+// -------------------------- Exams (Phase 5) --------------------------
+
+export type ExamScheduleDto = {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  termId: string | null;
+  code: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+  status: string;
+  publishedAt: string | null;
+  sessionCount: number;
+};
+
+export type ExamSessionDto = {
+  id: string;
+  examScheduleId: string;
+  gradeId: string;
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  paperCode: string;
+  name: string;
+  onDate: string;
+  startsAt: string;
+  endsAt: string;
+  room: string | null;
+  invigilatorStaffId: string | null;
+  maxMarks: number | null;
+};
+
+export type ExamClashDto = {
+  studentId: string;
+  sessionAId: string;
+  sessionBId: string;
+  onDate: string;
+  subjectA: string;
+  subjectB: string;
+};
+
+export type HallTicketDto = {
+  id: string;
+  examScheduleId: string;
+  studentId: string;
+  studentName: string;
+  admissionNo: string;
+  ticketNo: string;
+  seatNo: string | null;
+  issuedAt: string;
+  sessions: ExamSessionDto[];
+};
+
+export function listExamSchedules(schoolId: string, academicYearId?: string): Promise<ExamScheduleDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (academicYearId) params.set("academicYearId", academicYearId);
+  return apiFetch<ExamScheduleDto[]>(`/v1/exams/schedules?${params.toString()}`);
+}
+
+export function createExamSchedule(req: {
+  schoolId: string;
+  academicYearId: string;
+  termId?: string;
+  code: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+}): Promise<ExamScheduleDto> {
+  return apiFetch<ExamScheduleDto>("/v1/exams/schedules", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function listExamSessions(scheduleId: string): Promise<ExamSessionDto[]> {
+  return apiFetch<ExamSessionDto[]>(`/v1/exams/schedules/${scheduleId}/sessions`);
+}
+
+export function addExamSession(
+  scheduleId: string,
+  req: {
+    gradeId: string;
+    subjectId: string;
+    paperCode?: string;
+    name: string;
+    onDate: string;
+    startsAt: string;
+    endsAt: string;
+    room?: string;
+    invigilatorStaffId?: string;
+    maxMarks?: number;
+  }
+): Promise<ExamSessionDto> {
+  return apiFetch<ExamSessionDto>(`/v1/exams/schedules/${scheduleId}/sessions`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function deleteExamSession(sessionId: string): Promise<void> {
+  return apiFetch<void>(`/v1/exams/sessions/${sessionId}`, { method: "DELETE" });
+}
+
+/** Per-student clashes; publication is refused while any stand. */
+export function examClashes(scheduleId: string): Promise<{ clashCount: number; clashes: ExamClashDto[] }> {
+  return apiFetch<{ clashCount: number; clashes: ExamClashDto[] }>(
+    `/v1/exams/schedules/${scheduleId}/clashes`
+  );
+}
+
+export function publishExamSchedule(scheduleId: string): Promise<ExamScheduleDto> {
+  return apiFetch<ExamScheduleDto>(`/v1/exams/schedules/${scheduleId}/publish`, { method: "POST" });
+}
+
+export function unpublishExamSchedule(scheduleId: string): Promise<ExamScheduleDto> {
+  return apiFetch<ExamScheduleDto>(`/v1/exams/schedules/${scheduleId}/unpublish`, { method: "POST" });
+}
+
+export function issueHallTickets(scheduleId: string): Promise<HallTicketDto[]> {
+  return apiFetch<HallTicketDto[]>(`/v1/exams/schedules/${scheduleId}/hall-tickets`, { method: "POST" });
+}
+
+export function listHallTickets(scheduleId: string): Promise<HallTicketDto[]> {
+  return apiFetch<HallTicketDto[]>(`/v1/exams/schedules/${scheduleId}/hall-tickets`);
+}
+
+// -------------------------- Calendar & year lifecycle (Phase 1) --------------------------
+
+export type CalendarEntryDto = {
+  id: string;
+  schoolId: string;
+  academicYearId: string | null;
+  onDate: string;
+  kind: string;
+  title: string;
+  description: string | null;
+  gradeId: string | null;
+  campusId: string | null;
+  source: string;
+  declaredAt: string;
+};
+
+export const CALENDAR_KINDS = ["holiday", "vacation", "working_saturday", "closure", "exam_day"] as const;
+
+export type DayStatusDto = {
+  date: string;
+  working: boolean;
+  reason: string | null;
+  calendarKind: string | null;
+};
+
+export type WorkingDayPatternDto = {
+  id: string;
+  schoolId: string;
+  campusId: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  /** Mon..Sun, '1' for a teaching day. */
+  weekdayMask: string;
+  saturdayRule: string;
+  notes: string | null;
+};
+
+export const SATURDAY_RULES = ["none", "odd", "even", "all"] as const;
+
+export function listCalendarEntries(schoolId: string, from: string, to: string): Promise<CalendarEntryDto[]> {
+  const params = new URLSearchParams({ schoolId, from, to });
+  return apiFetch<CalendarEntryDto[]>(`/v1/calendar/entries?${params.toString()}`);
+}
+
+export function createCalendarEntry(req: {
+  schoolId: string;
+  academicYearId?: string;
+  onDate: string;
+  kind: string;
+  title: string;
+  description?: string;
+  gradeId?: string;
+  campusId?: string;
+  declaredByStaffId?: string;
+}): Promise<CalendarEntryDto> {
+  return apiFetch<CalendarEntryDto>("/v1/calendar/entries", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function deleteCalendarEntry(id: string): Promise<void> {
+  return apiFetch<void>(`/v1/calendar/entries/${id}`, { method: "DELETE" });
+}
+
+export function calendarDays(
+  schoolId: string,
+  from: string,
+  to: string,
+  gradeId?: string
+): Promise<DayStatusDto[]> {
+  const params = new URLSearchParams({ schoolId, from, to });
+  if (gradeId) params.set("gradeId", gradeId);
+  return apiFetch<DayStatusDto[]>(`/v1/calendar/days?${params.toString()}`);
+}
+
+export function listWorkingDayPatterns(schoolId: string): Promise<WorkingDayPatternDto[]> {
+  return apiFetch<WorkingDayPatternDto[]>(`/v1/calendar/patterns?schoolId=${schoolId}`);
+}
+
+export function createWorkingDayPattern(req: {
+  schoolId: string;
+  campusId?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  weekdayMask: string;
+  saturdayRule: string;
+  notes?: string;
+}): Promise<WorkingDayPatternDto> {
+  return apiFetch<WorkingDayPatternDto>("/v1/calendar/patterns", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * A same-day closure does three things together: the day stops counting,
+ * attendance already marked is voided (retained, not deleted), and the
+ * affected guardians are told. The result reports all three.
+ */
+export type ClosureResultDto = {
+  entry: CalendarEntryDto;
+  voidedAttendanceRecords: number;
+  guardiansNotified: number;
+};
+
+export function declareClosure(req: {
+  schoolId: string;
+  onDate: string;
+  title: string;
+  description?: string;
+  gradeId?: string;
+  campusId?: string;
+  declaredByStaffId?: string;
+}): Promise<ClosureResultDto> {
+  return apiFetch<ClosureResultDto>("/v1/calendar/closures", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type TermDto = {
+  id: string;
+  academicYearId: string;
+  code: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+};
+
+export function listTerms(academicYearId: string): Promise<TermDto[]> {
+  return apiFetch<TermDto[]>(`/v1/tenancy/academic-years/${academicYearId}/terms`);
+}
+
+export function createTerm(
+  academicYearId: string,
+  req: { code: string; name: string; startsOn: string; endsOn: string }
+): Promise<TermDto> {
+  return apiFetch<TermDto>(`/v1/tenancy/academic-years/${academicYearId}/terms`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function createAcademicYear(
+  schoolId: string,
+  req: { code: string; startsOn: string; endsOn: string; isCurrent?: boolean }
+): Promise<AcademicYearDto> {
+  return apiFetch<AcademicYearDto>(`/v1/tenancy/schools/${schoolId}/academic-years`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Closing a year makes it read-only; reopening it needs a reason and is audited. */
+export function setAcademicYearStatus(
+  academicYearId: string,
+  req: { status: string; actingStaffId?: string; reason?: string }
+): Promise<AcademicYearDto> {
+  return apiFetch<AcademicYearDto>(`/v1/tenancy/academic-years/${academicYearId}/status`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+// -------------------------- Amendments, leave & cover (Phase 3) --------------------------
+
+export type AttendanceAmendmentDto = {
+  id: string;
+  attendanceRecordId: string;
+  studentId: string;
+  sectionId: string;
+  onDate: string;
+  periodNo: number | null;
+  oldStatus: string;
+  newStatus: string;
+  reason: string;
+  requestedAt: string;
+  status: string;
+  decidedAt: string | null;
+  decisionNote: string | null;
+};
+
+export function listAmendments(schoolId: string, status?: string): Promise<AttendanceAmendmentDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (status) params.set("status", status);
+  return apiFetch<AttendanceAmendmentDto[]>(`/v1/attendance/amendments?${params.toString()}`);
+}
+
+export function requestAmendment(req: {
+  schoolId: string;
+  studentId: string;
+  onDate: string;
+  periodNo?: number;
+  newStatus: string;
+  reason: string;
+}): Promise<AttendanceAmendmentDto> {
+  return apiFetch<AttendanceAmendmentDto>("/v1/attendance/amendments", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function decideAmendment(
+  id: string,
+  req: { status: string; reason: string }
+): Promise<AttendanceAmendmentDto> {
+  return apiFetch<AttendanceAmendmentDto>(`/v1/attendance/amendments/${id}/decide`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type LeaveApplicationDto = {
+  id: string;
+  schoolId: string;
+  subjectType: string;
+  subjectId: string;
+  fromDate: string;
+  toDate: string;
+  reason: string | null;
+  status: string;
+  decidedAt: string | null;
+};
+
+export function listLeave(schoolId: string, status?: string): Promise<LeaveApplicationDto[]> {
+  const params = new URLSearchParams({ schoolId });
+  if (status) params.set("status", status);
+  return apiFetch<LeaveApplicationDto[]>(`/v1/attendance/leave?${params.toString()}`);
+}
+
+/** Approval materialises the covered working days; revoking one unwinds them. */
+export function decideLeave(
+  id: string,
+  req: { status: string; approverStaffId: string }
+): Promise<LeaveApplicationDto> {
+  return apiFetch<LeaveApplicationDto>(`/v1/attendance/leave/${id}/decide`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export type CoverDto = {
+  id: string;
+  slotId: string;
+  sectionId: string;
+  sectionLabel: string;
+  subjectName: string;
+  onDate: string;
+  periodNo: number;
+  startsAt: string;
+  endsAt: string;
+  room: string | null;
+  absentStaffId: string;
+  absentStaffName: string;
+  substituteStaffId: string;
+  substituteStaffName: string;
+  reason: string | null;
+  cancelled: boolean;
+};
+
+export type CoverNeedDto = {
+  slotId: string;
+  sectionId: string;
+  sectionLabel: string;
+  subjectName: string;
+  onDate: string;
+  periodNo: number;
+  startsAt: string;
+  endsAt: string;
+  room: string | null;
+  absentStaffId: string;
+  absentStaffName: string;
+  cover: CoverDto | null;
+  candidates: { staffId: string; name: string; periodsThatDay: number }[];
+};
+
+/**
+ * One section, one date. The school calendar decides whether there is school
+ * at all; a published exam schedule replaces the periods on the days it
+ * covers; cover names who is actually walking through the door.
+ */
+export type SectionDayDto = {
+  date: string;
+  working: boolean;
+  reason: string | null;
+  calendarKind: string | null;
+  slots: TimetableSlotDto[];
+  covers: CoverDto[];
+  examDay: boolean;
+  examSessions: ExamSessionDto[];
+};
+
+export function sectionDay(sectionId: string, date: string): Promise<SectionDayDto> {
+  return apiFetch<SectionDayDto>(`/v1/timetable/sections/${sectionId}/day?date=${date}`);
+}
+
+export function coverNeeds(schoolId: string, date: string): Promise<CoverNeedDto[]> {
+  const params = new URLSearchParams({ schoolId, date });
+  return apiFetch<CoverNeedDto[]>(`/v1/timetable/cover/needs?${params.toString()}`);
+}
+
+export function coverForDay(schoolId: string, date: string): Promise<CoverDto[]> {
+  const params = new URLSearchParams({ schoolId, date });
+  return apiFetch<CoverDto[]>(`/v1/timetable/cover?${params.toString()}`);
+}
+
+export function assignCover(req: {
+  slotId: string;
+  onDate: string;
+  substituteStaffId: string;
+  reason?: string;
+}): Promise<CoverDto> {
+  return apiFetch<CoverDto>("/v1/timetable/cover", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function cancelCover(id: string): Promise<CoverDto> {
+  return apiFetch<CoverDto>(`/v1/timetable/cover/${id}`, { method: "DELETE" });
 }
 
 // -------------------------- Library --------------------------
@@ -1052,8 +1770,10 @@ export const SCREEN_DEFS = [
   { key: "admissions", label: "Admissions", path: "/admissions" },
   { key: "attendance", label: "Attendance", path: "/attendance" },
   { key: "fees", label: "Fees", path: "/fees" },
+  { key: "calendar", label: "Calendar & Year", path: "/calendar" },
   { key: "timetable", label: "Timetable", path: "/timetable" },
   { key: "assessment", label: "Assessment", path: "/assessment" },
+  { key: "exams", label: "Exams", path: "/exams" },
   { key: "lms", label: "LMS", path: "/lms" },
   { key: "comms", label: "Comms", path: "/comms" },
   { key: "library", label: "Library", path: "/library" },

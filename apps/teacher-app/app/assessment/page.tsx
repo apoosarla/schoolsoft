@@ -11,7 +11,8 @@ import {
   componentsForAssessment,
   createAssessment,
   EnrolmentDto,
-  enterMark,
+  enterMarksInBulk,
+  MARK_STATUSES,
   getSession,
   listSections,
   MarkDto,
@@ -214,10 +215,12 @@ function MarksEditor({ assessment, schoolId, sectionId }: { assessment: Assessme
   const [component, setComponent] = useState<AssessmentComponentDto | null>(null);
   const [roster, setRoster] = useState<EnrolmentDto[] | null>(null);
   const [marksIn, setMarksIn] = useState<Record<string, string>>({});
-  const [absent, setAbsent] = useState<Record<string, boolean>>({});
+  /** Why there is no number: pending, absent, medical leave, exempt. */
+  const [markStatus, setMarkStatus] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [rejected, setRejected] = useState<{ studentId: string; reason: string }[]>([]);
 
   useEffect(() => {
     setError(null);
@@ -230,14 +233,14 @@ function MarksEditor({ assessment, schoolId, sectionId }: { assessment: Assessme
         if (!comp) return;
         const marks = await marksForComponent(comp.id);
         const initIn: Record<string, string> = {};
-        const initAbs: Record<string, boolean> = {};
+        const initStatus: Record<string, string> = {};
         for (const enr of r) {
           const m = marks.find((mk) => mk.studentId === enr.studentId);
           initIn[enr.studentId] = m?.rawMarks != null ? String(m.rawMarks) : "";
-          initAbs[enr.studentId] = m?.isAbsent ?? false;
+          initStatus[enr.studentId] = m?.status ?? "pending";
         }
         setMarksIn(initIn);
-        setAbsent(initAbs);
+        setMarkStatus(initStatus);
       })
       .catch((err) => setError(describeError(err)));
   }, [assessment.id, sectionId]);
@@ -247,18 +250,22 @@ function MarksEditor({ assessment, schoolId, sectionId }: { assessment: Assessme
     setSaving(true);
     setError(null);
     setSaveMessage(null);
+    setRejected([]);
     try {
-      await Promise.all(
-        roster.map((r) =>
-          enterMark(component.id, {
-            schoolId,
+      const result = await enterMarksInBulk({
+        schoolId,
+        componentId: component.id,
+        entries: roster.map((r) => {
+          const status = markStatus[r.studentId] ?? "pending";
+          return {
             studentId: r.studentId,
-            rawMarks: marksIn[r.studentId] ? Number(marksIn[r.studentId]) : undefined,
-            isAbsent: absent[r.studentId] ?? false,
-          })
-        )
-      );
-      setSaveMessage(`Saved marks for ${roster.length} student(s).`);
+            status,
+            rawMarks: status === "entered" && marksIn[r.studentId] !== "" ? Number(marksIn[r.studentId]) : undefined,
+          };
+        }),
+      });
+      setSaveMessage(`Saved ${result.accepted} mark(s).`);
+      setRejected(result.rejected);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -274,39 +281,67 @@ function MarksEditor({ assessment, schoolId, sectionId }: { assessment: Assessme
       {roster && roster.length === 0 && <p className="empty-note">No active students in this section.</p>}
       {roster && roster.length > 0 && component && (
         <>
+          {rejected.length > 0 && (
+            <div className="error-banner">
+              {rejected.length} mark(s) refused and not saved — check them against the paper&apos;s maximum of{" "}
+              {component.maxMarks}.
+            </div>
+          )}
           <table>
             <thead>
               <tr>
                 <th>Roll</th>
                 <th>Marks / {component.maxMarks}</th>
-                <th>Absent</th>
+                <th>If no mark</th>
               </tr>
             </thead>
             <tbody>
               {roster
                 .slice()
                 .sort((a, b) => (a.rollNo ?? "").localeCompare(b.rollNo ?? ""))
-                .map((r) => (
-                  <tr key={r.studentId}>
-                    <td>{r.rollNo ?? "—"}</td>
-                    <td>
-                      <input
-                        type="number"
-                        value={marksIn[r.studentId] ?? ""}
-                        onChange={(e) => setMarksIn((m) => ({ ...m, [r.studentId]: e.target.value }))}
-                        disabled={absent[r.studentId]}
-                        style={{ width: 90, minHeight: 36 }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={absent[r.studentId] ?? false}
-                        onChange={(e) => setAbsent((a) => ({ ...a, [r.studentId]: e.target.checked }))}
-                      />
-                    </td>
-                  </tr>
-                ))}
+                .map((r) => {
+                  const status = markStatus[r.studentId] ?? "pending";
+                  return (
+                    <tr key={r.studentId}>
+                      <td>{r.rollNo ?? "—"}</td>
+                      <td>
+                        <input
+                          type="number"
+                          value={marksIn[r.studentId] ?? ""}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setMarksIn((m) => ({ ...m, [r.studentId]: value }));
+                            // Typing a mark is what makes it entered; clearing it
+                            // makes the paper unmarked again, never a zero.
+                            setMarkStatus((s) => ({
+                              ...s,
+                              [r.studentId]: value === "" ? "pending" : "entered",
+                            }));
+                          }}
+                          disabled={status !== "entered" && status !== "pending"}
+                          style={{ width: 90, minHeight: 36 }}
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={status}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setMarkStatus((s) => ({ ...s, [r.studentId]: next }));
+                            if (next !== "entered") setMarksIn((m) => ({ ...m, [r.studentId]: "" }));
+                          }}
+                          style={{ minHeight: 36 }}
+                        >
+                          {MARK_STATUSES.map((st) => (
+                            <option key={st} value={st}>
+                              {st.replace("_", " ")}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
           <div style={{ marginTop: 14 }}>

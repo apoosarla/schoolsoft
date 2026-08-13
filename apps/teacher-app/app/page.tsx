@@ -8,12 +8,12 @@ import {
   listSections,
   SectionDto,
   Session,
-  timetableForTeacher,
-  TimetableSlotDto,
+  teacherDay,
+  TeacherDayDto,
 } from "@/lib/api";
 
-function todayDow(): number {
-  return new Date().getDay(); // 0 = Sunday .. 6 = Saturday
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function nowHHMM(): string {
@@ -26,10 +26,16 @@ function sectionLabel(sections: SectionDto[] | null, sectionId: string): string 
   return s ? `${s.gradeName}-${s.code}` : "Section";
 }
 
+/**
+ * The teacher's morning, resolved for one date rather than a week grid: the
+ * school calendar says whether there is school at all, periods handed to a
+ * substitute are gone, and periods taken on for somebody absent are here —
+ * along with the permission to mark that class's register.
+ */
 export default function TodayPage() {
   const router = useRouter();
   const [session, setSessionState] = useState<Session | null>(null);
-  const [slots, setSlots] = useState<TimetableSlotDto[] | null>(null);
+  const [day, setDay] = useState<TeacherDayDto | null>(null);
   const [sections, setSections] = useState<SectionDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,9 +51,9 @@ export default function TodayPage() {
       setLoading(false);
       return;
     }
-    Promise.all([timetableForTeacher(s.subjectId), listSections(s.schoolId)])
-      .then(([tt, secs]) => {
-        setSlots(tt);
+    Promise.all([teacherDay(s.subjectId, todayIso()), listSections(s.schoolId)])
+      .then(([d, secs]) => {
+        setDay(d);
         setSections(secs);
       })
       .catch((err) => setError(describeError(err)))
@@ -69,8 +75,29 @@ export default function TodayPage() {
     );
   }
 
-  const today = slots?.filter((s) => s.dayOfWeek === todayDow()).sort((a, b) => a.periodNo - b.periodNo) ?? null;
   const now = nowHHMM();
+  const periods = [
+    ...(day?.slots ?? []).map((slot) => ({
+      key: slot.id,
+      periodNo: slot.periodNo,
+      startsAt: slot.startsAt,
+      endsAt: slot.endsAt,
+      title: slot.subjectName,
+      sectionId: slot.sectionId,
+      room: slot.room,
+      cover: null as string | null,
+    })),
+    ...(day?.covering ?? []).map((cover) => ({
+      key: cover.id,
+      periodNo: cover.periodNo,
+      startsAt: cover.startsAt,
+      endsAt: cover.endsAt,
+      title: cover.subjectName,
+      sectionId: cover.sectionId,
+      room: cover.room,
+      cover: `Covering for ${cover.absentStaffName}`,
+    })),
+  ].sort((a, b) => a.periodNo - b.periodNo);
 
   return (
     <main className="shell">
@@ -78,23 +105,34 @@ export default function TodayPage() {
         <h2>Today&apos;s schedule</h2>
         {loading && <p className="hint">Loading…</p>}
         {error && <div className="error-banner">{error}</div>}
-        {today && today.length === 0 && <p className="empty-note">No periods scheduled for you today.</p>}
-        {today && today.length > 0 && (
+
+        {/* A closed day says why, rather than rendering an empty grid the
+            reader has to interpret. */}
+        {day && !day.working && (
+          <p className="empty-note">School closed today{day.reason ? ` — ${day.reason}` : ""}.</p>
+        )}
+
+        {day?.working && periods.length === 0 && (
+          <p className="empty-note">No periods scheduled for you today.</p>
+        )}
+
+        {day?.working && periods.length > 0 && (
           <div className="timeline" style={{ marginTop: 12 }}>
-            {today.map((slot) => {
-              const isNow = now >= slot.startsAt && now < slot.endsAt;
+            {periods.map((p) => {
+              const isNow = now >= p.startsAt && now < p.endsAt;
               return (
-                <div className={"tl-item" + (isNow ? " now" : "")} key={slot.id}>
+                <div className={"tl-item" + (isNow ? " now" : "")} key={p.key}>
                   <div className="tl-time">
-                    P{slot.periodNo} · {slot.startsAt.slice(0, 5)}–{slot.endsAt.slice(0, 5)}
+                    P{p.periodNo} · {p.startsAt.slice(0, 5)}–{p.endsAt.slice(0, 5)}
                   </div>
-                  <div className="tl-title">{slot.subjectName}</div>
+                  <div className="tl-title">{p.title}</div>
                   <div className="tl-sub">
-                    {sectionLabel(sections, slot.sectionId)}
-                    {slot.room ? ` · Room ${slot.room}` : ""}
+                    {sectionLabel(sections, p.sectionId)}
+                    {p.room ? ` · Room ${p.room}` : ""}
+                    {p.cover ? ` · ${p.cover}` : ""}
                   </div>
                   <div className="tl-actions">
-                    <button type="button" onClick={() => router.push(`/attendance?section=${slot.sectionId}`)}>
+                    <button type="button" onClick={() => router.push(`/attendance?section=${p.sectionId}`)}>
                       Mark attendance
                     </button>
                   </div>
@@ -102,6 +140,14 @@ export default function TodayPage() {
               );
             })}
           </div>
+        )}
+
+        {day && day.coveredForThem.length > 0 && (
+          <p className="hint" style={{ marginTop: 12 }}>
+            {day.coveredForThem
+              .map((c) => `P${c.periodNo} ${c.subjectName} is being taken by ${c.substituteStaffName}`)
+              .join(" · ")}
+          </p>
         )}
       </div>
     </main>
