@@ -46,6 +46,13 @@ const ICON: Record<string, JSX.Element> = {
       <path d="M16 5.6V9.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   ),
+  rollover: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path d="M15 9C15 12.3 12.3 15 9 15C5.7 15 3 12.3 3 9C3 5.7 5.7 3 9 3C11 3 12.8 4 13.9 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M14.6 2.6V5.9H11.3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.6 9.1L8.2 10.7L11.4 7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
   timetable: (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <rect x="2.3" y="3" width="13.4" height="12.2" rx="1.6" stroke="currentColor" strokeWidth="1.4" />

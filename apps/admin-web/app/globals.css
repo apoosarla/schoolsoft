@@ -494,6 +494,46 @@ tbody tr[role="button"] { cursor: pointer; }
   line-height: 1.25;
 }
 
+/* The rollover wizard's spine: five steps, and which one the school is on. */
+.stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 14px;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  background: var(--surface-2);
+}
+.step-no {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--border);
+  color: var(--text-dim);
+}
+.step.done { color: var(--success); background: var(--success-wash); border-color: transparent; }
+.step.done .step-no { background: var(--success); color: var(--accent-contrast); }
+.step.active {
+  color: var(--accent-strong);
+  background: var(--accent-wash-strong);
+  border-color: transparent;
+  font-weight: 600;
+}
+.step.active .step-no { background: var(--accent); color: var(--accent-contrast); }
+
 /* A subject row on a report card: the marks column is the one people scan. */
 .mark-cell { width: 110px; }
 .rejected-list { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--critical); }

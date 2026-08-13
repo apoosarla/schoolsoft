@@ -882,9 +882,20 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   fee computation calls. Blocks CAL-01..07, ATT-02/04/10, TT-01/09.
 
 - **GAP-02 — No academic year rollover / bulk promotion.**
-  `enrolment.status` already allows `promoted` and `graduated`, but nothing
-  ever sets them and there is no rollover code (only a comment in
-  `enrolment/package-info.java`). Missing: next-AY structure cloning
+  ✅ **Closed 2026-08-13 (Phase 6).** `rollover_run` carries the state machine
+  (draft → structure_cloned → allocated → committed, with rolled_back reachable
+  until the new year is activated), `rollover_allocation` holds one editable row
+  per child, and `rollover_artifact` records every row the run created so an
+  undo deletes exactly that. Readiness lists the five things that block a
+  closure; the structure clone copies sections and fee structures into a
+  planning year (teacher assignments deliberately not); allocation reads the
+  report card's promotion decision, walks the grade ladder, respects capacity
+  and keeps siblings together; commit works in batches and is resumable, carries
+  arrears into an opening-balance invoice plus transport and elective
+  continuity, and closes the source year only once every child has somewhere to
+  go. Original finding: `enrolment.status` already allows `promoted` and
+  `graduated`, but nothing ever sets them and there is no rollover code (only a
+  comment in `enrolment/package-info.java`). Missing: next-AY structure cloning
   (grades/sections/curriculum bindings), a year-end readiness check
   (unpublished assessments, unlocked report cards, unmarked days, dues),
   bulk promote / detain / graduate, section reshuffle at promotion,

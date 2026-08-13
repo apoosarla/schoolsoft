@@ -2360,6 +2360,185 @@ export function createCombinedFamilyInvoice(req: {
   });
 }
 
+// -------------------------- Year closure & rollover (Phase 6) --------------------------
+
+/**
+ * What still stands between the school and closing its year. Each count is
+ * also a list, because the office has to work through names, not totals.
+ */
+export type ReadinessReportDto = {
+  schoolId: string;
+  academicYearId: string;
+  academicYearCode: string;
+  ready: boolean;
+  activeEnrolments: number;
+  unpublishedAssessments: number;
+  unlockedReportCards: number;
+  missingPromotionDecisions: number;
+  unmarkedAttendanceDays: number;
+  studentsWithDues: number;
+  outstandingTotal: number;
+  items: { kind: string; detail: string; targetId: string | null }[];
+};
+
+export function rolloverReadiness(schoolId: string, academicYearId: string): Promise<ReadinessReportDto> {
+  const params = new URLSearchParams({ schoolId, academicYearId });
+  return apiFetch<ReadinessReportDto>(`/v1/rollover/readiness?${params.toString()}`);
+}
+
+/**
+ * One attempt at moving the school into the next year. `state` is the whole
+ * contract: nothing irreversible happens before `committed`, and even that is
+ * undoable while the new year is still `planning`.
+ */
+export type RolloverRunDto = {
+  id: string;
+  schoolId: string;
+  fromAcademicYearId: string;
+  fromAcademicYearCode: string;
+  toAcademicYearId: string;
+  toAcademicYearCode: string;
+  toAcademicYearStatus: string;
+  toAcademicYearIsCurrent: boolean;
+  runKey: string;
+  /** draft | structure_cloned | allocated | committed | rolled_back */
+  state: string;
+  batchSize: number;
+  batchesDone: number;
+  stats: Record<string, number>;
+  startedByStaffId: string | null;
+  createdAt: string;
+  committedAt: string | null;
+  rolledBackAt: string | null;
+};
+
+export const ROLLOVER_STATES = [
+  "draft",
+  "structure_cloned",
+  "allocated",
+  "committed",
+  "rolled_back",
+] as const;
+
+/**
+ * Where one child is going. A row with no `toSectionId` is a question for the
+ * school — the grade above is full, or nobody decided whether they passed.
+ */
+export type RolloverAllocationDto = {
+  id: string;
+  rolloverRunId: string;
+  studentId: string;
+  studentName: string;
+  admissionNo: string;
+  fromEnrolmentId: string;
+  fromSectionId: string;
+  fromSectionLabel: string;
+  decision: string;
+  toSectionId: string | null;
+  toSectionLabel: string | null;
+  rollNo: string | null;
+  overCapacityReason: string | null;
+  /** planned | applied | skipped */
+  state: string;
+  note: string | null;
+  newEnrolmentId: string | null;
+  batchNo: number;
+  appliedAt: string | null;
+};
+
+export type RolloverCommitResultDto = {
+  runId: string;
+  state: string;
+  applied: number;
+  graduated: number;
+  remaining: number;
+  unplaced: number;
+  withoutDecision: number;
+  sourceYearClosed: boolean;
+  arrearsCarried: number;
+};
+
+export function listRolloverRuns(schoolId: string): Promise<RolloverRunDto[]> {
+  return apiFetch<RolloverRunDto[]>(`/v1/rollover/runs?schoolId=${schoolId}`);
+}
+
+export function getRolloverRun(id: string): Promise<RolloverRunDto> {
+  return apiFetch<RolloverRunDto>(`/v1/rollover/runs/${id}`);
+}
+
+/** The same run key twice is the same run — a double-clicked button is one rollover. */
+export function startRollover(req: {
+  schoolId: string;
+  fromAcademicYearId: string;
+  toAcademicYearId: string;
+  runKey?: string;
+  batchSize?: number;
+  startedByStaffId?: string;
+}): Promise<RolloverRunDto> {
+  return apiFetch<RolloverRunDto>("/v1/rollover/runs", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Next year's sections and fee structures, as a planning-state copy. */
+export function cloneRolloverStructure(runId: string): Promise<RolloverRunDto> {
+  return apiFetch<RolloverRunDto>(`/v1/rollover/runs/${runId}/clone-structure`, { method: "POST" });
+}
+
+/** Turns each promotion decision into a seat. Inert until commit. */
+export function allocateRollover(runId: string): Promise<RolloverRunDto> {
+  return apiFetch<RolloverRunDto>(`/v1/rollover/runs/${runId}/allocate`, { method: "POST" });
+}
+
+export function rolloverAllocations(runId: string, state?: string): Promise<RolloverAllocationDto[]> {
+  const query = state ? `?state=${state}` : "";
+  return apiFetch<RolloverAllocationDto[]>(`/v1/rollover/runs/${runId}/allocations${query}`);
+}
+
+export function reallocateStudent(
+  allocationId: string,
+  req: { toSectionId?: string; rollNo?: string; overCapacityReason?: string; note?: string }
+): Promise<RolloverAllocationDto> {
+  return apiFetch<RolloverAllocationDto>(`/v1/rollover/allocations/${allocationId}`, {
+    method: "PUT",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Applies the plan in batches; call again to continue where it stopped. */
+export function commitRollover(
+  runId: string,
+  req?: { maxBatches?: number; actingStaffId?: string }
+): Promise<RolloverCommitResultDto> {
+  return apiFetch<RolloverCommitResultDto>(`/v1/rollover/runs/${runId}/commit`, {
+    method: "POST",
+    body: JSON.stringify(req ?? {}),
+  });
+}
+
+/** Undoes everything the run created — refused once the new year is live. */
+export function rollbackRollover(
+  runId: string,
+  req: { reason: string; actingStaffId?: string }
+): Promise<RolloverRunDto> {
+  return apiFetch<RolloverRunDto>(`/v1/rollover/runs/${runId}/rollback`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Makes the new year live. After this the rollover cannot be undone. */
+export function activateRollover(
+  runId: string,
+  req?: { actingStaffId?: string }
+): Promise<RolloverRunDto> {
+  return apiFetch<RolloverRunDto>(`/v1/rollover/runs/${runId}/activate`, {
+    method: "POST",
+    body: JSON.stringify(req ?? {}),
+  });
+}
+
 // -------------------------- Roles & access --------------------------
 
 /** Every admin-web route that's gated by a role's screen_keys, plus "admin" for this Roles & Users screen itself. */
@@ -2371,6 +2550,7 @@ export const SCREEN_DEFS = [
   { key: "fees", label: "Fees", path: "/fees" },
   { key: "calendar", label: "Calendar & Year", path: "/calendar" },
   { key: "academics", label: "Academics", path: "/academics" },
+  { key: "rollover", label: "Year Rollover", path: "/rollover" },
   { key: "timetable", label: "Timetable", path: "/timetable" },
   { key: "assessment", label: "Assessment", path: "/assessment" },
   { key: "exams", label: "Exams", path: "/exams" },

@@ -314,6 +314,95 @@ public abstract class AbstractCertificationTest {
         });
     }
 
+    // ------------------------------------------------------ rollover sandbox
+
+    /**
+     * A small school of its own for a rollover scenario, plus a token for its
+     * principal. Rollover closes a year and re-enrols everybody, so it cannot
+     * be run against a school the other fifty scenarios read — see
+     * {@link RolloverSandbox}.
+     *
+     * The slug carries the scenario id, which keeps two sandboxes apart and
+     * makes a leftover row in a failed run say which test made it.
+     */
+    protected RolloverSandbox.Sandbox rolloverSandbox(String scenarioSlug) {
+        return inChain(jdbc -> new RolloverSandbox(jdbc, "rb-" + scenarioSlug).build());
+    }
+
+    protected String sandboxToken(RolloverSandbox.Sandbox sandbox) {
+        return jwt.issueAccess(sandbox.principalUserId(), seed.chainId().toString(), seed.chainSchema(),
+            sandbox.schoolId(), "staff");
+    }
+
+    /**
+     * Removes the sandbox school and everything hanging off it. Scenarios call
+     * this in a finally block: a rollover leaves rows in a dozen tables, and a
+     * failed assertion should not leave the next run's fixture holding them.
+     */
+    protected void dropSandbox(RolloverSandbox.Sandbox sandbox) {
+        inChainDo(jdbc -> {
+            UUID schoolId = sandbox.schoolId();
+            jdbc.update("DELETE FROM rollover_artifact WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM rollover_allocation WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM rollover_run WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM student_subject WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM mark WHERE assessment_component_id IN (SELECT ac.id " +
+                "FROM assessment_component ac JOIN assessment a ON a.id = ac.assessment_id " +
+                "WHERE a.school_id = ?)", schoolId);
+            jdbc.update("DELETE FROM assessment_component WHERE assessment_id IN " +
+                "(SELECT id FROM assessment WHERE school_id = ?)", schoolId);
+            jdbc.update("DELETE FROM assessment WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM report_card_subject WHERE report_card_id IN " +
+                "(SELECT id FROM report_card WHERE school_id = ?)", schoolId);
+            jdbc.update("DELETE FROM report_card WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM attendance_record WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM payment WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM fee_adjustment WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM ledger_entry WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM fee_invoice_line WHERE fee_invoice_id IN " +
+                "(SELECT id FROM fee_invoice WHERE school_id = ?)", schoolId);
+            jdbc.update("DELETE FROM fee_invoice WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM fee_schedule_run WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM fee_structure_line WHERE fee_structure_id IN " +
+                "(SELECT id FROM fee_structure WHERE school_id = ?)", schoolId);
+            jdbc.update("DELETE FROM fee_structure WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM fee_head WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM number_series WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM student_transport WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM transport_stop WHERE route_id IN " +
+                "(SELECT id FROM transport_route WHERE school_id = ?)", schoolId);
+            jdbc.update("DELETE FROM transport_route WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM enrolment WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM guardian_student WHERE student_id IN " +
+                "(SELECT id FROM student WHERE school_id = ?)", schoolId);
+            jdbc.update("DELETE FROM student WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM family WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM guardian WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM section_subject_teacher WHERE section_id IN " +
+                "(SELECT id FROM section WHERE school_id = ?)", schoolId);
+            jdbc.update("UPDATE section SET source_section_id = NULL WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM section WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM subject WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM grade WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM audit_log WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM notification_dispatch WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM user_account WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM staff_role WHERE staff_id IN " +
+                "(SELECT id FROM staff WHERE school_id = ?)", schoolId);
+            // A closed or reopened year names the staff member who did it, so
+            // those references have to let go before the staff row can.
+            jdbc.update("UPDATE academic_year SET closed_by_staff_id = NULL, reopened_by_staff_id = NULL " +
+                "WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM staff WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM term WHERE academic_year_id IN " +
+                "(SELECT id FROM academic_year WHERE school_id = ?)", schoolId);
+            jdbc.update("DELETE FROM academic_year WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM curriculum WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM campus WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM school WHERE id = ?", schoolId);
+        });
+    }
+
     protected UUID enrolmentOf(UUID studentId) {
         return queryOne("SELECT id FROM enrolment WHERE student_id = ? AND status = 'active'",
             UUID.class, studentId);

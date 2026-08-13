@@ -148,6 +148,25 @@ public class SchoolRepository {
         return findAcademicYear(id);
     }
 
+    /**
+     * Makes a year the live one. The is_current flip is what every "this year"
+     * lookup reads, so it is done here in one statement with the status rather
+     * than left to the caller to remember (YEC-07: rollover stays reversible
+     * right up until this happens).
+     */
+    public AcademicYearDto activateAcademicYear(UUID id, UUID actingStaffId) {
+        AcademicYearDto year = findAcademicYear(id);
+        if ("closed".equals(year.status())) {
+            throw new IllegalArgumentException(
+                "Academic year " + year.code() + " is closed; reopen it before activating");
+        }
+        UUID schoolId = jdbc.queryForObject(
+            "SELECT school_id FROM academic_year WHERE id = ?", UUID.class, id);
+        jdbc.update("UPDATE academic_year SET is_current = FALSE WHERE school_id = ? AND id <> ?", schoolId, id);
+        jdbc.update("UPDATE academic_year SET status = 'active', is_current = TRUE WHERE id = ?", id);
+        return findAcademicYear(id);
+    }
+
     public List<GradeDto> listGrades(UUID schoolId) {
         return jdbc.query(
             "SELECT id, code, name, sort_order FROM grade WHERE school_id = ? ORDER BY sort_order",

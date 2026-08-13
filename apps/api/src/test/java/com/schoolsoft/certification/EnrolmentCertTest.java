@@ -176,9 +176,57 @@ class EnrolmentCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("GAP-02 — re-admission after withdrawal depends on rollover-aware enrolment history "
-        + "(Phase 6).")
     void cert_ENR_08_withdrawnStudentIsReadmittedWithoutDuplicating() {
+        var sandbox = rolloverSandbox("enr08");
+        String token = sandboxToken(sandbox);
+        UUID student = sandbox.firstStudent("R1", "A");
+        try {
+            UUID oldEnrolment = queryOne(
+                "SELECT id FROM enrolment WHERE student_id = ? AND status = 'active'", UUID.class, student);
+            var withdrawn = post("/v1/enrolment/" + oldEnrolment + "/status", body(
+                "status", "withdrawn", "endsOn", "2026-08-15", "reason", "Family relocating"), token);
+            assertThat(withdrawn.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            // The year rolls over without them: a withdrawn child is not part of
+            // the cohort being moved.
+            var run = post("/v1/rollover/runs", body(
+                "schoolId", sandbox.schoolId(), "fromAcademicYearId", sandbox.sourceAyId(),
+                "toAcademicYearId", sandbox.targetAyId(), "runKey", "enr08",
+                "startedByStaffId", sandbox.principalStaffId()), token);
+            UUID runId = UUID.fromString(run.getBody().get("id").asText());
+            post("/v1/rollover/runs/" + runId + "/clone-structure", null, token);
+            post("/v1/rollover/runs/" + runId + "/allocate", null, token);
+            post("/v1/rollover/runs/" + runId + "/commit", body(), token);
+            post("/v1/rollover/runs/" + runId + "/activate",
+                body("actingStaffId", sandbox.principalStaffId()), token);
+            assertThat(count("SELECT count(*) FROM enrolment WHERE student_id = ? AND academic_year_id = ?",
+                student, sandbox.targetAyId())).isZero();
+
+            // They come back the next year. The family is re-admitted, not
+            // re-created: same student row, same admission number, one history.
+            UUID section = queryOne(
+                "SELECT s.id FROM section s JOIN grade g ON g.id = s.grade_id " +
+                "WHERE s.academic_year_id = ? AND g.code = 'R1' AND s.code = 'A'",
+                UUID.class, sandbox.targetAyId());
+            String admissionNo = queryOne("SELECT admission_no FROM student WHERE id = ?",
+                String.class, student);
+
+            var readmitted = post("/v1/enrolment", body(
+                "schoolId", sandbox.schoolId(), "studentId", student, "sectionId", section,
+                "academicYearId", sandbox.targetAyId(), "startsOn", "2026-09-01"), token);
+            assertThat(readmitted.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            assertThat(count("SELECT count(*) FROM student WHERE admission_no = ? AND school_id = ?",
+                admissionNo, sandbox.schoolId())).isEqualTo(1);
+            var history = get("/v1/enrolment/students/" + student, token).getBody();
+            assertThat(history).hasSize(2);
+            assertThat(queryOne("SELECT status FROM enrolment WHERE id = ?", String.class, oldEnrolment))
+                .isEqualTo("withdrawn");
+            assertThat(count("SELECT count(*) FROM enrolment WHERE student_id = ? AND status = 'active'",
+                student)).isEqualTo(1);
+        } finally {
+            dropSandbox(sandbox);
+        }
     }
 
     @Test @Tag("P1")

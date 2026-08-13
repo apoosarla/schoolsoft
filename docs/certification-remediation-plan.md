@@ -490,6 +490,66 @@ restartable after a mid-run interruption.
 
 **Certifies:** YEC-01..11, GRAD-01/06, FEE-16, ENR-08.
 
+### Status — landed 2026-08-13
+
+`V025__rollover.sql` (V021 went to Phase 3, so the numbering moved again).
+
+Built as three tables rather than the planned one. `rollover_run` carries the
+state machine; `rollover_allocation` holds a row per child — where they are
+going and why — which is what makes the plan inspectable before commit and
+restartable during it; and `rollover_artifact` records every row the run
+created, so a roll-back deletes exactly that.
+
+- **Readiness** (`GET /v1/rollover/readiness`) assembles five answers from the
+  modules that own them: unpublished assessments, unsealed report cards,
+  children with no promotion decision, unmarked registers, and outstanding
+  dues. Each count comes with the list, capped — a school with a thousand
+  unmarked days needs a report, not a download.
+- **Structure clone** copies sections (with capacity, curriculum and campus)
+  and fee structures into a `planning` year, idempotent on
+  `section.source_section_id`.
+- **Allocation** reads the report card's promotion decision, walks the grade
+  ladder by position, and places children with the class they came from where
+  there is room, respecting capacity.
+- **Commit** works in batches, skips rows already applied, carries arrears,
+  transport and elective choices, and closes the source year.
+- **Roll-back** is possible until activation, which is a separate, audited step.
+
+Five things the plan did not anticipate:
+
+- **A detained child's old enrolment was not `promoted`.** The status vocabulary
+  had no word for repeating a year, so the history would have said the opposite
+  of what happened. `detained` is a new enrolment status, and YEC-04 asserts it.
+- **Carrying an arrear forward has to move it, not copy it.** Leaving last
+  year's invoice `open` while raising an opening balance counts the same money
+  twice, and the outstanding report then disagrees with itself. Source invoices
+  become `carried_forward` — a new invoice status — and the roll-back restores
+  the status each one actually had.
+- **Keeping twins together needs a reservation, not a preference.** Placing the
+  first child in the section their sibling will want is not enough: the children
+  behind them in the queue take the seat. The planner now claims the whole
+  household's seats at once, and the sibling's placement spends one of them.
+- **Closing the year has to wait for the last child.** A closed year holding an
+  active enrolment with no next seat is a child nobody can find, so the source
+  year closes only when no allocation is unplaced or undecided; until then the
+  run stays `allocated` and reports what remains.
+- **The certification fixture could not host this.** Every other scenario makes
+  its own row inside the shared two-school fixture; a rollover closes a year and
+  re-enrols everybody, which would take the other fifty scenarios with it. Each
+  rollover scenario builds its own small school (`RolloverSandbox`) and rolls
+  that.
+
+The **rollover wizard** landed with it (`/rollover` in admin-web, screen key
+granted to the office roles): five steps with the run's state between them —
+readiness with its lists, the clone, the allocation table with per-child
+override, batched commit, and the deliberate activation that ends
+reversibility.
+
+**Executable scenarios: 104 → 117.** Newly passing: YEC-01..07, YEC-09, YEC-10,
+GRAD-01, GRAD-06, FEE-16, ENR-08. YEC-11 stays disabled — restartability is
+proved batch-by-batch in YEC-07, but the timing half needs the bulk seed and an
+agreed window. Suite: 208 run, 0 failures, 88 disabled.
+
 ---
 
 ## Phase 7 — Exit, transfer, graduation, alumni

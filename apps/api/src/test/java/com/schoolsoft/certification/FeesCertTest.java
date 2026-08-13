@@ -610,9 +610,77 @@ class FeesCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-02 + GAP-09 — no rollover, so arrears cannot carry into next year's opening balance "
-        + "(Phase 6).")
     void cert_FEE_16_arrearsCarryForwardIntoTheNextYearsOpeningBalance() {
+        // Rollover moves a whole school, so this runs against a sandbox school
+        // of its own rather than Oakridge — see RolloverSandbox.
+        var sandbox = rolloverSandbox("fee16");
+        String token = sandboxToken(sandbox);
+        UUID debtor = sandbox.firstStudent("R1", "A");
+        UUID settled = sandbox.students("R1", "A").get(1);
+        try {
+            UUID unpaid = UUID.fromString(post("/v1/fees/invoices", body(
+                "schoolId", sandbox.schoolId(), "studentId", debtor,
+                "invoiceNo", "FEE16-A-" + UUID.randomUUID().toString().substring(0, 8),
+                "cycleLabel", "Term 1", "dueOn", "2026-08-20",
+                "lines", List.of(body("feeHeadId", sandbox.feeHeadId(), "description", "Tuition",
+                    "amount", 9000.0, "discount", 0.0, "gst", 0.0))), token)
+                .getBody().get("id").asText());
+            post("/v1/fees/payments", body(
+                "schoolId", sandbox.schoolId(), "feeInvoiceId", unpaid, "amount", 3500.0,
+                "gateway", "manual", "method", "cash", "idempotencyKey", "fee16-" + UUID.randomUUID()), token);
+
+            UUID paid = UUID.fromString(post("/v1/fees/invoices", body(
+                "schoolId", sandbox.schoolId(), "studentId", settled,
+                "invoiceNo", "FEE16-B-" + UUID.randomUUID().toString().substring(0, 8),
+                "cycleLabel", "Term 1", "dueOn", "2026-08-20",
+                "lines", List.of(body("feeHeadId", sandbox.feeHeadId(), "description", "Tuition",
+                    "amount", 2000.0, "discount", 0.0, "gst", 0.0))), token)
+                .getBody().get("id").asText());
+            post("/v1/fees/payments", body(
+                "schoolId", sandbox.schoolId(), "feeInvoiceId", paid, "amount", 2000.0,
+                "gateway", "manual", "method", "cash", "idempotencyKey", "fee16b-" + UUID.randomUUID()), token);
+
+            var run = post("/v1/rollover/runs", body(
+                "schoolId", sandbox.schoolId(), "fromAcademicYearId", sandbox.sourceAyId(),
+                "toAcademicYearId", sandbox.targetAyId(), "runKey", "fee16",
+                "startedByStaffId", sandbox.principalStaffId()), token);
+            UUID runId = UUID.fromString(run.getBody().get("id").asText());
+            post("/v1/rollover/runs/" + runId + "/clone-structure", null, token);
+            post("/v1/rollover/runs/" + runId + "/allocate", null, token);
+            var committed = post("/v1/rollover/runs/" + runId + "/commit", body(), token);
+            assertThat(committed.getBody().get("arrearsCarried").asDouble()).isEqualTo(5500.0);
+            post("/v1/rollover/runs/" + runId + "/activate",
+                body("actingStaffId", sandbox.principalStaffId()), token);
+
+            // What the family still owes is now an invoice in the year they are
+            // being asked to pay it, under its own head.
+            var invoices = get("/v1/fees/invoices?studentId=" + debtor, token).getBody();
+            var opening = java.util.stream.StreamSupport.stream(invoices.spliterator(), false)
+                .filter(node -> node.get("cycleLabel").asText().startsWith("Opening balance"))
+                .findFirst().orElseThrow();
+            assertThat(opening.get("total").asDouble()).isEqualTo(5500.0);
+            assertThat(opening.get("status").asText()).isEqualTo("open");
+            assertThat(queryOne(
+                "SELECT fh.code FROM fee_invoice_line fil JOIN fee_head fh ON fh.id = fil.fee_head_id " +
+                "WHERE fil.fee_invoice_id = ?", String.class,
+                UUID.fromString(opening.get("id").asText()))).isEqualTo("ARREARS");
+
+            // And it is not owed twice: last year's invoice is marked as moved,
+            // so the outstanding report counts the amount once.
+            assertThat(queryOne("SELECT status FROM fee_invoice WHERE id = ?", String.class, unpaid))
+                .isEqualTo("carried_forward");
+            var outstanding = get("/v1/fees/reports/outstanding?schoolId=" + sandbox.schoolId(), token)
+                .getBody();
+            assertThat(outstanding.get("totalOutstanding").asDouble()).isEqualTo(5500.0);
+            assertThat(outstanding.get("studentsWithDues").asInt()).isEqualTo(1);
+
+            // A family that paid up starts the year clean.
+            assertThat(count(
+                "SELECT count(*) FROM fee_invoice WHERE student_id = ? AND academic_year_id = ?",
+                settled, sandbox.targetAyId())).isZero();
+        } finally {
+            dropSandbox(sandbox);
+        }
     }
 
     @Test @Tag("P2")
