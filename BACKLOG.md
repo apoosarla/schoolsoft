@@ -1198,10 +1198,15 @@ several are security-relevant.
   23:55 IST event lands on the next day (NFR-08).
 
 - **GAP-37 — Assessment lifecycle and report-card locks are not enforced.**
-  `enterMark` upserts regardless of the assessment being `locked` (ASMT-06),
-  `generateReportCard` always inserts, so a locked card can be superseded
-  silently (ASMT-12), and component weights are never validated against the
-  assessment total (ASMT-03).
+  ✅ **Closed 2026-08-13 (Phase 5).** A sealed assessment refuses marks and
+  names the way back in; report cards are one per student per term per template,
+  regenerated in place with a version, and a locked one refuses regeneration
+  until it is unlocked with a role, a reason and an audit row; component weights
+  and marks are checked against the assessment total before marking opens.
+  Original finding: `enterMark` upserts regardless of the assessment being
+  `locked` (ASMT-06), `generateReportCard` always inserts, so a locked card can
+  be superseded silently (ASMT-12), and component weights are never validated
+  against the assessment total (ASMT-03).
 
 - **GAP-38 — Invoice totals are computed by read-modify-write.** ✅ **Closed
   2026-08-12 (Phase 4).** `recordPayment` is transactional, takes the invoice
