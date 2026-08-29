@@ -234,11 +234,22 @@ public class ReportCardService {
 
     // ------------------------------------------------------------- lifecycle
 
+    /**
+     * draft → locked.
+     *
+     * <p>The transition asserts the state it is moving out of in the same
+     * statement that moves it. Reading the status first and updating after
+     * leaves a window: the card can be published in between, and the update's
+     * {@code status <> 'published'} guard then matches nothing while the method
+     * still returns a card and reports success. The caller believes they locked
+     * something they did not.</p>
+     */
     @Transactional
     public ReportCardDto lock(UUID id) {
-        find(id);
-        jdbc.update("UPDATE report_card SET is_locked = TRUE, status = 'locked', updated_at = now() " +
-            "WHERE id = ? AND status <> 'published'", id);
+        int moved = jdbc.update(
+            "UPDATE report_card SET is_locked = TRUE, status = 'locked', updated_at = now() " +
+            "WHERE id = ? AND status = 'draft'", id);
+        if (moved == 0) refuseTransition(id, "lock", "draft");
         return find(id);
     }
 
@@ -256,9 +267,11 @@ public class ReportCardService {
             throw new ForbiddenException(
                 "Your role cannot unlock a report card (needs one of " + UNLOCK_ROLES + ")");
         }
-        find(id);
-        jdbc.update("UPDATE report_card SET is_locked = FALSE, status = 'draft', parent_visible_from = NULL, " +
-            "  published_at = NULL, updated_at = now() WHERE id = ?", id);
+        int moved = jdbc.update(
+            "UPDATE report_card SET is_locked = FALSE, status = 'draft', parent_visible_from = NULL, " +
+            "  published_at = NULL, updated_at = now() " +
+            "WHERE id = ? AND status IN ('locked', 'published')", id);
+        if (moved == 0) refuseTransition(id, "unlock", "locked or published");
         return find(id);
     }
 
@@ -271,9 +284,6 @@ public class ReportCardService {
     @Transactional
     public ReportCardDto publish(UUID id) {
         ReportCardDto card = find(id);
-        if ("draft".equals(card.status())) {
-            throw new ConflictException("Lock the report card before publishing it");
-        }
         var policy = policies.forSchool(card.schoolId());
         if ("withhold".equals(policy.duesBlockPolicy())) {
             double due = feeDues.outstandingForStudent(card.studentId());
@@ -283,8 +293,15 @@ public class ReportCardService {
                     + "dues policy is 'withhold'. Settle the dues or change the policy to release.");
             }
         }
-        jdbc.update("UPDATE report_card SET status = 'published', is_locked = TRUE, published_at = now(), " +
-            "  parent_visible_from = COALESCE(parent_visible_from, now()), updated_at = now() WHERE id = ?", id);
+        // Conditional on 'locked', not on the status read above: between that
+        // read and this write the card can be unlocked back to draft, and
+        // publishing a draft is how a family gets shown a card the school had
+        // taken back.
+        int moved = jdbc.update(
+            "UPDATE report_card SET status = 'published', is_locked = TRUE, published_at = now(), " +
+            "  parent_visible_from = COALESCE(parent_visible_from, now()), updated_at = now() " +
+            "WHERE id = ? AND status = 'locked'", id);
+        if (moved == 0) refuseTransition(id, "publish", "locked");
         return find(id);
     }
 
@@ -707,4 +724,27 @@ public class ReportCardService {
         rs.getString("coverage_note"),
         rs.getTimestamp("published_at") == null ? null : rs.getTimestamp("published_at").toInstant(),
         rs.getTimestamp("generated_at").toInstant());
+
+    /**
+     * Why a conditional transition matched no row. Either the card is gone, or
+     * it is in a state this transition does not start from — and the caller
+     * needs to be told which, because the two need different things done about
+     * them.
+     *
+     * <p>Re-running a transition that has already happened is not an error: a
+     * retried request should not fail because the first attempt succeeded.</p>
+     */
+    private void refuseTransition(UUID id, String transition, String expectedFrom) {
+        ReportCardDto card = find(id);
+        String target = switch (transition) {
+            case "lock" -> "locked";
+            case "unlock" -> "draft";
+            default -> "published";
+        };
+        if (target.equals(card.status())) return;
+        throw new ConflictException(
+            "Cannot " + transition + " a report card that is '" + card.status() + "'"
+            + " \u2014 the transition starts from " + expectedFrom + ".");
+    }
+
 }
