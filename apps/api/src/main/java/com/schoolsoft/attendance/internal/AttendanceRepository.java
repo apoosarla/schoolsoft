@@ -3,7 +3,6 @@ package com.schoolsoft.attendance.internal;
 import com.schoolsoft.attendance.api.AttendanceRecordDto;
 import com.schoolsoft.attendance.api.AttendanceSummaryDto;
 import com.schoolsoft.attendance.api.LeaveApplicationDto;
-import com.schoolsoft.iam.api.Authz;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.ForbiddenException;
@@ -29,17 +28,17 @@ public class AttendanceRepository {
     private final AcademicYearGuard academicYears;
     private final AttendanceAmendmentService amendments;
     private final LeaveMaterialisationService leaveDays;
-    private final Authz authz;
+    private final LeaveAuthorizer leaveAuthorizer;
 
     public AttendanceRepository(JdbcTemplate jdbc, WorkingDayService workingDays,
                                 AcademicYearGuard academicYears, AttendanceAmendmentService amendments,
-                                LeaveMaterialisationService leaveDays, Authz authz) {
+                                LeaveMaterialisationService leaveDays, LeaveAuthorizer leaveAuthorizer) {
         this.jdbc = jdbc;
         this.workingDays = workingDays;
         this.academicYears = academicYears;
         this.amendments = amendments;
         this.leaveDays = leaveDays;
-        this.authz = authz;
+        this.leaveAuthorizer = leaveAuthorizer;
     }
 
     /** A section's cohort scope, which is what a calendar entry can be narrowed to. */
@@ -326,7 +325,7 @@ public class AttendanceRepository {
         UUID subjectId = (UUID) existing.get(0)[2];
         String previous = (String) existing.get(0)[3];
 
-        UUID approver = requireLeaveApprover(subjectType, subjectId, approverStaffId);
+        UUID approver = leaveAuthorizer.requireApprover(subjectType, subjectId, approverStaffId);
         var snap = TenantContext.get();
 
         jdbc.update(
@@ -342,36 +341,4 @@ public class AttendanceRepository {
         return jdbc.queryForObject("SELECT " + LEAVE_COLS + " FROM leave_application WHERE id = ?", LEAVE_MAPPER, id);
     }
 
-    /** Roles that may decide leave. Student leave is a class teacher's call; staff leave is not. */
-    private static final List<String> STAFF_LEAVE_APPROVERS =
-        List.of("principal", "vice_principal", "it_admin");
-    private static final List<String> STUDENT_LEAVE_APPROVERS =
-        List.of("principal", "vice_principal", "it_admin", "academic_coordinator", "class_teacher");
-
-    private UUID requireLeaveApprover(String subjectType, UUID subjectId, UUID claimedApproverStaffId) {
-        var snap = TenantContext.get();
-        if (snap != null && (snap.trusted() || "platform_admin".equals(snap.subjectType()))) {
-            return claimedApproverStaffId;
-        }
-        if (snap == null || !"staff".equals(snap.subjectType())) {
-            throw new ForbiddenException("Only staff may decide a leave application");
-        }
-
-        UUID callerStaffId = authz.currentStaffId();
-        if (callerStaffId == null) throw new ForbiddenException("No staff record behind this login");
-        if ("staff".equals(subjectType) && callerStaffId.equals(subjectId)) {
-            throw new ForbiddenException("A staff member cannot approve their own leave");
-        }
-        if (claimedApproverStaffId != null && !claimedApproverStaffId.equals(callerStaffId)) {
-            throw new ForbiddenException(
-                "The approver on record is whoever decides it; approverStaffId must be your own staff id");
-        }
-
-        var allowed = "staff".equals(subjectType) ? STAFF_LEAVE_APPROVERS : STUDENT_LEAVE_APPROVERS;
-        if (authz.rolesOfCurrentUser().stream().noneMatch(allowed::contains)) {
-            throw new ForbiddenException(
-                "Your role cannot decide " + subjectType + " leave (needs one of " + allowed + ")");
-        }
-        return callerStaffId;
-    }
 }

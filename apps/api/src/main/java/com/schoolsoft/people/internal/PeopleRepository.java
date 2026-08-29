@@ -1,6 +1,6 @@
 package com.schoolsoft.people.internal;
 
-import com.schoolsoft.iam.api.Authz;
+import com.schoolsoft.iam.api.CampusScope;
 import com.schoolsoft.people.api.GuardianDto;
 import com.schoolsoft.people.api.PeopleController;
 import com.schoolsoft.people.api.StaffDto;
@@ -21,12 +21,12 @@ import org.springframework.stereotype.Repository;
 public class PeopleRepository {
 
     private final JdbcTemplate jdbc;
-    private final Authz authz;
+    private final CampusScope campusScope;
     private final NumberSeries numbers;
 
-    public PeopleRepository(JdbcTemplate jdbc, Authz authz, NumberSeries numbers) {
+    public PeopleRepository(JdbcTemplate jdbc, CampusScope campusScope, NumberSeries numbers) {
         this.jdbc = jdbc;
-        this.authz = authz;
+        this.campusScope = campusScope;
         this.numbers = numbers;
     }
 
@@ -164,12 +164,12 @@ public class PeopleRepository {
             args.add(q);
         }
         // A campus-level admin sees their campus's staff and no one else's (GAP-24).
-        List<UUID> campusScope = authz.campusScopeOfCurrentUser();
-        if (!campusScope.isEmpty()) {
+        List<UUID> scope = campusScope.ofCurrentUser();
+        if (!scope.isEmpty()) {
             sql.append(" AND campus_id IN (")
-               .append(String.join(",", campusScope.stream().map(x -> "?").toList()))
+               .append(String.join(",", scope.stream().map(x -> "?").toList()))
                .append(")");
-            args.addAll(campusScope);
+            args.addAll(scope);
         }
         sql.append(" ORDER BY first_name");
         RowMapper<StaffDto> mapper = (rs, i) -> new StaffDto(

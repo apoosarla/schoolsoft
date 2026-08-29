@@ -1,6 +1,6 @@
 package com.schoolsoft.tenancy.internal;
 
-import com.schoolsoft.iam.api.Authz;
+import com.schoolsoft.iam.api.CampusScope;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.AcademicYearDto;
 import com.schoolsoft.tenancy.api.CampusDto;
@@ -25,11 +25,11 @@ import org.springframework.stereotype.Repository;
 public class SchoolRepository {
 
     private final JdbcTemplate jdbc;
-    private final Authz authz;
+    private final CampusScope campusScope;
 
-    public SchoolRepository(JdbcTemplate jdbc, Authz authz) {
+    public SchoolRepository(JdbcTemplate jdbc, CampusScope campusScope) {
         this.jdbc = jdbc;
-        this.authz = authz;
+        this.campusScope = campusScope;
     }
 
     /**
@@ -38,7 +38,7 @@ public class SchoolRepository {
      * are left unfiltered (GAP-24).
      */
     private String campusFilter(String columnExpression, List<Object> args) {
-        List<UUID> scope = authz.campusScopeOfCurrentUser();
+        List<UUID> scope = campusScope.ofCurrentUser();
         if (scope.isEmpty()) return "";
         args.addAll(scope);
         return " AND " + columnExpression + " IN (" +

@@ -116,7 +116,7 @@ public class RoleRepository {
     /**
      * Grants a role over a scope. {@code scopeType} is {@code school} for the
      * ordinary case and {@code campus} for an admin who runs one campus of a
-     * multi-campus school — {@link com.schoolsoft.iam.api.Authz#campusScopeOfCurrentUser()}
+     * multi-campus school — {@link com.schoolsoft.iam.api.CampusScope#ofCurrentUser()}
      * turns the latter into the filter every campus-aware list applies (GAP-24).
      */
     public void assignRole(UUID staffId, UUID schoolId, String roleCode, String scopeType, UUID scopeId) {

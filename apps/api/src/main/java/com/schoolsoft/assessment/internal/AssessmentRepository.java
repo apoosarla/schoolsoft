@@ -2,7 +2,6 @@ package com.schoolsoft.assessment.internal;
 
 import com.schoolsoft.assessment.api.AssessmentComponentDto;
 import com.schoolsoft.assessment.api.AssessmentDto;
-import com.schoolsoft.iam.api.Authz;
 import com.schoolsoft.platform.db.Jdbc;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.ForbiddenException;
@@ -31,12 +30,12 @@ import org.springframework.stereotype.Repository;
 public class AssessmentRepository {
 
     private final JdbcTemplate jdbc;
-    private final Authz authz;
+    private final AssessmentAuthorizer authorizer;
     private final AssessmentPolicyRepository policies;
 
-    public AssessmentRepository(JdbcTemplate jdbc, Authz authz, AssessmentPolicyRepository policies) {
+    public AssessmentRepository(JdbcTemplate jdbc, AssessmentAuthorizer authorizer, AssessmentPolicyRepository policies) {
         this.jdbc = jdbc;
-        this.authz = authz;
+        this.authorizer = authorizer;
         this.policies = policies;
     }
 
@@ -94,9 +93,6 @@ public class AssessmentRepository {
     /** Statuses that mean "marking is open or done" — the ones the weight gate guards. */
     private static final List<String> MARKING_OR_LATER = List.of("marking", "locked", "published");
 
-    /** Roles allowed to reopen a sealed assessment. */
-    private static final List<String> UNLOCK_ROLES = MarkService.EXAM_AUTHORITY_ROLES;
-
     public AssessmentDto setStatus(UUID id, String status, String reason) {
         AssessmentDto current = find(id)
             .orElseThrow(() -> new NotFoundException("Assessment not found: " + id));
@@ -109,10 +105,7 @@ public class AssessmentRepository {
                 throw new IllegalArgumentException(
                     "Reopening a " + current.status() + " assessment needs a reason");
             }
-            if (authz.rolesOfCurrentUser().stream().noneMatch(UNLOCK_ROLES::contains)) {
-                throw new ForbiddenException(
-                    "Your role cannot reopen a " + current.status() + " assessment (needs one of " + UNLOCK_ROLES + ")");
-            }
+            authorizer.requireMayReopen("a " + current.status() + " assessment");
         }
 
         // Opening for marking is the last moment the shape of the assessment can
