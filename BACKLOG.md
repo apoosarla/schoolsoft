@@ -5,7 +5,110 @@ check `schoolsoft-design.md` §19 (MVP vs Phase 2 vs Phase 3) for priority conte
 
 ---
 
+## Borrowed from healthcare-initiative — remaining
+
+A comparison against the sibling HMS codebase (same architecture, further
+along) surfaced these. Four of what it found are closed — see the first four
+entries under **Done** below.
+
+- **No optimistic locking on plain field edits.** `student`, `fee_invoice` and
+  `academic_year` updates are read-modify-write and last-write-wins. `mark` is
+  the least exposed, because every change writes a `mark_revision` row, so an
+  overwrite is recoverable. Adding a checked `version` column changes the API
+  contract — clients must send what they read — so this is deliberate work, not
+  a refactor. Report-card lifecycle transitions are already atomic (above); the
+  same conditional-UPDATE trick covers any other state machine and needs no
+  API change, so prefer it where the field *is* a state.
+
+- **No unit tests.** Everything runs through HTTP against a real database, so
+  pure logic — fee generation, grading bands, rollover date maths, sibling
+  policy — cannot be exercised without Postgres and has no fast test. HMS runs
+  domain tests as plain JUnit with no Spring context; the equivalent here is
+  extracting that logic from the repositories first.
+
+- **The six frontends have zero tests.** HMS's `lims-web` is 385 source files
+  to 187 test files. Vitest + React Testing Library is the shape.
+
+- **No shared UI package.** `app-shell.tsx` is duplicated four times
+  (216/129/113/83 lines) across admin/parent/teacher/driver, and there are no
+  design tokens. `packages/api-client` is already shared and is the model —
+  one implementation of bearer auth, error mapping and the 401 → refresh →
+  replay dance. Add `packages/ui` before app number seven.
+
+- **Frontends have no per-route permission check.** `screen_keys` drives
+  navigation, which is fine — frontend gates are UX and the backend is the
+  boundary — but there is no route guard and no test that a route declares
+  one. HMS fails its build on a route with no `beforeLoad` unless it is listed
+  as deliberately open.
+
+- **Slow certification fixture.** `CertificationFixture` drops and
+  re-provisions the whole chain schema on every run. HMS onboards once per JVM
+  and then restores a snapshot (truncate the non-empty tables, copy the
+  reference rows back with FK triggers off), measured at 5s/method → a
+  fraction. Its worker-per-database trick also runs ITs 4-way parallel
+  (2.0s/method vs 5.8s serial) — read its CLAUDE.md "A database per test
+  worker" section first, which documents the disk-fill and DDL-deadlock traps
+  that make it look like mass test breakage.
+
+### Gaps opened by the authorization work
+
+- **`driver` holds school-wide `student.view`.** A driver needs the students on
+  their own route; this grants them the school. Needs a route-scoped student
+  read that transport does not have.
+- **Exam schedule reads do not filter unpublished.** `exam.view.own` lets a
+  family read `/v1/exams/schedules` and the repository does not restrict to
+  published. Pre-existing; the gate did not introduce it.
+- **Teacher grants are school-wide.** `class_teacher` and `subject_teacher`
+  hold `attendance.mark` and `mark.enter` across the school. Narrowing to their
+  own sections is STF-05, enforced today only where a contextual authorizer
+  exists (`AttendanceAuthorizer`).
+- **`AuditInterceptor` runs ahead of method security.** It is a web
+  interceptor, so an `@Audited(requireReason = true)` endpoint called without a
+  reason answers 400 about the payload even when the caller would have been
+  refused 403.
+
+---
+
 ## Done
+
+- ~~The API had no authorization at all.~~ 29 controllers, ~230 endpoints,
+  zero `@PreAuthorize`, and no `@EnableMethodSecurity` — `.anyRequest()
+  .authenticated()` was the whole model, so any valid token could call any
+  endpoint. `POST /v1/iam/staff-roles/assign` was reachable by a guardian's
+  token, i.e. any parent could make themselves `it_admin`. Now: `Perm`
+  vocabulary (96 codes), `role_perm` grants (`V026`), 268 `@PreAuthorize`
+  annotations, `SelfScope` for the `.own` half, and eleven ArchUnit rules that
+  fail the build on drift. `docs/adr/0001-authorization-model.md`. 2026-08-30.
+
+- ~~The audit log was not tamper-evident.~~ `audit_log` was an ordinary table:
+  a row could be edited or removed and the log still read as consistent. Now a
+  Postgres trigger chains every row to the hash of the row before it (`V027`),
+  `UPDATE` is refused outright, and `GET /v1/audit/chain` walks the chain and
+  names the first break. `AuditChainTest` tampers the way an attacker with
+  database access would and asserts it is caught. 2026-08-30.
+
+- ~~Report-card transitions were read-then-write.~~ `publish` checked for
+  `draft` and then wrote unconditionally, so a card unlocked in between got
+  published anyway — a family shown a card the school had taken back. `lock`
+  guarded on `status <> 'published'`, so against a published card it updated
+  nothing and reported success. Each transition is now one conditional UPDATE
+  naming the state it moves out of, with zero rows affected treated as a
+  conflict. `ReportCardTransitionTest`. 2026-08-30.
+
+- ~~Authorization decided inside four repositories.~~ `AttendanceRepository`,
+  `SchoolRepository`, `AssessmentRepository` and `PeopleRepository` imported
+  `Authz` and decided access in SQL helpers, where nobody auditing "who may do
+  this" would look. `Authz` is now split: `CampusScope` (a filter — answers "of
+  what", stays next to the SQL) and the role checks (decisions — moved into
+  `LeaveAuthorizer` and `AssessmentAuthorizer`, alongside the existing
+  `AttendanceAuthorizer`). `ArchitectureTest` fails the build on a repository
+  that reaches for `Authz`. 2026-08-30.
+
+- ~~`publicsite` reached into `admissions.internal`.~~ The unauthenticated
+  public site held a reference to `AdmissionsRepository`, so `transition`,
+  `recordTestScore` and `convertToStudent` were one call away from a
+  no-token endpoint. Now goes through `admissions/api/PublicAdmissions`, a
+  two-method interface. Enforced by `ArchitectureTest`. 2026-08-30.
 
 - ~~Platform-admin API endpoint for chain provisioning.~~ Added
   `ChainAdminController` (`apps/api/.../tenancy/api/`) — `GET/POST
