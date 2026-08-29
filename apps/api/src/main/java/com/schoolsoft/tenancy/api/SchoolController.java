@@ -1,5 +1,6 @@
 package com.schoolsoft.tenancy.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.AuditService;
 import com.schoolsoft.tenancy.internal.SchoolRepository;
 import jakarta.validation.constraints.NotBlank;
@@ -22,9 +23,11 @@ public class SchoolController {
         this.audit = audit;
     }
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/schools")
     public List<SchoolDto> list() { return repo.list(); }
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/schools/{id}")
     public ResponseEntity<SchoolDto> get(@PathVariable UUID id) {
         return repo.find(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
@@ -38,21 +41,25 @@ public class SchoolController {
         String stateCode
     ) {}
 
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     @PostMapping("/schools")
     public SchoolDto create(@RequestBody CreateSchoolRequest req) {
         return repo.create(req.slug(), req.name(), req.boardCode(), req.gstin(), req.stateCode());
     }
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/schools/{schoolId}/academic-years")
     public List<AcademicYearDto> academicYears(@PathVariable UUID schoolId) {
         return repo.listAcademicYears(schoolId);
     }
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/schools/{schoolId}/grades")
     public List<GradeDto> grades(@PathVariable UUID schoolId) {
         return repo.listGrades(schoolId);
     }
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/schools/{schoolId}/sections")
     public List<SectionDto> sections(@PathVariable UUID schoolId, @RequestParam(required = false) UUID academicYearId) {
         return repo.listSections(schoolId, academicYearId);
@@ -60,6 +67,7 @@ public class SchoolController {
 
     // -------------------------- Campus --------------------------
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/schools/{schoolId}/campuses")
     public List<CampusDto> campuses(@PathVariable UUID schoolId) {
         return repo.listCampuses(schoolId);
@@ -67,6 +75,7 @@ public class SchoolController {
 
     public record CreateCampusRequest(@NotBlank String name, boolean isPrimary) {}
 
+    @PreAuthorize("@perm.can('structure.manage')")
     @PostMapping("/schools/{schoolId}/campuses")
     public CampusDto createCampus(@PathVariable UUID schoolId, @RequestBody CreateCampusRequest req) {
         return repo.createCampus(schoolId, req.name(), req.isPrimary());
@@ -78,6 +87,7 @@ public class SchoolController {
         @NotBlank String code, @NotNull LocalDate startsOn, @NotNull LocalDate endsOn, boolean isCurrent
     ) {}
 
+    @PreAuthorize("@perm.can('structure.manage')")
     @PostMapping("/schools/{schoolId}/academic-years")
     public AcademicYearDto createAcademicYear(@PathVariable UUID schoolId, @RequestBody CreateAcademicYearRequest req) {
         return repo.createAcademicYear(schoolId, req.code(), req.startsOn(), req.endsOn(), req.isCurrent());
@@ -91,6 +101,7 @@ public class SchoolController {
      * last year's attendance, marks and invoices read-only; reopening is
      * audited so "who let this be edited after closure" has an answer.
      */
+    @PreAuthorize("@perm.can('academic_year.manage')")
     @PostMapping("/academic-years/{academicYearId}/status")
     public AcademicYearDto setAcademicYearStatus(
         @PathVariable UUID academicYearId, @RequestBody AcademicYearStatusRequest req
@@ -106,6 +117,7 @@ public class SchoolController {
 
     // -------------------------- Term --------------------------
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/academic-years/{academicYearId}/terms")
     public List<TermDto> terms(@PathVariable UUID academicYearId) {
         return repo.listTerms(academicYearId);
@@ -115,6 +127,7 @@ public class SchoolController {
         @NotBlank String code, @NotBlank String name, @NotNull LocalDate startsOn, @NotNull LocalDate endsOn
     ) {}
 
+    @PreAuthorize("@perm.can('structure.manage')")
     @PostMapping("/academic-years/{academicYearId}/terms")
     public TermDto createTerm(@PathVariable UUID academicYearId, @RequestBody CreateTermRequest req) {
         return repo.createTerm(academicYearId, req.code(), req.name(), req.startsOn(), req.endsOn());
@@ -124,6 +137,7 @@ public class SchoolController {
 
     public record CreateGradeRequest(@NotBlank String code, @NotBlank String name, int sortOrder) {}
 
+    @PreAuthorize("@perm.can('structure.manage')")
     @PostMapping("/schools/{schoolId}/grades")
     public GradeDto createGrade(@PathVariable UUID schoolId, @RequestBody CreateGradeRequest req) {
         return repo.createGrade(schoolId, req.code(), req.name(), req.sortOrder());
@@ -136,6 +150,7 @@ public class SchoolController {
         @NotBlank String strategyCode, Integer capacity, UUID campusId
     ) {}
 
+    @PreAuthorize("@perm.can('structure.manage')")
     @PostMapping("/schools/{schoolId}/sections")
     public SectionDto createSection(@PathVariable UUID schoolId, @RequestBody CreateSectionRequest req) {
         return repo.createSection(
@@ -146,6 +161,7 @@ public class SchoolController {
 
     public record BindCurriculumRequest(@NotNull UUID curriculumId, @NotBlank String strategyCode) {}
 
+    @PreAuthorize("@perm.can('curriculum.manage')")
     @PutMapping("/sections/{sectionId}/curriculum")
     public ResponseEntity<Void> bindCurriculum(@PathVariable UUID sectionId, @RequestBody BindCurriculumRequest req) {
         repo.bindSectionCurriculum(sectionId, req.curriculumId(), req.strategyCode());
@@ -154,6 +170,7 @@ public class SchoolController {
 
     // -------------------------- Subject --------------------------
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/schools/{schoolId}/subjects")
     public List<SubjectDto> subjects(@PathVariable UUID schoolId) {
         return repo.listSubjects(schoolId);
@@ -161,6 +178,7 @@ public class SchoolController {
 
     public record CreateSubjectRequest(@NotBlank String code, @NotBlank String name, String boardCode) {}
 
+    @PreAuthorize("@perm.can('structure.manage')")
     @PostMapping("/schools/{schoolId}/subjects")
     public SubjectDto createSubject(@PathVariable UUID schoolId, @RequestBody CreateSubjectRequest req) {
         return repo.createSubject(schoolId, req.code(), req.name(), req.boardCode());
@@ -168,6 +186,7 @@ public class SchoolController {
 
     // -------------------------- Section-Subject-Teacher --------------------------
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/sections/{sectionId}/teachers")
     public List<SectionSubjectTeacherDto> sectionTeachers(@PathVariable UUID sectionId) {
         return repo.listSectionSubjectTeachers(sectionId);
@@ -182,6 +201,7 @@ public class SchoolController {
         @NotNull UUID subjectId, @NotNull UUID teacherStaffId, boolean isPrimary, boolean isElective
     ) {}
 
+    @PreAuthorize("@perm.can('teacher.assign')")
     @PostMapping("/sections/{sectionId}/teachers")
     public SectionSubjectTeacherDto assignTeacher(@PathVariable UUID sectionId, @RequestBody AssignTeacherRequest req) {
         return repo.assignSectionSubjectTeacher(
@@ -190,6 +210,7 @@ public class SchoolController {
 
     // -------------------------- Elective groups --------------------------
 
+    @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/schools/{schoolId}/elective-groups")
     public List<ElectiveGroupDto> electiveGroups(
         @PathVariable UUID schoolId,
@@ -204,6 +225,7 @@ public class SchoolController {
         int minPicks, int maxPicks, @NotNull List<UUID> subjectIds
     ) {}
 
+    @PreAuthorize("@perm.can('structure.manage')")
     @PostMapping("/schools/{schoolId}/elective-groups")
     public ElectiveGroupDto createElectiveGroup(
         @PathVariable UUID schoolId, @RequestBody CreateElectiveGroupRequest req

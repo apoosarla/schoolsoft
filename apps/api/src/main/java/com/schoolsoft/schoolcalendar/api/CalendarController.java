@@ -1,5 +1,6 @@
 package com.schoolsoft.schoolcalendar.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.AuditService;
 import com.schoolsoft.notification.api.NotificationService;
 import com.schoolsoft.schoolcalendar.internal.CalendarRepository;
@@ -47,6 +48,7 @@ public class CalendarController {
 
     // ------------------------------------------------------- working patterns
 
+    @PreAuthorize("@perm.can('calendar.view')")
     @GetMapping("/patterns")
     public List<WorkingDayPatternDto> patterns(@RequestParam UUID schoolId) {
         return repo.listPatterns(schoolId);
@@ -57,6 +59,7 @@ public class CalendarController {
         @NotBlank String weekdayMask, @NotBlank String saturdayRule, String notes
     ) {}
 
+    @PreAuthorize("@perm.can('calendar.manage')")
     @PostMapping("/patterns")
     public WorkingDayPatternDto createPattern(@RequestBody CreatePatternRequest req) {
         return repo.upsertPattern(req.schoolId(), req.campusId(), req.effectiveFrom(), req.effectiveTo(),
@@ -65,6 +68,7 @@ public class CalendarController {
 
     // -------------------------------------------------------- calendar entries
 
+    @PreAuthorize("@perm.can('calendar.view')")
     @GetMapping("/entries")
     public List<CalendarEntryDto> entries(
         @RequestParam UUID schoolId,
@@ -79,6 +83,7 @@ public class CalendarController {
         @NotBlank String title, String description, UUID gradeId, UUID campusId, UUID declaredByStaffId
     ) {}
 
+    @PreAuthorize("@perm.can('calendar.manage')")
     @PostMapping("/entries")
     public CalendarEntryDto createEntry(@RequestBody CreateEntryRequest req) {
         return repo.upsertEntry(req.schoolId(), req.academicYearId(), req.onDate(), req.kind(),
@@ -94,6 +99,7 @@ public class CalendarController {
      * list against this year's dates, or re-importing after a partial failure,
      * corrects rather than duplicates.
      */
+    @PreAuthorize("@perm.can('calendar.manage')")
     @PostMapping("/entries/bulk")
     public List<CalendarEntryDto> importEntries(@RequestBody BulkImportRequest req) {
         return req.entries().stream()
@@ -105,6 +111,7 @@ public class CalendarController {
             .toList();
     }
 
+    @PreAuthorize("@perm.can('calendar.manage')")
     @DeleteMapping("/entries/{id}")
     public ResponseEntity<Void> deleteEntry(@PathVariable UUID id) {
         repo.deleteEntry(id);
@@ -115,6 +122,7 @@ public class CalendarController {
 
     public record DayStatusDto(LocalDate date, boolean working, String reason, String calendarKind) {}
 
+    @PreAuthorize("@perm.can('calendar.view')")
     @GetMapping("/days")
     public List<DayStatusDto> days(
         @RequestParam UUID schoolId,
@@ -128,6 +136,7 @@ public class CalendarController {
             .toList();
     }
 
+    @PreAuthorize("@perm.can('calendar.view')")
     @GetMapping("/working-days")
     public Map<String, Object> workingDayCount(
         @RequestParam UUID schoolId,
@@ -158,6 +167,7 @@ public class CalendarController {
      * school can show what was taken and that it was withdrawn — and the
      * affected guardians are told.
      */
+    @PreAuthorize("@perm.can('closure.declare')")
     @PostMapping("/closures")
     public ClosureResultDto declareClosure(@RequestBody DeclareClosureRequest req) {
         CalendarEntryDto entry = repo.upsertEntry(req.schoolId(), null, req.onDate(), "closure",

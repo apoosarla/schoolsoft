@@ -1,5 +1,6 @@
 package com.schoolsoft.theming.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -12,6 +13,7 @@ public class ThemeController {
     private final JdbcTemplate jdbc;
     public ThemeController(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    @PreAuthorize("@perm.can('theme.view')")
     @GetMapping("/schools/{id}")
     public Map<String, Object> theme(@PathVariable UUID id) {
         var rows = jdbc.queryForList(
@@ -35,6 +37,7 @@ public class ThemeController {
      * existing" from "field omitted, use default" once EXCLUDED has already
      * applied the VALUES-side default.
      */
+    @PreAuthorize("@perm.can('theme.manage')")
     @PutMapping("/schools/{id}")
     public Map<String, Object> update(@PathVariable UUID id, @RequestBody UpdateThemeRequest req) {
         jdbc.update("INSERT INTO school_theme (school_id) VALUES (?) ON CONFLICT (school_id) DO NOTHING", id);

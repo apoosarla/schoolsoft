@@ -1,5 +1,6 @@
 package com.schoolsoft.device.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.device.internal.DeviceRepository;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -15,6 +16,7 @@ public class DeviceController {
     private final DeviceRepository repo;
     public DeviceController(DeviceRepository repo) { this.repo = repo; }
 
+    @PreAuthorize("@perm.can('device.view')")
     @GetMapping
     public List<DeviceDto> list(
         @RequestParam UUID schoolId,
@@ -29,6 +31,7 @@ public class DeviceController {
         @NotBlank String serialNo, String location, String apiKey
     ) {}
 
+    @PreAuthorize("@perm.can('device.manage')")
     @PostMapping
     public DeviceDto register(@RequestBody RegisterRequest req) {
         return repo.register(req.schoolId(), req.campusId(), req.kind(), req.vendor(), req.model(),
@@ -40,6 +43,7 @@ public class DeviceController {
     ) {}
 
     /** Ingestion endpoint a school-side biometric/RFID bridge posts to once it has resolved a read to a student. */
+    @PreAuthorize("@perm.can('device.event.post')")
     @PostMapping("/{deviceId}/events/student")
     public DeviceDto studentEvent(@PathVariable UUID deviceId, @RequestBody StudentEventRequest req) {
         return repo.ingestStudentEvent(
@@ -50,6 +54,7 @@ public class DeviceController {
 
     public record StaffEventRequest(@NotNull UUID schoolId, @NotNull UUID staffId, LocalDate onDate, boolean checkIn) {}
 
+    @PreAuthorize("@perm.can('device.event.post')")
     @PostMapping("/{deviceId}/events/staff")
     public DeviceDto staffEvent(@PathVariable UUID deviceId, @RequestBody StaffEventRequest req) {
         return repo.ingestStaffEvent(

@@ -1,5 +1,6 @@
 package com.schoolsoft.publicsite.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.publicsite.internal.PublicLookupRepository;
@@ -24,18 +25,21 @@ public class PublicController {
     private final PublicLookupRepository repo;
     public PublicController(PublicLookupRepository repo) { this.repo = repo; }
 
+    @PreAuthorize("permitAll()")
     @GetMapping
     public PublicSchoolDto school(@PathVariable String chainSlug, @PathVariable String schoolSlug) {
         return repo.findSchool(chainSlug, schoolSlug)
             .orElseThrow(() -> new NotFoundException("No school for " + chainSlug + "/" + schoolSlug));
     }
 
+    @PreAuthorize("permitAll()")
     @GetMapping("/grades")
     public List<GradeDto> grades(@PathVariable String chainSlug, @PathVariable String schoolSlug) {
         return repo.listGrades(chainSlug, schoolSlug);
     }
 
     /** Published school calendar — the same day resolution the apps see (CAL-07). */
+    @PreAuthorize("permitAll()")
     @GetMapping("/calendar")
     public List<PublicCalendarDayDto> calendar(
         @PathVariable String chainSlug, @PathVariable String schoolSlug,
@@ -57,6 +61,7 @@ public class PublicController {
         @NotNull UUID gradeId, @NotBlank String guardianName, @NotBlank String guardianPhone, String guardianEmail
     ) {}
 
+    @PreAuthorize("permitAll()")
     @PostMapping("/admissions/apply")
     public Map<String, String> apply(
         @PathVariable String chainSlug, @PathVariable String schoolSlug, @RequestBody ApplyRequest req
@@ -68,6 +73,7 @@ public class PublicController {
         return Map.of("applicationNo", created.applicationNo());
     }
 
+    @PreAuthorize("permitAll()")
     @GetMapping("/admissions/track")
     public AdmissionApplicationDto track(
         @PathVariable String chainSlug, @PathVariable String schoolSlug,

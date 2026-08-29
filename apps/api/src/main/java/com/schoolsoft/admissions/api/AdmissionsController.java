@@ -1,5 +1,6 @@
 package com.schoolsoft.admissions.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.admissions.internal.AdmissionsRepository;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import jakarta.validation.constraints.NotBlank;
@@ -18,11 +19,13 @@ public class AdmissionsController {
     private final AdmissionsRepository repo;
     public AdmissionsController(AdmissionsRepository repo) { this.repo = repo; }
 
+    @PreAuthorize("@perm.can('admission.view')")
     @GetMapping("/applications")
     public List<AdmissionApplicationDto> list(@RequestParam UUID schoolId, @RequestParam(required = false) String state) {
         return repo.list(schoolId, state);
     }
 
+    @PreAuthorize("@perm.can('admission.view')")
     @GetMapping("/applications/{id}")
     public ResponseEntity<AdmissionApplicationDto> get(@PathVariable UUID id) {
         return repo.find(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
@@ -34,6 +37,7 @@ public class AdmissionsController {
         @NotBlank String guardianName, @NotBlank String guardianPhone, String guardianEmail, String source
     ) {}
 
+    @PreAuthorize("@perm.can('admission.manage')")
     @PostMapping("/applications")
     public AdmissionApplicationDto create(@RequestBody CreateApplicationRequest req) {
         return repo.create(
@@ -45,6 +49,7 @@ public class AdmissionsController {
 
     public record TransitionRequest(@NotBlank String toState) {}
 
+    @PreAuthorize("@perm.can('admission.decide')")
     @PostMapping("/applications/{id}/transition")
     public AdmissionApplicationDto transition(@PathVariable UUID id, @RequestBody TransitionRequest req) {
         var snap = TenantContext.get();
@@ -54,11 +59,13 @@ public class AdmissionsController {
 
     public record TestScoreRequest(double score, String notes) {}
 
+    @PreAuthorize("@perm.can('admission.manage')")
     @PostMapping("/applications/{id}/test-score")
     public AdmissionApplicationDto testScore(@PathVariable UUID id, @RequestBody TestScoreRequest req) {
         return repo.recordTestScore(id, req.score(), req.notes());
     }
 
+    @PreAuthorize("@perm.can('admission.view')")
     @GetMapping("/applications/{id}/events")
     public List<AdmissionEventDto> events(@PathVariable UUID id) {
         return repo.listEvents(id);
@@ -66,6 +73,7 @@ public class AdmissionsController {
 
     public record ConvertRequest(@NotNull UUID sectionId, String rollNo, String overCapacityReason) {}
 
+    @PreAuthorize("@perm.can('admission.enrol')")
     @PostMapping("/applications/{id}/enrol")
     public Map<String, UUID> enrol(@PathVariable UUID id, @RequestBody ConvertRequest req) {
         UUID studentId = repo.convertToStudent(id, req.sectionId(), req.rollNo(), req.overCapacityReason());

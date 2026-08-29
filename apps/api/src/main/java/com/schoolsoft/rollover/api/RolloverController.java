@@ -1,5 +1,6 @@
 package com.schoolsoft.rollover.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.rollover.internal.RolloverService;
 import jakarta.validation.constraints.NotBlank;
@@ -24,6 +25,7 @@ public class RolloverController {
     public RolloverController(RolloverService service) { this.service = service; }
 
     /** What still stands between the school and closing this year (YEC-01). */
+    @PreAuthorize("@perm.can('rollover.view')")
     @GetMapping("/readiness")
     public ReadinessReportDto readiness(@RequestParam UUID schoolId, @RequestParam UUID academicYearId) {
         return service.checkReadiness(schoolId, academicYearId);
@@ -39,34 +41,40 @@ public class RolloverController {
         UUID startedByStaffId
     ) {}
 
+    @PreAuthorize("@perm.can('rollover.manage')")
     @PostMapping("/runs")
     public RolloverRunDto start(@RequestBody StartRequest req) {
         return service.start(req.schoolId(), req.fromAcademicYearId(), req.toAcademicYearId(),
             req.runKey(), req.batchSize(), req.startedByStaffId());
     }
 
+    @PreAuthorize("@perm.can('rollover.view')")
     @GetMapping("/runs")
     public List<RolloverRunDto> runs(@RequestParam UUID schoolId) {
         return service.list(schoolId);
     }
 
+    @PreAuthorize("@perm.can('rollover.view')")
     @GetMapping("/runs/{id}")
     public RolloverRunDto run(@PathVariable UUID id) {
         return service.find(id);
     }
 
     /** Next year's sections and fee structures, as a planning-state copy (YEC-02). */
+    @PreAuthorize("@perm.can('rollover.manage')")
     @PostMapping("/runs/{id}/clone-structure")
     public RolloverRunDto cloneStructure(@PathVariable UUID id) {
         return service.cloneStructure(id);
     }
 
     /** Turns each promotion decision into a seat. Inert until commit. */
+    @PreAuthorize("@perm.can('rollover.manage')")
     @PostMapping("/runs/{id}/allocate")
     public RolloverRunDto allocate(@PathVariable UUID id) {
         return service.allocate(id);
     }
 
+    @PreAuthorize("@perm.can('rollover.view')")
     @GetMapping("/runs/{id}/allocations")
     public List<RolloverAllocationDto> allocations(
         @PathVariable UUID id, @RequestParam(required = false) String state
@@ -76,6 +84,7 @@ public class RolloverController {
 
     public record ReallocateRequest(UUID toSectionId, String rollNo, String overCapacityReason, String note) {}
 
+    @PreAuthorize("@perm.can('rollover.manage')")
     @PutMapping("/allocations/{allocationId}")
     public RolloverAllocationDto reallocate(
         @PathVariable UUID allocationId, @RequestBody ReallocateRequest req
@@ -90,6 +99,7 @@ public class RolloverController {
      * Applies the plan in batches. Call it again to continue; the source year
      * closes only when nothing is left unresolved.
      */
+    @PreAuthorize("@perm.can('rollover.manage')")
     @PostMapping("/runs/{id}/commit")
     @Audited(action = "rollover.commit", targetType = "rollover_run", snapshot = false,
              requireReason = false)
@@ -103,6 +113,7 @@ public class RolloverController {
     public record RollbackRequest(@NotBlank String reason, UUID actingStaffId) {}
 
     /** Undoes everything the run created — possible only until the new year is activated. */
+    @PreAuthorize("@perm.can('rollover.manage')")
     @PostMapping("/runs/{id}/rollback")
     @Audited(action = "rollover.rollback", targetType = "rollover_run", snapshot = false)
     public RolloverRunDto rollback(@PathVariable UUID id, @RequestBody RollbackRequest req) {
@@ -112,6 +123,7 @@ public class RolloverController {
     public record ActivateRequest(UUID actingStaffId) {}
 
     /** Makes the new year the live one. After this the rollover cannot be undone. */
+    @PreAuthorize("@perm.can('rollover.manage')")
     @PostMapping("/runs/{id}/activate")
     @Audited(action = "rollover.activate", targetType = "rollover_run", snapshot = false,
              requireReason = false)

@@ -1,7 +1,10 @@
 package com.schoolsoft.attendance.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.attendance.internal.AttendanceAmendmentService;
 import com.schoolsoft.attendance.internal.AttendanceAuthorizer;
+import com.schoolsoft.iam.api.SelfScope;
+import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.attendance.internal.AttendancePolicyRepository;
 import com.schoolsoft.attendance.internal.AttendanceRepository;
 import com.schoolsoft.audit.api.Audited;
@@ -20,13 +23,16 @@ public class AttendanceController {
     private final AttendanceAuthorizer authorizer;
     private final AttendanceAmendmentService amendments;
     private final AttendancePolicyRepository policies;
+    private final SelfScope selfScope;
 
     public AttendanceController(AttendanceRepository repo, AttendanceAuthorizer authorizer,
-                                AttendanceAmendmentService amendments, AttendancePolicyRepository policies) {
+                                AttendanceAmendmentService amendments, AttendancePolicyRepository policies,
+                                SelfScope selfScope) {
         this.repo = repo;
         this.authorizer = authorizer;
         this.amendments = amendments;
         this.policies = policies;
+        this.selfScope = selfScope;
     }
 
     public record MarkRequest(
@@ -34,6 +40,7 @@ public class AttendanceController {
         Integer periodNo, @NotBlank String status, String source, UUID markedByStaffId, String notes
     ) {}
 
+    @PreAuthorize("@perm.can('attendance.mark')")
     @PostMapping("/mark")
     public AttendanceRecordDto mark(@RequestBody MarkRequest req) {
         authorizer.requireMayMark(req.sectionId(), req.onDate(), req.periodNo());
@@ -50,6 +57,7 @@ public class AttendanceController {
 
     public record StudentStatus(@NotNull UUID studentId, @NotBlank String status, String notes) {}
 
+    @PreAuthorize("@perm.can('attendance.mark')")
     @PostMapping("/mark/bulk")
     public List<AttendanceRecordDto> markBulk(@RequestBody BulkMarkRequest req) {
         authorizer.requireMayMark(req.sectionId(), req.onDate(), req.periodNo());
@@ -61,23 +69,28 @@ public class AttendanceController {
             .toList();
     }
 
+    @PreAuthorize("@perm.can('attendance.view')")
     @GetMapping
     public List<AttendanceRecordDto> forSection(@RequestParam UUID sectionId, @RequestParam LocalDate onDate) {
         return repo.forSectionOnDate(sectionId, onDate);
     }
 
+    @PreAuthorize("@perm.canAnyOf('attendance.view', 'attendance.view.own')")
     @GetMapping("/students/{studentId}")
     public List<AttendanceRecordDto> forStudent(
         @PathVariable UUID studentId, @RequestParam LocalDate from, @RequestParam LocalDate to
     ) {
+        selfScope.requireStudent(studentId, Perm.ATTENDANCE_VIEW);
         return repo.forStudent(studentId, from, to);
     }
 
     /** Attendance percentage over a range, against the school-calendar denominator. */
+    @PreAuthorize("@perm.canAnyOf('attendance.view', 'attendance.view.own')")
     @GetMapping("/students/{studentId}/summary")
     public AttendanceSummaryDto summary(
         @PathVariable UUID studentId, @RequestParam LocalDate from, @RequestParam LocalDate to
     ) {
+        selfScope.requireStudent(studentId, Perm.ATTENDANCE_VIEW);
         return repo.summaryForStudent(studentId, from, to);
     }
 
@@ -88,11 +101,21 @@ public class AttendanceController {
         @NotNull LocalDate fromDate, @NotNull LocalDate toDate, String reason
     ) {}
 
+    @PreAuthorize("@perm.can('leave.apply')")
     @PostMapping("/leave")
     public LeaveApplicationDto applyLeave(@RequestBody LeaveRequest req) {
+        // Anyone may apply for leave; only the office may apply on somebody
+        // else's behalf. Without this a guardian could file leave against any
+        // child in the school, and leave writes the register.
+        if ("staff".equals(req.subjectType())) {
+            selfScope.requireStaff(req.subjectId(), Perm.LEAVE_DECIDE);
+        } else {
+            selfScope.requireStudent(req.subjectId(), Perm.LEAVE_DECIDE);
+        }
         return repo.applyLeave(req.schoolId(), req.subjectType(), req.subjectId(), req.fromDate(), req.toDate(), req.reason());
     }
 
+    @PreAuthorize("@perm.can('leave.view')")
     @GetMapping("/leave")
     public List<LeaveApplicationDto> listLeave(@RequestParam UUID schoolId, @RequestParam(required = false) String status) {
         return repo.listLeave(schoolId, status);
@@ -105,6 +128,7 @@ public class AttendanceController {
      * an approval takes them back out again (ATT-05, ATT-13) — which is why
      * this is audited: it changes attendance for a range of dates at once.
      */
+    @PreAuthorize("@perm.can('leave.decide')")
     @PostMapping("/leave/{id}/decide")
     @Audited(action = "leave.decided", targetType = "leave_application", requireReason = false)
     public LeaveApplicationDto decideLeave(@PathVariable UUID id, @RequestBody DecideLeaveRequest req) {
@@ -119,12 +143,14 @@ public class AttendanceController {
     ) {}
 
     /** Asks for a change to a register that is past its marking window. */
+    @PreAuthorize("@perm.can('attendance.amend.request')")
     @PostMapping("/amendments")
     public AttendanceAmendmentDto requestAmendment(@RequestBody AmendRequest req) {
         return amendments.request(req.studentId(), req.onDate(), req.periodNo(),
             req.newStatus(), req.reason());
     }
 
+    @PreAuthorize("@perm.can('attendance.view')")
     @GetMapping("/amendments")
     public List<AttendanceAmendmentDto> listAmendments(
         @RequestParam UUID schoolId,
@@ -137,6 +163,7 @@ public class AttendanceController {
     /** The decision's own reason — why the correction was allowed, or refused. */
     public record DecideAmendmentRequest(@NotBlank String status, @NotBlank String reason) {}
 
+    @PreAuthorize("@perm.can('attendance.amend.decide')")
     @PostMapping("/amendments/{id}/decide")
     @Audited(action = "attendance.amendment_decided", targetType = "attendance_amendment")
     public AttendanceAmendmentDto decideAmendment(
@@ -147,6 +174,7 @@ public class AttendanceController {
 
     // -------------------------- Marking policy --------------------------
 
+    @PreAuthorize("@perm.can('attendance.view')")
     @GetMapping("/policy")
     public AttendancePolicyRepository.Policy policy(@RequestParam UUID schoolId) {
         return policies.of(schoolId);
@@ -154,6 +182,7 @@ public class AttendanceController {
 
     public record PolicyRequest(@NotNull UUID schoolId, Integer editWindowHours, List<String> approverRoles) {}
 
+    @PreAuthorize("@perm.can('attendance.policy.manage')")
     @PutMapping("/policy")
     public AttendancePolicyRepository.Policy setPolicy(@RequestBody PolicyRequest req) {
         return policies.upsert(req.schoolId(), req.editWindowHours(), req.approverRoles());

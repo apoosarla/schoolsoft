@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -56,6 +57,20 @@ public class GlobalExceptionHandler {
         log.warn("Constraint violation: {}", detail);
         return ResponseEntity.status(HttpStatus.CONFLICT)
             .body(ApiError.of("constraint_violation", detail));
+    }
+
+    /**
+     * A {@code @PreAuthorize} refusal. Method security throws this from inside
+     * the controller invocation, so this advice sees it — and without an
+     * explicit handler the catch-all below would turn every denied call into a
+     * 500, which reads to the client as "the server is broken" rather than
+     * "you may not do this". Deliberately says nothing about which permission
+     * was missing: that is a map of the system, drawn for whoever was refused.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> accessDenied(AccessDeniedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(ApiError.of("forbidden", "You do not have permission to do this"));
     }
 
     @ExceptionHandler(Exception.class)

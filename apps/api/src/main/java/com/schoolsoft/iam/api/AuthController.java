@@ -1,5 +1,6 @@
 package com.schoolsoft.iam.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.iam.internal.OtpStore;
 import com.schoolsoft.iam.internal.UserLookupService;
 import com.schoolsoft.platform.security.JwtService;
@@ -48,6 +49,7 @@ public class AuthController {
 
     private static final String PLATFORM_OTP_NAMESPACE = "platform";
 
+    @PreAuthorize("permitAll()")
     @PostMapping("/otp/start")
     public ResponseEntity<Map<String, Object>> start(@RequestBody OtpStartRequest req) {
         String code = otpStore.issue(req.identifier(), req.chainSlug());
@@ -57,6 +59,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("status", "sent"));
     }
 
+    @PreAuthorize("permitAll()")
     @PostMapping("/otp/verify")
     public ResponseEntity<AuthResponse> verify(@RequestBody OtpVerifyRequest req) {
         if (!otpStore.verify(req.identifier(), req.chainSlug(), req.code())) {
@@ -94,6 +97,7 @@ public class AuthController {
     public record PlatformOtpStartRequest(@NotBlank String email) {}
     public record PlatformOtpVerifyRequest(@NotBlank String email, @NotBlank String code) {}
 
+    @PreAuthorize("permitAll()")
     @PostMapping("/platform-admin/otp/start")
     public ResponseEntity<Map<String, Object>> platformStart(@RequestBody PlatformOtpStartRequest req) {
         String code = otpStore.issue(req.email(), PLATFORM_OTP_NAMESPACE);
@@ -101,6 +105,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("status", "sent"));
     }
 
+    @PreAuthorize("permitAll()")
     @PostMapping("/platform-admin/otp/verify")
     public ResponseEntity<AuthResponse> platformVerify(@RequestBody PlatformOtpVerifyRequest req) {
         if (!otpStore.verify(req.email(), PLATFORM_OTP_NAMESPACE, req.code())) {
@@ -117,6 +122,7 @@ public class AuthController {
         )));
     }
 
+    @PreAuthorize("permitAll()")
     @PostMapping("/refresh")
     public ResponseEntity<AuthResponse> refresh(@RequestBody Map<String, String> body) {
         String token = body.get("refreshToken");

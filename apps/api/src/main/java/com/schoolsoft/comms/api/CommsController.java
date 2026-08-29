@@ -1,5 +1,6 @@
 package com.schoolsoft.comms.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.comms.internal.CommsRepository;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -17,6 +18,7 @@ public class CommsController {
 
     // -------------------------- Announcements --------------------------
 
+    @PreAuthorize("@perm.can('announcement.view')")
     @GetMapping("/announcements")
     public List<AnnouncementDto> announcements(@RequestParam UUID schoolId) {
         return repo.list(schoolId);
@@ -27,16 +29,19 @@ public class CommsController {
         @NotBlank String body, List<String> channels, UUID createdByUserId
     ) {}
 
+    @PreAuthorize("@perm.can('announcement.manage')")
     @PostMapping("/announcements")
     public AnnouncementDto createAnnouncement(@RequestBody CreateAnnouncementRequest req) {
         return repo.create(req.schoolId(), req.scopeType(), req.scopeIds(), req.title(), req.body(), req.channels(), req.createdByUserId());
     }
 
+    @PreAuthorize("@perm.can('announcement.manage')")
     @PostMapping("/announcements/{id}/publish")
     public AnnouncementDto publish(@PathVariable UUID id) {
         return repo.publish(id);
     }
 
+    @PreAuthorize("@perm.can('announcement.view')")
     @PostMapping("/announcements/{id}/read")
     public ResponseEntity<Void> markRead(@PathVariable UUID id, @RequestParam UUID userAccountId) {
         repo.markRead(id, userAccountId);
@@ -45,6 +50,7 @@ public class CommsController {
 
     // -------------------------- Messaging --------------------------
 
+    @PreAuthorize("@perm.can('message.participate')")
     @GetMapping("/threads")
     public List<MessageThreadDto> threads(@RequestParam UUID userAccountId) {
         return repo.threadsForParticipant(userAccountId);
@@ -52,11 +58,13 @@ public class CommsController {
 
     public record CreateThreadRequest(@NotNull UUID schoolId, UUID subjectStudentId, @NotNull List<UUID> participants) {}
 
+    @PreAuthorize("@perm.can('message.participate')")
     @PostMapping("/threads")
     public MessageThreadDto createThread(@RequestBody CreateThreadRequest req) {
         return repo.createThread(req.schoolId(), req.subjectStudentId(), req.participants());
     }
 
+    @PreAuthorize("@perm.can('message.participate')")
     @GetMapping("/threads/{id}/messages")
     public List<MessageDto> messages(@PathVariable UUID id) {
         return repo.listMessages(id);
@@ -64,6 +72,7 @@ public class CommsController {
 
     public record SendMessageRequest(@NotNull UUID senderUserId, @NotBlank String body) {}
 
+    @PreAuthorize("@perm.can('message.participate')")
     @PostMapping("/threads/{id}/messages")
     public MessageDto sendMessage(@PathVariable UUID id, @RequestBody SendMessageRequest req) {
         return repo.sendMessage(id, req.senderUserId(), req.body());

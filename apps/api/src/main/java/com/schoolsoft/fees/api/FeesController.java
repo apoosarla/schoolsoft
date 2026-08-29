@@ -1,7 +1,10 @@
 package com.schoolsoft.fees.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.fees.internal.DunningService;
+import com.schoolsoft.iam.api.SelfScope;
+import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.fees.internal.FeeAdjustmentService;
 import com.schoolsoft.fees.internal.FeeGenerationService;
 import com.schoolsoft.fees.internal.FeeReportRepository;
@@ -25,20 +28,42 @@ public class FeesController {
     private final FeeAdjustmentService adjustments;
     private final FeeReportRepository reports;
     private final DunningService dunning;
+    private final SelfScope selfScope;
 
     public FeesController(FeesRepository repo, FeeStructureRepository structures,
                           FeeGenerationService generation, FeeAdjustmentService adjustments,
-                          FeeReportRepository reports, DunningService dunning) {
+                          FeeReportRepository reports, DunningService dunning, SelfScope selfScope) {
         this.repo = repo;
         this.structures = structures;
         this.generation = generation;
         this.adjustments = adjustments;
         this.reports = reports;
         this.dunning = dunning;
+        this.selfScope = selfScope;
+    }
+
+    /**
+     * An invoice is keyed by its own id on the wire, so the family-facing reads
+     * have to resolve back to the student before they can decide whether the
+     * caller is entitled to it.
+     *
+     * <p>A combined family invoice carries no single {@code studentId}; there
+     * is no way to tell from the row alone whose family it is, so a caller
+     * holding only {@code fee.invoice.view.own} is refused rather than guessed
+     * at. Combined invoices reach guardians through the office today (FEE-12
+     * remains open for a family-scoped read).</p>
+     */
+    private void requireOwnInvoice(UUID invoiceId) {
+        UUID studentId = repo.findInvoice(invoiceId).map(FeeInvoiceDto::studentId).orElse(null);
+        // requireStudent refuses a null student unless the caller holds the
+        // unrestricted permission, which is the behaviour a combined invoice
+        // and a missing invoice both want.
+        selfScope.requireStudent(studentId, Perm.FEE_INVOICE_VIEW);
     }
 
     // -------------------------- Structures (FEE-01) --------------------------
 
+    @PreAuthorize("@perm.can('fee.structure.view')")
     @GetMapping("/structures")
     public List<FeeStructureDto> structures(
         @RequestParam UUID schoolId,
@@ -48,6 +73,7 @@ public class FeesController {
         return structures.list(schoolId, academicYearId, gradeId);
     }
 
+    @PreAuthorize("@perm.can('fee.structure.view')")
     @GetMapping("/structures/{id}")
     public FeeStructureDto structure(@PathVariable UUID id) {
         return structures.find(id);
@@ -60,6 +86,7 @@ public class FeesController {
         java.util.Map<String, Object> schedule, @NotNull List<StructureLineRequest> lines
     ) {}
 
+    @PreAuthorize("@perm.can('fee.structure.manage')")
     @PostMapping("/structures")
     public FeeStructureDto createStructure(@RequestBody CreateStructureRequest req) {
         return structures.create(req.schoolId(), req.gradeId(), req.academicYearId(), req.name(),
@@ -69,6 +96,7 @@ public class FeesController {
 
     public record ReplaceLinesRequest(@NotNull List<StructureLineRequest> lines) {}
 
+    @PreAuthorize("@perm.can('fee.structure.manage')")
     @PutMapping("/structures/{id}/lines")
     public FeeStructureDto replaceStructureLines(@PathVariable UUID id, @RequestBody ReplaceLinesRequest req) {
         return structures.replaceLines(id, req.lines().stream()
@@ -78,6 +106,7 @@ public class FeesController {
     public record CloneStructureRequest(@NotNull UUID targetAcademicYearId, String name) {}
 
     /** Next year's structure is a copy — editing it must not touch this year's. */
+    @PreAuthorize("@perm.can('fee.structure.manage')")
     @PostMapping("/structures/{id}/clone")
     public FeeStructureDto cloneStructure(@PathVariable UUID id, @RequestBody CloneStructureRequest req) {
         return structures.cloneInto(id, req.targetAcademicYearId(), req.name());
@@ -95,6 +124,7 @@ public class FeesController {
      * against them with who approved it — and it shows on the invoice as a
      * discount line rather than a quietly smaller number (FEE-03).
      */
+    @PreAuthorize("@perm.can('fee.concession.manage')")
     @PostMapping("/concessions")
     @Audited(action = "fee.concession_granted", targetType = "student", idParam = "studentId",
              snapshot = false, requireReason = false)
@@ -104,6 +134,7 @@ public class FeesController {
         return java.util.Map.of("id", id);
     }
 
+    @PreAuthorize("@perm.can('fee.structure.view')")
     @GetMapping("/concessions")
     public List<java.util.Map<String, Object>> concessions(
         @RequestParam UUID studentId, @RequestParam(required = false) UUID academicYearId
@@ -115,6 +146,7 @@ public class FeesController {
         @NotNull UUID schoolId, @NotNull UUID academicYearId, int nthChild, double pct, UUID appliesToHeadId
     ) {}
 
+    @PreAuthorize("@perm.can('fee.concession.manage')")
     @PostMapping("/sibling-policies")
     public java.util.Map<String, Object> siblingPolicy(@RequestBody SiblingPolicyRequest req) {
         UUID id = repo.upsertSiblingPolicy(req.schoolId(), req.academicYearId(), req.nthChild(), req.pct(),
@@ -122,6 +154,7 @@ public class FeesController {
         return java.util.Map.of("id", id);
     }
 
+    @PreAuthorize("@perm.can('fee.structure.view')")
     @GetMapping("/sibling-policies")
     public List<SiblingPolicyDto> siblingPolicies(
         @RequestParam UUID schoolId, @RequestParam(required = false) UUID academicYearId
@@ -134,6 +167,7 @@ public class FeesController {
         Double lateFeeFlat, UUID lateFeeHeadId
     ) {}
 
+    @PreAuthorize("@perm.can('dunning.manage')")
     @PutMapping("/dunning-policy")
     public java.util.Map<String, Object> dunningPolicy(@RequestBody DunningPolicyRequest req) {
         UUID id = repo.upsertDunningPolicy(req.schoolId(), req.graceDays(), req.reminderDays(),
@@ -142,6 +176,7 @@ public class FeesController {
     }
 
     /** 204 when the school has none — dunning then leaves its invoices alone. */
+    @PreAuthorize("@perm.can('fee.structure.view')")
     @GetMapping("/dunning-policy")
     public ResponseEntity<DunningPolicyDto> getDunningPolicy(@RequestParam UUID schoolId) {
         return repo.findDunningPolicy(schoolId)
@@ -156,6 +191,7 @@ public class FeesController {
         @NotNull LocalDate dueOn, UUID runByStaffId
     ) {}
 
+    @PreAuthorize("@perm.can('fee.invoice.manage')")
     @PostMapping("/generate")
     public FeeGenerationService.RunResult generate(@RequestBody GenerateRequest req) {
         return generation.generate(req.schoolId(), req.academicYearId(), req.gradeId(), req.cycleLabel(),
@@ -163,6 +199,7 @@ public class FeesController {
     }
 
     /** What has been billed already, newest first — the answer to "did October run?". */
+    @PreAuthorize("@perm.can('fee.invoice.view')")
     @GetMapping("/runs")
     public List<FeeScheduleRunDto> runs(
         @RequestParam UUID schoolId, @RequestParam(required = false) UUID academicYearId
@@ -175,6 +212,7 @@ public class FeesController {
     public record FamilyRequest(@NotNull UUID schoolId, @NotNull UUID studentId) {}
 
     /** Groups a student with their siblings, by their shared guardian. */
+    @PreAuthorize("@perm.can('fee.invoice.manage')")
     @PostMapping("/families/link")
     public java.util.Map<String, Object> linkFamily(@RequestBody FamilyRequest req) {
         UUID familyId = generation.familyForStudent(req.schoolId(), req.studentId());
@@ -185,6 +223,7 @@ public class FeesController {
         @NotNull UUID schoolId, @NotNull UUID familyId, @NotBlank String cycleLabel, @NotNull LocalDate dueOn
     ) {}
 
+    @PreAuthorize("@perm.can('fee.invoice.manage')")
     @PostMapping("/families/combined-invoice")
     public FeeInvoiceDto combinedInvoice(@RequestBody CombinedInvoiceRequest req) {
         UUID invoiceId = generation.createCombinedFamilyInvoice(
@@ -194,8 +233,10 @@ public class FeesController {
 
     // -------------------------- Adjustments (FEE-08/10/11) --------------------------
 
+    @PreAuthorize("@perm.canAnyOf('fee.invoice.view', 'fee.invoice.view.own')")
     @GetMapping("/invoices/{id}/adjustments")
     public List<FeeAdjustmentDto> adjustments(@PathVariable UUID id) {
+        requireOwnInvoice(id);
         return adjustments.listForInvoice(id);
     }
 
@@ -205,6 +246,7 @@ public class FeesController {
     ) {}
 
     /** credit_note | refund | waiver | late_fee | charge | reversal. */
+    @PreAuthorize("@perm.can('fee.adjustment.manage')")
     @PostMapping("/invoices/{id}/adjustments")
     @Audited(action = "fee.adjustment", targetType = "fee_invoice")
     public FeeAdjustmentDto adjust(@PathVariable UUID id, @RequestBody AdjustRequest req) {
@@ -216,6 +258,7 @@ public class FeesController {
 
     public record DunningRunRequest(@NotNull UUID schoolId, LocalDate asOf) {}
 
+    @PreAuthorize("@perm.can('dunning.manage')")
     @PostMapping("/dunning/run")
     public DunningService.Result runDunning(@RequestBody DunningRunRequest req) {
         return dunning.runFor(req.schoolId(), req.asOf() == null ? LocalDate.now() : req.asOf());
@@ -223,6 +266,7 @@ public class FeesController {
 
     // -------------------------- Reports (FEE-14/15) --------------------------
 
+    @PreAuthorize("@perm.can('fee.report.view')")
     @GetMapping("/reports/day-book")
     public java.util.Map<String, Object> dayBook(
         @RequestParam UUID schoolId, @RequestParam LocalDate from, @RequestParam LocalDate to
@@ -230,6 +274,7 @@ public class FeesController {
         return reports.dayBook(schoolId, from, to);
     }
 
+    @PreAuthorize("@perm.can('fee.report.view')")
     @GetMapping("/reports/outstanding")
     public java.util.Map<String, Object> outstanding(
         @RequestParam UUID schoolId,
@@ -240,13 +285,16 @@ public class FeesController {
         return reports.outstanding(schoolId, academicYearId, gradeId, sectionId);
     }
 
+    @PreAuthorize("@perm.canAnyOf('fee.invoice.view', 'fee.invoice.view.own')")
     @GetMapping("/students/{studentId}/dues")
     public java.util.Map<String, Object> dues(@PathVariable UUID studentId) {
+        selfScope.requireStudent(studentId, Perm.FEE_INVOICE_VIEW);
         return reports.duesFor(studentId);
     }
 
     // -------------------------- Heads --------------------------
 
+    @PreAuthorize("@perm.can('fee.structure.view')")
     @GetMapping("/heads")
     public List<FeeHeadDto> heads(@RequestParam UUID schoolId) {
         return repo.listHeads(schoolId);
@@ -256,6 +304,7 @@ public class FeesController {
         @NotBlank String code, @NotBlank String name, boolean isRecurring, double gstRatePct, String hsnSac
     ) {}
 
+    @PreAuthorize("@perm.can('fee.structure.manage')")
     @PostMapping("/heads")
     public FeeHeadDto createHead(@RequestParam UUID schoolId, @RequestBody CreateHeadRequest req) {
         return repo.createHead(schoolId, req.code(), req.name(), req.isRecurring(), req.gstRatePct(), req.hsnSac());
@@ -263,18 +312,24 @@ public class FeesController {
 
     // -------------------------- Invoices --------------------------
 
+    @PreAuthorize("@perm.canAnyOf('fee.invoice.view', 'fee.invoice.view.own')")
     @GetMapping("/invoices")
     public List<FeeInvoiceDto> invoicesForStudent(@RequestParam UUID studentId) {
+        selfScope.requireStudent(studentId, Perm.FEE_INVOICE_VIEW);
         return repo.listInvoicesByStudent(studentId);
     }
 
+    @PreAuthorize("@perm.canAnyOf('fee.invoice.view', 'fee.invoice.view.own')")
     @GetMapping("/invoices/{id}")
     public ResponseEntity<FeeInvoiceDto> getInvoice(@PathVariable UUID id) {
+        requireOwnInvoice(id);
         return repo.findInvoice(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("@perm.canAnyOf('fee.invoice.view', 'fee.invoice.view.own')")
     @GetMapping("/invoices/{id}/lines")
     public List<FeeInvoiceLineDto> invoiceLines(@PathVariable UUID id) {
+        requireOwnInvoice(id);
         return repo.listInvoiceLines(id);
     }
 
@@ -285,6 +340,7 @@ public class FeesController {
         @NotNull LocalDate dueOn, @NotNull List<InvoiceLineRequest> lines
     ) {}
 
+    @PreAuthorize("@perm.can('fee.invoice.manage')")
     @PostMapping("/invoices")
     public FeeInvoiceDto createInvoice(@RequestBody CreateInvoiceRequest req) {
         var lines = req.lines().stream()
@@ -295,8 +351,10 @@ public class FeesController {
 
     // -------------------------- Payments --------------------------
 
+    @PreAuthorize("@perm.canAnyOf('fee.invoice.view', 'fee.invoice.view.own')")
     @GetMapping("/invoices/{id}/payments")
     public List<PaymentDto> payments(@PathVariable UUID id) {
+        requireOwnInvoice(id);
         return repo.listPaymentsForInvoice(id);
     }
 
@@ -305,6 +363,7 @@ public class FeesController {
         String method, @NotBlank String idempotencyKey
     ) {}
 
+    @PreAuthorize("@perm.can('fee.payment.record')")
     @PostMapping("/payments")
     public PaymentDto recordPayment(@RequestBody RecordPaymentRequest req) {
         return repo.recordPayment(req.schoolId(), req.feeInvoiceId(), req.amount(), req.gateway(), req.method(), req.idempotencyKey());
@@ -312,6 +371,7 @@ public class FeesController {
 
     // -------------------------- Ledger --------------------------
 
+    @PreAuthorize("@perm.can('fee.report.view')")
     @GetMapping("/ledger")
     public List<LedgerEntryDto> ledger(@RequestParam String sourceType, @RequestParam UUID sourceId) {
         return repo.ledgerForSource(sourceType, sourceId);

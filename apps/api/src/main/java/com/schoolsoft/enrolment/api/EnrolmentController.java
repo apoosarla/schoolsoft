@@ -1,7 +1,10 @@
 package com.schoolsoft.enrolment.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.enrolment.internal.EnrolmentRepository;
+import com.schoolsoft.iam.api.SelfScope;
+import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.enrolment.internal.StudentSubjectRepository;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
@@ -17,19 +20,24 @@ public class EnrolmentController {
     private final EnrolmentRepository repo;
     private final StudentSubjectRepository subjects;
     private final SubjectSetResolver subjectSets;
+    private final SelfScope selfScope;
 
     public EnrolmentController(EnrolmentRepository repo, StudentSubjectRepository subjects,
-                               SubjectSetResolver subjectSets) {
+                               SubjectSetResolver subjectSets, SelfScope selfScope) {
         this.repo = repo;
         this.subjects = subjects;
         this.subjectSets = subjectSets;
+        this.selfScope = selfScope;
     }
 
+    @PreAuthorize("@perm.canAnyOf('enrolment.view', 'enrolment.view.own')")
     @GetMapping("/students/{studentId}")
     public List<EnrolmentDto> historyForStudent(@PathVariable UUID studentId) {
+        selfScope.requireStudent(studentId, Perm.ENROLMENT_VIEW);
         return repo.listByStudent(studentId);
     }
 
+    @PreAuthorize("@perm.can('enrolment.view')")
     @GetMapping("/sections/{sectionId}")
     public List<EnrolmentDto> roster(@PathVariable UUID sectionId, @RequestParam(defaultValue = "true") boolean activeOnly) {
         return repo.listBySection(sectionId, activeOnly);
@@ -45,6 +53,7 @@ public class EnrolmentController {
         @NotNull UUID academicYearId, @NotNull LocalDate startsOn, String rollNo, String overCapacityReason
     ) {}
 
+    @PreAuthorize("@perm.can('enrolment.manage')")
     @PostMapping
     public EnrolmentDto enrol(@RequestBody EnrolRequest req) {
         return repo.enrol(req.schoolId(), req.studentId(), req.sectionId(), req.academicYearId(),
@@ -53,6 +62,7 @@ public class EnrolmentController {
 
     public record TransferRequest(@NotNull UUID newSectionId, String rollNo, String overCapacityReason) {}
 
+    @PreAuthorize("@perm.can('enrolment.manage')")
     @PostMapping("/{id}/transfer")
     public EnrolmentDto transfer(@PathVariable UUID id, @RequestBody TransferRequest req) {
         return repo.transfer(id, req.newSectionId(), req.rollNo(), req.overCapacityReason());
@@ -65,6 +75,7 @@ public class EnrolmentController {
      * family disputes months later, so it carries a reason and an audit entry
      * with the enrolment row before and after (SEC-08).
      */
+    @PreAuthorize("@perm.can('enrolment.manage')")
     @PostMapping("/{id}/status")
     @Audited(action = "enrolment.status_change", targetType = "enrolment")
     public EnrolmentDto setStatus(@PathVariable UUID id, @RequestBody StatusRequest req) {
@@ -72,6 +83,7 @@ public class EnrolmentController {
     }
 
     /** Re-sequences a section's roll numbers from 1 in admission order (ENR-02). */
+    @PreAuthorize("@perm.can('enrolment.manage')")
     @PostMapping("/sections/{sectionId}/renumber")
     public List<EnrolmentDto> renumber(@PathVariable UUID sectionId) {
         return repo.renumber(sectionId);
@@ -83,6 +95,7 @@ public class EnrolmentController {
      * What the student actually studies: the section's compulsory subjects plus
      * their own elections, as of {@code onDate} (default today).
      */
+    @PreAuthorize("@perm.can('enrolment.view')")
     @GetMapping("/{id}/subjects")
     public List<StudentSubjectDto> subjectSet(
         @PathVariable UUID id,
@@ -93,6 +106,7 @@ public class EnrolmentController {
         return subjectSets.forEnrolment(id, onDate);
     }
 
+    @PreAuthorize("@perm.canAnyOf('enrolment.view', 'enrolment.view.own')")
     @GetMapping("/students/{studentId}/subjects")
     public List<StudentSubjectDto> subjectSetForStudent(
         @PathVariable UUID studentId,
@@ -100,9 +114,11 @@ public class EnrolmentController {
         @org.springframework.format.annotation.DateTimeFormat(
             iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate onDate
     ) {
+        selfScope.requireStudent(studentId, Perm.ENROLMENT_VIEW);
         return subjectSets.forStudent(studentId, onDate);
     }
 
+    @PreAuthorize("@perm.can('enrolment.view')")
     @GetMapping("/{id}/elections")
     public List<StudentSubjectDto> elections(@PathVariable UUID id) {
         return subjects.listElections(id);
@@ -110,6 +126,7 @@ public class EnrolmentController {
 
     public record ElectRequest(@NotNull UUID subjectId, UUID electiveGroupId, LocalDate effectiveFrom) {}
 
+    @PreAuthorize("@perm.can('election.manage')")
     @PostMapping("/{id}/elections")
     public StudentSubjectDto elect(@PathVariable UUID id, @RequestBody ElectRequest req) {
         return subjects.elect(id, req.subjectId(), req.electiveGroupId(),
@@ -119,6 +136,7 @@ public class EnrolmentController {
     public record DropElectionRequest(@NotNull UUID subjectId, LocalDate effectiveTo) {}
 
     /** Ends an election from a date; the marks earned under it stay. */
+    @PreAuthorize("@perm.can('election.manage')")
     @PostMapping("/{id}/elections/drop")
     public ResponseEntity<Void> dropElection(@PathVariable UUID id, @RequestBody DropElectionRequest req) {
         subjects.drop(id, req.subjectId(), req.effectiveTo() == null ? LocalDate.now() : req.effectiveTo());

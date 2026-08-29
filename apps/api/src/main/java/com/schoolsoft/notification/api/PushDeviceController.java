@@ -1,5 +1,6 @@
 package com.schoolsoft.notification.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.notification.internal.NotificationDeviceRepository;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import jakarta.validation.Valid;
@@ -27,12 +28,14 @@ public class PushDeviceController {
         @Pattern(regexp = "android|ios|web") String platform
     ) {}
 
+    @PreAuthorize("isAuthenticated()")
     @PostMapping
     public PushDeviceDto register(@Valid @RequestBody RegisterDeviceRequest req) {
         var d = repo.upsert(TenantContext.require().userAccountId(), req.token(), req.platform());
         return new PushDeviceDto(d.id(), d.userAccountId(), d.platform(), d.createdAt(), d.lastSeenAt());
     }
 
+    @PreAuthorize("isAuthenticated()")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> unregister(@PathVariable UUID id) {
         repo.delete(id, TenantContext.require().userAccountId());

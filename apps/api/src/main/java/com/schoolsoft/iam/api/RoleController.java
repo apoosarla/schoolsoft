@@ -1,5 +1,6 @@
 package com.schoolsoft.iam.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.iam.internal.RoleRepository;
 import com.schoolsoft.platform.tenancy.TenantContext;
@@ -30,6 +31,7 @@ public class RoleController {
         this.authz = authz;
     }
 
+    @PreAuthorize("@perm.can('role.view')")
     @GetMapping("/roles")
     public List<RoleDto> roles() {
         return repo.listRoles();
@@ -39,6 +41,7 @@ public class RoleController {
         @NotBlank String code, @NotBlank String name, String description, @NotNull List<String> screenKeys
     ) {}
 
+    @PreAuthorize("@perm.can('role.manage')")
     @PostMapping("/roles")
     public RoleDto createRole(@RequestBody CreateRoleRequest req) {
         return repo.createRole(req.code(), req.name(), req.description(), req.screenKeys());
@@ -46,17 +49,20 @@ public class RoleController {
 
     public record UpdateRoleRequest(@NotBlank String name, String description, @NotNull List<String> screenKeys) {}
 
+    @PreAuthorize("@perm.can('role.manage')")
     @PutMapping("/roles/{id}")
     public RoleDto updateRole(@PathVariable UUID id, @RequestBody UpdateRoleRequest req) {
         return repo.updateRole(id, req.name(), req.description(), req.screenKeys());
     }
 
+    @PreAuthorize("@perm.can('role.manage')")
     @DeleteMapping("/roles/{id}")
     public ResponseEntity<Void> deleteRole(@PathVariable UUID id) {
         repo.deleteRole(id);
         return ResponseEntity.noContent().build();
     }
 
+    @PreAuthorize("@perm.can('role.view')")
     @GetMapping("/staff-roles")
     public List<StaffWithRolesDto> staffRoles(@RequestParam UUID schoolId) {
         return repo.listStaffWithRoles(schoolId);
@@ -76,6 +82,7 @@ public class RoleController {
      * somebody screens full of other people's children — so it takes a reason
      * and lands in the audit log (SEC-08).
      */
+    @PreAuthorize("@perm.can('role.manage')")
     @PostMapping("/staff-roles/assign")
     @Audited(action = "role.granted", targetType = "staff", idParam = "staffId", snapshot = false)
     public ResponseEntity<Void> assign(@RequestBody AssignRoleRequest req) {
@@ -83,6 +90,7 @@ public class RoleController {
         return ResponseEntity.noContent().build();
     }
 
+    @PreAuthorize("@perm.can('role.manage')")
     @PostMapping("/staff-roles/unassign")
     @Audited(action = "role.revoked", targetType = "staff", idParam = "staffId", snapshot = false)
     public ResponseEntity<Void> unassign(@RequestBody AssignRoleRequest req) {
@@ -90,6 +98,7 @@ public class RoleController {
         return ResponseEntity.noContent().build();
     }
 
+    @PreAuthorize("isAuthenticated()")
     @GetMapping("/me/screens")
     public Map<String, Object> myScreens() {
         List<String> roleCodes = authz.rolesOfCurrentUser();
@@ -102,6 +111,7 @@ public class RoleController {
      * (e.g. teacher-app looking up "my timetable" by staff id) call this once
      * after login rather than threading a lookup through every endpoint.
      */
+    @PreAuthorize("isAuthenticated()")
     @GetMapping("/me")
     public Map<String, Object> me() {
         var snap = TenantContext.require();

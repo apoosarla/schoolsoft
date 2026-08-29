@@ -1,8 +1,11 @@
 package com.schoolsoft.assessment.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.assessment.internal.AssessmentPolicyRepository;
 import com.schoolsoft.assessment.internal.AssessmentRepository;
 import com.schoolsoft.assessment.internal.MarkService;
+import com.schoolsoft.iam.api.SelfScope;
+import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.assessment.internal.ReportCardService;
 import com.schoolsoft.audit.api.Audited;
 import jakarta.validation.constraints.NotBlank;
@@ -22,20 +25,24 @@ public class AssessmentController {
     private final MarkService marks;
     private final ReportCardService reportCards;
     private final AssessmentPolicyRepository policies;
+    private final SelfScope selfScope;
 
     public AssessmentController(AssessmentRepository repo, MarkService marks, ReportCardService reportCards,
-                                AssessmentPolicyRepository policies) {
+                                AssessmentPolicyRepository policies, SelfScope selfScope) {
         this.repo = repo;
         this.marks = marks;
         this.reportCards = reportCards;
         this.policies = policies;
+        this.selfScope = selfScope;
     }
 
+    @PreAuthorize("@perm.can('assessment.view')")
     @GetMapping
     public List<AssessmentDto> listBySection(@RequestParam UUID sectionId) {
         return repo.listBySection(sectionId);
     }
 
+    @PreAuthorize("@perm.can('assessment.view')")
     @GetMapping("/{id}")
     public ResponseEntity<AssessmentDto> get(@PathVariable UUID id) {
         return repo.find(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
@@ -47,6 +54,7 @@ public class AssessmentController {
         Double maxMarks, Double weightPct, LocalDate scheduledOn
     ) {}
 
+    @PreAuthorize("@perm.can('assessment.manage')")
     @PostMapping
     public AssessmentDto create(@RequestBody CreateAssessmentRequest req) {
         return repo.create(
@@ -63,6 +71,7 @@ public class AssessmentController {
      * authorised role — and it is audited either way (SEC-08). Moving it
      * forward into marking runs the weight check (ASMT-03).
      */
+    @PreAuthorize("@perm.can('assessment.manage')")
     @PostMapping("/{id}/status")
     @Audited(action = "assessment.status_change", targetType = "assessment", requireReason = false)
     public AssessmentDto setStatus(@PathVariable UUID id, @RequestBody StatusRequest req) {
@@ -70,6 +79,7 @@ public class AssessmentController {
     }
 
     /** What is wrong with the assessment's shape before marking opens (ASMT-03). */
+    @PreAuthorize("@perm.can('assessment.view')")
     @GetMapping("/{id}/validation")
     public AssessmentRepository.Validation validate(@PathVariable UUID id) {
         return repo.validate(id);
@@ -77,6 +87,7 @@ public class AssessmentController {
 
     // -------------------------- Components --------------------------
 
+    @PreAuthorize("@perm.can('assessment.view')")
     @GetMapping("/{id}/components")
     public List<AssessmentComponentDto> components(@PathVariable UUID id) {
         return repo.listComponents(id);
@@ -86,6 +97,7 @@ public class AssessmentController {
         @NotBlank String code, @NotBlank String name, double maxMarks, Double weightPct, int sortOrder
     ) {}
 
+    @PreAuthorize("@perm.can('assessment.manage')")
     @PostMapping("/{id}/components")
     public AssessmentComponentDto addComponent(@PathVariable UUID id, @RequestBody CreateComponentRequest req) {
         return repo.addComponent(id, req.code(), req.name(), req.maxMarks(), req.weightPct(), req.sortOrder());
@@ -93,9 +105,13 @@ public class AssessmentController {
 
     // -------------------------- Marks --------------------------
 
+    @PreAuthorize("@perm.canAnyOf('mark.view', 'mark.view.own')")
     @GetMapping("/components/{componentId}/marks")
     public List<MarkDto> marks(@PathVariable UUID componentId) {
-        return marks.listMarks(componentId);
+        // A component's marks are the whole class. A family sees the rows that
+        // are theirs and no others — refusing outright would take the marks
+        // screen away from every parent app.
+        return selfScope.narrowToOwnStudents(marks.listMarks(componentId), MarkDto::studentId, Perm.MARK_VIEW);
     }
 
     /**
@@ -115,6 +131,7 @@ public class AssessmentController {
         }
     }
 
+    @PreAuthorize("@perm.can('mark.enter')")
     @PostMapping("/components/{componentId}/marks")
     public MarkDto enterMark(@PathVariable UUID componentId, @RequestBody EnterMarkRequest req) {
         return marks.enter(req.schoolId(), componentId,
@@ -137,6 +154,7 @@ public class AssessmentController {
      * the component maximum is rejected and named, and the rest are stored
      * (ASMT-04).
      */
+    @PreAuthorize("@perm.can('mark.enter')")
     @PostMapping("/marks/bulk")
     public MarkService.BulkResult enterMarksInBulk(@RequestBody BulkMarkRequest req) {
         return marks.enterBulk(req.schoolId(), req.componentId(),
@@ -148,6 +166,7 @@ public class AssessmentController {
     }
 
     /** What this mark used to be, and why it changed (ASMT-07, ASMT-08). */
+    @PreAuthorize("@perm.can('mark.view')")
     @GetMapping("/marks/{markId}/revisions")
     public List<MarkRevisionDto> revisions(@PathVariable UUID markId) {
         return marks.revisions(markId);
@@ -158,14 +177,19 @@ public class AssessmentController {
     public record ReevaluationRequest(@NotBlank String reason) {}
 
     /** Raised by a guardian for their own child, or by the school on their behalf. */
+    @PreAuthorize("@perm.canAny('mark.reeval.decide', 'mark.reeval.request')")
     @PostMapping("/marks/{markId}/re-evaluations")
     public MarkReevaluationDto requestReevaluation(@PathVariable UUID markId,
                                                    @RequestBody ReevaluationRequest req) {
+        selfScope.requireStudent(marks.find(markId).map(MarkDto::studentId).orElse(null),
+            Perm.MARK_REEVAL_DECIDE);
         return marks.requestReevaluation(markId, req.reason());
     }
 
+    @PreAuthorize("@perm.canAnyOf('mark.view', 'mark.view.own')")
     @GetMapping("/re-evaluations")
     public List<MarkReevaluationDto> reevaluations(@RequestParam UUID studentId) {
+        selfScope.requireStudent(studentId, Perm.MARK_VIEW);
         return marks.reevaluationsForStudent(studentId);
     }
 
@@ -175,6 +199,7 @@ public class AssessmentController {
      * {@code revised} supersedes the mark and keeps the original; {@code upheld}
      * and {@code rejected} change nothing but record that somebody looked.
      */
+    @PreAuthorize("@perm.can('mark.reeval.decide')")
     @PostMapping("/re-evaluations/{id}/decide")
     @Audited(action = "mark.re_evaluation_decided", targetType = "mark_reevaluation")
     public MarkReevaluationDto decideReevaluation(@PathVariable UUID id, @RequestBody ReevaluationDecision req) {
@@ -183,15 +208,21 @@ public class AssessmentController {
 
     // -------------------------- Report Cards --------------------------
 
+    @PreAuthorize("@perm.canAnyOf('report_card.view', 'report_card.view.own')")
     @GetMapping("/report-cards/students/{studentId}")
     public List<ReportCardDto> reportCards(@PathVariable UUID studentId) {
+        selfScope.requireStudent(studentId, Perm.REPORT_CARD_VIEW);
         return reportCards.listForStudent(studentId);
     }
 
     /** The card as it is rendered: subject rows, co-scholastic ratings, remarks. */
+    @PreAuthorize("@perm.canAnyOf('report_card.view', 'report_card.view.own')")
     @GetMapping("/report-cards/{id}")
     public ReportCardDetailDto reportCard(@PathVariable UUID id) {
-        return reportCards.detail(id);
+        var detail = reportCards.detail(id);
+        selfScope.requireStudent(detail.card() == null ? null : detail.card().studentId(),
+            Perm.REPORT_CARD_VIEW);
+        return detail;
     }
 
     public record CoScholasticRequest(String areaCode, String areaName, String rating, String remarks, int sortOrder) {}
@@ -203,6 +234,7 @@ public class AssessmentController {
         List<CoScholasticRequest> coScholastic
     ) {}
 
+    @PreAuthorize("@perm.can('report_card.generate')")
     @PostMapping("/report-cards")
     public ReportCardDto generateReportCard(@RequestBody GenerateReportCardRequest req) {
         return reportCards.generate(new ReportCardService.GenerateRequest(
@@ -221,12 +253,14 @@ public class AssessmentController {
     ) {}
 
     /** A section's cards in one run — and the rank across them (ASMT-10, ASMT-11). */
+    @PreAuthorize("@perm.can('report_card.generate')")
     @PostMapping("/report-cards/sections")
     public List<ReportCardDto> generateForSection(@RequestBody GenerateSectionRequest req) {
         return reportCards.generateForSection(req.schoolId(), req.sectionId(), req.academicYearId(),
             req.termId(), req.strategyCode(), req.templateCode());
     }
 
+    @PreAuthorize("@perm.can('report_card.lock')")
     @PostMapping("/report-cards/{id}/lock")
     @Audited(action = "report_card.locked", targetType = "report_card", requireReason = false)
     public ReportCardDto lockReportCard(@PathVariable UUID id) {
@@ -235,6 +269,7 @@ public class AssessmentController {
 
     public record UnlockRequest(@NotBlank String reason) {}
 
+    @PreAuthorize("@perm.can('report_card.lock')")
     @PostMapping("/report-cards/{id}/unlock")
     @Audited(action = "report_card.unlocked", targetType = "report_card")
     public ReportCardDto unlockReportCard(@PathVariable UUID id, @RequestBody UnlockRequest req) {
@@ -242,6 +277,7 @@ public class AssessmentController {
     }
 
     /** Publication is what a family sees, and where the dues policy applies (ASMT-15). */
+    @PreAuthorize("@perm.can('report_card.publish')")
     @PostMapping("/report-cards/{id}/publish")
     @Audited(action = "report_card.published", targetType = "report_card", requireReason = false)
     public ReportCardDto publishReportCard(@PathVariable UUID id) {
@@ -251,6 +287,7 @@ public class AssessmentController {
     public record PromotionRequest(@NotBlank String decision) {}
 
     /** The school's own call, overriding what the strategy suggested (GAP-02 feeds on this). */
+    @PreAuthorize("@perm.can('report_card.generate')")
     @PostMapping("/report-cards/{id}/promotion")
     @Audited(action = "report_card.promotion_decision", targetType = "report_card", requireReason = false)
     public ReportCardDto setPromotion(@PathVariable UUID id, @RequestBody PromotionRequest req) {
@@ -259,6 +296,7 @@ public class AssessmentController {
 
     // -------------------------- Policy --------------------------
 
+    @PreAuthorize("@perm.can('assessment.view')")
     @GetMapping("/policy")
     public AssessmentPolicyRepository.Policy policy(@RequestParam UUID schoolId) {
         return policies.forSchool(schoolId);
@@ -268,6 +306,7 @@ public class AssessmentController {
         @NotNull UUID schoolId, String duesBlockPolicy, Double duesBlockThreshold, Double weightTolerancePct
     ) {}
 
+    @PreAuthorize("@perm.can('assessment.policy.manage')")
     @PutMapping("/policy")
     public AssessmentPolicyRepository.Policy setPolicy(@RequestBody PolicyRequest req) {
         return policies.upsert(req.schoolId(), req.duesBlockPolicy(), req.duesBlockThreshold(),

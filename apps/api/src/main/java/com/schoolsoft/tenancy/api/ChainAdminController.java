@@ -1,5 +1,6 @@
 package com.schoolsoft.tenancy.api;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -47,6 +48,7 @@ public class ChainAdminController {
         }
     }
 
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     @GetMapping
     public List<ChainDto> list() {
         requirePlatformAdmin();
@@ -80,6 +82,7 @@ public class ChainAdminController {
      * Safe for the HQ Console to retry on a flaky network without risking a
      * duplicate chain.
      */
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     @PostMapping
     public ResponseEntity<ProvisionChainResponse> provision(@RequestBody ProvisionChainRequest req) {
         requirePlatformAdmin();
@@ -95,6 +98,7 @@ public class ChainAdminController {
      * {@code UserLookupService} and {@code ChainSchemaMigrator} already do
      * to step outside the requesting platform-admin's own search_path.
      */
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     @GetMapping("/{id}/stats")
     public ChainStatsDto stats(@PathVariable UUID id) {
         requirePlatformAdmin();
