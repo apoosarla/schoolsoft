@@ -1,7 +1,7 @@
 package com.schoolsoft.publicsite.internal;
 
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
-import com.schoolsoft.admissions.internal.AdmissionsRepository;
+import com.schoolsoft.admissions.api.PublicAdmissions;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.publicsite.api.PublicSchoolDto;
@@ -38,11 +38,11 @@ public class PublicLookupRepository {
 
     private final JdbcTemplate platformJdbc;
     private final DataSource dataSource;
-    private final AdmissionsRepository admissionsRepo;
+    private final PublicAdmissions admissionsRepo;
     private final WorkingDayService workingDays;
 
     public PublicLookupRepository(JdbcTemplate platformJdbc, DataSource dataSource,
-                                  AdmissionsRepository admissionsRepo, WorkingDayService workingDays) {
+                                  PublicAdmissions admissionsRepo, WorkingDayService workingDays) {
         this.platformJdbc = platformJdbc;
         this.dataSource = dataSource;
         this.admissionsRepo = admissionsRepo;
