@@ -384,7 +384,12 @@ public abstract class AbstractCertificationTest {
             jdbc.update("DELETE FROM section WHERE school_id = ?", schoolId);
             jdbc.update("DELETE FROM subject WHERE school_id = ?", schoolId);
             jdbc.update("DELETE FROM grade WHERE school_id = ?", schoolId);
-            jdbc.update("DELETE FROM audit_log WHERE school_id = ?", schoolId);
+            // Truncated, not deleted by school: audit_log is a hash chain
+            // (V027), and removing a row from the middle of one forks it —
+            // which is exactly what the chain exists to make visible, and not
+            // something a fixture rebuild should be doing. A rebuild starts
+            // the log again from nothing.
+            jdbc.update("TRUNCATE TABLE audit_log RESTART IDENTITY");
             jdbc.update("DELETE FROM notification_dispatch WHERE school_id = ?", schoolId);
             jdbc.update("DELETE FROM user_account WHERE school_id = ?", schoolId);
             jdbc.update("DELETE FROM staff_role WHERE staff_id IN " +

@@ -13,8 +13,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuditController {
 
     private final AuditService audit;
+    private final AuditChainVerifier verifier;
 
-    public AuditController(AuditService audit) { this.audit = audit; }
+    public AuditController(AuditService audit, AuditChainVerifier verifier) {
+        this.audit = audit;
+        this.verifier = verifier;
+    }
 
     @PreAuthorize("@perm.can('audit.view')")
     @GetMapping
@@ -25,5 +29,20 @@ public class AuditController {
         @RequestParam(defaultValue = "100") int limit
     ) {
         return audit.query(targetType, targetId, actorUserId, Math.min(limit, 500));
+    }
+
+    /**
+     * Walks the log's hash chain and says whether it still holds.
+     *
+     * <p>The chain (V027) makes tampering detectable; this is what does the
+     * detecting, and it is the answer to the only question an auditor asks of
+     * an audit log — "has anything been changed since it was written". Reads
+     * the whole log, so it is a deliberate action rather than something a
+     * dashboard polls.</p>
+     */
+    @PreAuthorize("@perm.can('audit.view')")
+    @GetMapping("/chain")
+    public AuditChainVerifier.Result verifyChain() {
+        return verifier.verify();
     }
 }
