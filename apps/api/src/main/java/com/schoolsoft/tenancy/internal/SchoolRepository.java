@@ -1,6 +1,7 @@
 package com.schoolsoft.tenancy.internal;
 
 import com.schoolsoft.iam.api.CampusScope;
+import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.AcademicYearDto;
 import com.schoolsoft.tenancy.api.CampusDto;
@@ -118,34 +119,57 @@ public class SchoolRepository {
         switch (status) {
             case "closed" -> {
                 if ("closed".equals(current.status())) return current;
-                jdbc.update(
+                int moved = jdbc.update(
                     "UPDATE academic_year SET status = 'closed', is_current = FALSE, closed_at = now(), " +
-                    "  closed_by_staff_id = ? WHERE id = ?", actingStaffId, id);
+                    "  closed_by_staff_id = ? WHERE id = ? AND status <> 'closed'", actingStaffId, id);
+                if (moved == 0) return findAcademicYear(id);
             }
             case "active" -> {
                 boolean reopening = "closed".equals(current.status());
                 if (reopening && (reason == null || reason.isBlank())) {
                     throw new IllegalArgumentException("Reopening a closed academic year requires a reason");
                 }
-                jdbc.update(
+                // Conditional on the status that was read, not merely on the id.
+                // Reopening is the branch that demands a reason and stamps who
+                // did it; writing unconditionally meant a year closed between
+                // the read and this line was reopened as if it had never been
+                // closed — no reason, no reopened_by, no trace.
+                int moved = jdbc.update(
                     "UPDATE academic_year SET status = 'active', " +
                     "  reopened_at = CASE WHEN ? THEN now() ELSE reopened_at END, " +
                     "  reopened_by_staff_id = CASE WHEN ? THEN ? ELSE reopened_by_staff_id END, " +
                     "  reopen_reason = CASE WHEN ? THEN ? ELSE reopen_reason END " +
-                    "WHERE id = ?",
-                    reopening, reopening, actingStaffId, reopening, reason, id);
+                    "WHERE id = ? AND status = ?",
+                    reopening, reopening, actingStaffId, reopening, reason, id, current.status());
+                if (moved == 0) refuseYearTransition(id, "activate", current.status());
             }
             case "planning" -> {
                 if ("closed".equals(current.status())) {
                     throw new IllegalArgumentException(
                         "A closed academic year cannot return to planning; reopen it instead");
                 }
-                jdbc.update("UPDATE academic_year SET status = 'planning' WHERE id = ?", id);
+                int moved = jdbc.update(
+                    "UPDATE academic_year SET status = 'planning' WHERE id = ? AND status <> 'closed'", id);
+                if (moved == 0) refuseYearTransition(id, "return to planning", current.status());
             }
             default -> throw new IllegalArgumentException(
                 "Unknown academic year status: " + status + " (planning | active | closed)");
         }
         return findAcademicYear(id);
+    }
+
+    /**
+     * A conditional transition that matched no row: somebody moved the year
+     * between the read and the write. Landing on the target anyway is not an
+     * error — a retry must not fail because the first attempt worked.
+     */
+    private void refuseYearTransition(UUID id, String transition, String expectedFrom) {
+        AcademicYearDto now = findAcademicYear(id);
+        String target = "return to planning".equals(transition) ? "planning" : "active";
+        if (target.equals(now.status())) return;
+        throw new ConflictException(
+            "Cannot " + transition + " academic year " + now.code() + ": it was '" + expectedFrom
+          + "' when you asked and is '" + now.status() + "' now.");
     }
 
     /**
@@ -163,7 +187,17 @@ public class SchoolRepository {
         UUID schoolId = jdbc.queryForObject(
             "SELECT school_id FROM academic_year WHERE id = ?", UUID.class, id);
         jdbc.update("UPDATE academic_year SET is_current = FALSE WHERE school_id = ? AND id <> ?", schoolId, id);
-        jdbc.update("UPDATE academic_year SET status = 'active', is_current = TRUE WHERE id = ?", id);
+        // Conditional on the year still being open. The schema forbids a closed
+        // year being current, and checking above then writing here left a
+        // window in which a concurrent close produced exactly that.
+        int moved = jdbc.update(
+            "UPDATE academic_year SET status = 'active', is_current = TRUE " +
+            "WHERE id = ? AND status <> 'closed'", id);
+        if (moved == 0) {
+            throw new ConflictException(
+                "Academic year " + year.code() + " was closed while you were activating it; "
+              + "reopen it before activating.");
+        }
         return findAcademicYear(id);
     }
 

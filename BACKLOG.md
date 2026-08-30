@@ -11,15 +11,6 @@ A comparison against the sibling HMS codebase (same architecture, further
 along) surfaced these. Four of what it found are closed — see the first four
 entries under **Done** below.
 
-- **No optimistic locking on plain field edits.** `student`, `fee_invoice` and
-  `academic_year` updates are read-modify-write and last-write-wins. `mark` is
-  the least exposed, because every change writes a `mark_revision` row, so an
-  overwrite is recoverable. Adding a checked `version` column changes the API
-  contract — clients must send what they read — so this is deliberate work, not
-  a refactor. Report-card lifecycle transitions are already atomic (above); the
-  same conditional-UPDATE trick covers any other state machine and needs no
-  API change, so prefer it where the field *is* a state.
-
 - **No unit tests.** Everything runs through HTTP against a real database, so
   pure logic — fee generation, grading bands, rollover date maths, sibling
   policy — cannot be exercised without Postgres and has no fast test. HMS runs
@@ -94,6 +85,20 @@ entries under **Done** below.
   nothing and reported success. Each transition is now one conditional UPDATE
   naming the state it moves out of, with zero rows affected treated as a
   conflict. `ReportCardTransitionTest`. 2026-08-30.
+
+- ~~Lost updates on records two people edit as a form.~~ `role` (name,
+  description, screen list) and `fee_structure` (whose line editor deletes every
+  line and re-inserts) were blind overwrites: the later save won, the earlier
+  one vanished, nobody was told. Both now carry a `version` the client sends
+  back, with a 409 on a stale save. Deliberately not applied to invoice
+  arithmetic (`paid = paid + ?` is computed in the database and already atomic)
+  or to status columns (state machines, better served by a conditional
+  transition) — `V028__optimistic_locking.sql` argues both. `academic_year`
+  transitions got that conditional treatment at the same time: activating or
+  reopening previously read the status and then wrote unconditionally, so a year
+  closed in between could be reopened with no reason and no `reopened_by`.
+  `ArchitectureTest` fails the build on an unversioned write to a versioned
+  table. 2026-08-30.
 
 - ~~Authorization decided inside four repositories.~~ `AttendanceRepository`,
   `SchoolRepository`, `AssessmentRepository` and `PeopleRepository` imported

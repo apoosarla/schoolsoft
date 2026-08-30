@@ -242,6 +242,12 @@ Worth knowing before trusting a green build:
   message rather than a 500.
 - Number series (admission numbers, roll numbers, invoice numbers) are issued by
   `NumberSeries`, not by the caller. Passing one explicitly is the exception.
+- **A record written back whole carries a `version`**, the client sends back
+  what it read, and the UPDATE is `... version = version + 1 WHERE id = ? AND
+  version = ?`. Zero rows means somebody saved first: 409, never a silent
+  overwrite. `role` and `fee_structure` are versioned; `V028` explains why the
+  other contended tables deliberately are not, and `ArchitectureTest` fails the
+  build on an unversioned write to a versioned table.
 - **A state transition is one conditional UPDATE that names the state it moves
   out of**, and zero rows affected is a conflict, not a success. Reading the
   status and then writing leaves a window; `ReportCardService.publish` used to
@@ -260,12 +266,9 @@ Worth knowing before trusting a green build:
 
 `BACKLOG.md` is the live list. Two structural ones worth knowing up front:
 
-- **No optimistic locking on plain edits.** Report-card lifecycle transitions
-  are now atomic, but ordinary field updates (`student`, `fee_invoice`,
-  `academic_year`) are still read-modify-write and last-write-wins. `mark` is
-  the least exposed of them, because every change writes a `mark_revision` row,
-  so an overwrite is at least recoverable. Adding a checked `version` column
-  changes the API contract — clients have to send what they read — so it is a
-  deliberate piece of work, not a refactor.
 - **No unit tests, and no frontend tests.** See above — everything runs through
   HTTP against a real database.
+- **`mark` is unversioned.** Concurrent mark entry is last-write-wins, but every
+  change writes a `mark_revision` row, so an overwrite is recorded and
+  recoverable rather than silent. Versioning it would mean a version on every
+  cell of a marks grid; the revision trail is the cheaper guarantee.
