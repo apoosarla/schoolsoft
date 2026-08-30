@@ -2,6 +2,7 @@ package com.schoolsoft.iam.internal;
 
 import com.schoolsoft.iam.api.RoleDto;
 import com.schoolsoft.iam.api.StaffWithRolesDto;
+import com.schoolsoft.platform.db.OptimisticLock;
 import com.schoolsoft.platform.web.NotFoundException;
 import java.sql.Array;
 import java.sql.ResultSet;
@@ -41,10 +42,12 @@ public class RoleRepository {
         rs.getString("description"),
         readTextArray(rs, "screen_keys"),
         rs.getBoolean("is_system"),
+        rs.getLong("version"),
         rs.getTimestamp("created_at").toInstant()
     );
 
-    private static final String ROLE_COLS = "id, code, name, description, screen_keys, is_system, created_at";
+    private static final String ROLE_COLS =
+        "id, code, name, description, screen_keys, is_system, version, created_at";
 
     public List<RoleDto> listRoles() {
         return jdbc.query("SELECT " + ROLE_COLS + " FROM role ORDER BY is_system DESC, name", ROLE_MAPPER);
@@ -64,12 +67,22 @@ public class RoleRepository {
         return findRole(id).orElseThrow();
     }
 
-    public RoleDto updateRole(UUID id, String name, String description, List<String> screenKeys) {
+    /**
+     * Overwrites the whole record, so it is versioned: two administrators
+     * editing what a role may reach, one silently winning, is a permissions
+     * change nobody decided on.
+     *
+     * @param expectedVersion the version the caller read; a save against a
+     *                        stale one is refused, not applied
+     */
+    public RoleDto updateRole(UUID id, String name, String description, List<String> screenKeys,
+                              long expectedVersion) {
         int updated = jdbc.update(
-            "UPDATE role SET name = ?, description = ?, screen_keys = ? WHERE id = ?",
-            name, description, textArray(screenKeys), id
+            "UPDATE role SET name = ?, description = ?, screen_keys = ?, version = version + 1 " +
+            "WHERE id = ? AND version = ?",
+            name, description, textArray(screenKeys), id, expectedVersion
         );
-        if (updated == 0) throw new NotFoundException("Role not found: " + id);
+        OptimisticLock.requireApplied(updated, "role", id, rid -> findRole(rid).isPresent());
         return findRole(id).orElseThrow();
     }
 

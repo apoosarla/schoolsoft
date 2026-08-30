@@ -10,6 +10,7 @@ import com.schoolsoft.fees.internal.FeeGenerationService;
 import com.schoolsoft.fees.internal.FeeReportRepository;
 import com.schoolsoft.fees.internal.FeeStructureRepository;
 import com.schoolsoft.fees.internal.FeesRepository;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
@@ -94,13 +95,24 @@ public class FeesController {
                 .map(l -> new FeeStructureRepository.LineInput(l.feeHeadId(), l.amount())).toList());
     }
 
-    public record ReplaceLinesRequest(@NotNull List<StructureLineRequest> lines) {}
+    /**
+     * {@code expectedVersion} is the version the caller read. Required: this
+     * replaces every line, so a client allowed to omit it is a client that can
+     * drop somebody else's whole fee schedule without noticing.
+     */
+    public record ReplaceLinesRequest(
+        @NotNull List<StructureLineRequest> lines,
+        @NotNull Long expectedVersion
+    ) {}
 
     @PreAuthorize("@perm.can('fee.structure.manage')")
     @PutMapping("/structures/{id}/lines")
-    public FeeStructureDto replaceStructureLines(@PathVariable UUID id, @RequestBody ReplaceLinesRequest req) {
-        return structures.replaceLines(id, req.lines().stream()
-            .map(l -> new FeeStructureRepository.LineInput(l.feeHeadId(), l.amount())).toList());
+    public FeeStructureDto replaceStructureLines(@PathVariable UUID id,
+                                                 @Valid @RequestBody ReplaceLinesRequest req) {
+        return structures.replaceLines(id,
+            req.lines().stream()
+                .map(l -> new FeeStructureRepository.LineInput(l.feeHeadId(), l.amount())).toList(),
+            req.expectedVersion());
     }
 
     public record CloneStructureRequest(@NotNull UUID targetAcademicYearId, String name) {}

@@ -148,6 +148,55 @@ class ArchitectureTest {
                 .isEmpty();
     }
 
+    /**
+     * A table carrying a {@code version} column carries it for a reason: the
+     * record is written back whole, and an unversioned UPDATE against it is the
+     * silent overwrite the column exists to stop. Adding one is easy to do by
+     * accident — the statement looks ordinary — so it fails the build instead.
+     *
+     * <p>Source-level rather than bytecode: the thing being checked is the SQL
+     * string, which ArchUnit cannot see.</p>
+     */
+    @Test
+    @DisplayName("every UPDATE on a versioned table checks and bumps the version")
+    void versioned_tables_are_updated_with_their_version() throws java.io.IOException {
+        // Kept in step with V028__optimistic_locking.sql by hand; the list is
+        // short because the column is deliberately rare (see that migration for
+        // why invoice arithmetic and status columns are not on it).
+        List<String> versioned = List.of("role", "fee_structure");
+
+        var offenders = new TreeSet<String>();
+        var main = java.nio.file.Path.of("src/main/java");
+        try (var files = java.nio.file.Files.walk(main)) {
+            for (var file : files.filter(f -> f.toString().endsWith(".java")).toList()) {
+                String body = java.nio.file.Files.readString(file);
+                for (String table : versioned) {
+                    var matcher = java.util.regex.Pattern
+                            .compile("UPDATE " + table + " SET (.{0,400}?)\"", java.util.regex.Pattern.DOTALL)
+                            .matcher(body);
+                    while (matcher.find()) {
+                        String statement = matcher.group(1);
+                        // The statement may be split across concatenated string
+                        // literals; the WHERE clause can land in the next one, so
+                        // look at the whole file region rather than one literal.
+                        int from = matcher.start();
+                        String region = body.substring(from, Math.min(body.length(), from + 600));
+                        boolean checks = region.contains("AND version = ?");
+                        boolean bumps = region.contains("version = version + 1");
+                        if (!checks || !bumps) {
+                            offenders.add(file.getFileName() + ": UPDATE " + table + " SET " + statement.trim());
+                        }
+                    }
+                }
+            }
+        }
+
+        assertThat(offenders)
+                .as("unversioned writes to a versioned table — add `version = version + 1` to the SET "
+                  + "and `AND version = ?` to the WHERE, and take the expected version from the caller")
+                .isEmpty();
+    }
+
     /** {@code com.schoolsoft.<module>....} -> {@code <module>}, or null for the root package. */
     private static String moduleOf(String packageName) {
         if (!packageName.startsWith("com.schoolsoft.")) return null;

@@ -2568,6 +2568,8 @@ export type RoleDto = {
   description: string | null;
   screenKeys: string[];
   isSystem: boolean;
+  /** Send this back on update. A save against a stale version is refused with a 409 rather than overwriting whoever saved in between. */
+  version: number;
   createdAt: string;
 };
 
@@ -2586,7 +2588,7 @@ export function createRole(req: {
 
 export function updateRole(
   id: string,
-  req: { name: string; description?: string; screenKeys: string[] }
+  req: { name: string; description?: string; screenKeys: string[]; expectedVersion: number }
 ): Promise<RoleDto> {
   return apiFetch<RoleDto>(`/v1/iam/roles/${id}`, { method: "PUT", body: JSON.stringify(req) });
 }

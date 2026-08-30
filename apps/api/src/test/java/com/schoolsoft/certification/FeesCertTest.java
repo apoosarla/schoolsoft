@@ -46,7 +46,11 @@ class FeesCertTest extends AbstractCertificationTest {
 
             put("/v1/fees/structures/" + nextYear + "/lines", Map.of(
                 "lines", List.of(Map.of("feeHeadId", tuition, "amount", 46000.0),
-                                 Map.of("feeHeadId", lab, "amount", 5500.0))), token);
+                                 Map.of("feeHeadId", lab, "amount", 5500.0)),
+                // Replacing the lines is versioned (V028): the caller sends back
+                // the version it read, so an overlapping save is refused rather
+                // than dropping the other editor's whole schedule.
+                "expectedVersion", clone.getBody().get("version").asLong()), token);
 
             assertThat(get("/v1/fees/structures/" + nextYear, token).getBody().get("total").asDouble())
                 .isEqualTo(51500.0);

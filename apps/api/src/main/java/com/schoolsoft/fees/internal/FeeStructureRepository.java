@@ -2,6 +2,7 @@ package com.schoolsoft.fees.internal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolsoft.fees.api.FeeStructureDto;
+import com.schoolsoft.platform.db.OptimisticLock;
 import com.schoolsoft.platform.web.NotFoundException;
 import java.util.List;
 import java.util.Map;
@@ -24,7 +25,7 @@ public class FeeStructureRepository {
 
     public List<FeeStructureDto> list(UUID schoolId, UUID academicYearId, UUID gradeId) {
         StringBuilder sql = new StringBuilder(
-            "SELECT id, school_id, grade_id, academic_year_id, name, schedule::text AS schedule " +
+            "SELECT id, school_id, grade_id, academic_year_id, name, schedule::text AS schedule, version " +
             "FROM fee_structure WHERE school_id = ?");
         List<Object> args = new java.util.ArrayList<>();
         args.add(schoolId);
@@ -36,26 +37,26 @@ public class FeeStructureRepository {
             UUID.fromString(rs.getString("school_id")),
             UUID.fromString(rs.getString("grade_id")),
             UUID.fromString(rs.getString("academic_year_id")),
-            rs.getString("name"), rs.getString("schedule")), args.toArray());
+            rs.getString("name"), rs.getString("schedule"), rs.getLong("version")), args.toArray());
     }
 
     public FeeStructureDto find(UUID id) {
         var rows = jdbc.query(
-            "SELECT id, school_id, grade_id, academic_year_id, name, schedule::text AS schedule " +
+            "SELECT id, school_id, grade_id, academic_year_id, name, schedule::text AS schedule, version " +
             "FROM fee_structure WHERE id = ?",
             (rs, i) -> hydrate(
                 UUID.fromString(rs.getString("id")),
                 UUID.fromString(rs.getString("school_id")),
                 UUID.fromString(rs.getString("grade_id")),
                 UUID.fromString(rs.getString("academic_year_id")),
-                rs.getString("name"), rs.getString("schedule")),
+                rs.getString("name"), rs.getString("schedule"), rs.getLong("version")),
             id);
         if (rows.isEmpty()) throw new NotFoundException("Fee structure not found: " + id);
         return rows.get(0);
     }
 
     private FeeStructureDto hydrate(UUID id, UUID schoolId, UUID gradeId, UUID academicYearId,
-                                    String name, String scheduleJson) {
+                                    String name, String scheduleJson, long version) {
         List<FeeStructureDto.Line> lines = jdbc.query(
             "SELECT l.id, l.fee_head_id, h.code, h.name, l.amount, h.gst_rate_pct " +
             "FROM fee_structure_line l JOIN fee_head h ON h.id = l.fee_head_id " +
@@ -73,7 +74,7 @@ public class FeeStructureRepository {
         } catch (Exception e) {
             schedule = Map.of("raw", scheduleJson);
         }
-        return new FeeStructureDto(id, schoolId, gradeId, academicYearId, name, schedule, lines, total);
+        return new FeeStructureDto(id, schoolId, gradeId, academicYearId, name, schedule, lines, total, version);
     }
 
     public record LineInput(UUID feeHeadId, double amount) {}
@@ -85,11 +86,28 @@ public class FeeStructureRepository {
             "INSERT INTO fee_structure (id, school_id, grade_id, academic_year_id, name, schedule) " +
             "VALUES (?, ?, ?, ?, ?, ?)",
             id, schoolId, gradeId, academicYearId, name, jsonb(schedule));
-        replaceLines(id, lines);
+        writeLines(id, lines);
         return find(id);
     }
 
-    public FeeStructureDto replaceLines(UUID structureId, List<LineInput> lines) {
+    /**
+     * Replaces every line, so it is versioned: this deletes the lot and
+     * re-inserts, and an overlapping save would drop a whole fee schedule
+     * rather than merge or partially lose.
+     *
+     * @param expectedVersion the version the caller read
+     */
+    public FeeStructureDto replaceLines(UUID structureId, List<LineInput> lines, long expectedVersion) {
+        int claimed = jdbc.update(
+            "UPDATE fee_structure SET version = version + 1 WHERE id = ? AND version = ?",
+            structureId, expectedVersion);
+        OptimisticLock.requireApplied(claimed, "fee structure", structureId,
+            id -> !jdbc.queryForList("SELECT 1 FROM fee_structure WHERE id = ?", id).isEmpty());
+        return writeLines(structureId, lines);
+    }
+
+    /** The line rewrite itself, with no version check — creation has nothing to conflict with. */
+    private FeeStructureDto writeLines(UUID structureId, List<LineInput> lines) {
         jdbc.update("DELETE FROM fee_structure_line WHERE fee_structure_id = ?", structureId);
         for (LineInput line : lines == null ? List.<LineInput>of() : lines) {
             jdbc.update(

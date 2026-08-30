@@ -4,6 +4,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.iam.internal.RoleRepository;
 import com.schoolsoft.platform.tenancy.TenantContext;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.util.List;
@@ -47,12 +48,20 @@ public class RoleController {
         return repo.createRole(req.code(), req.name(), req.description(), req.screenKeys());
     }
 
-    public record UpdateRoleRequest(@NotBlank String name, String description, @NotNull List<String> screenKeys) {}
+    /**
+     * {@code expectedVersion} is the version the caller read. It is required,
+     * not optional: a client that may omit it is a client that silently
+     * overwrites whoever saved in between, which is the whole defect.
+     */
+    public record UpdateRoleRequest(
+        @NotBlank String name, String description, @NotNull List<String> screenKeys,
+        @NotNull Long expectedVersion
+    ) {}
 
     @PreAuthorize("@perm.can('role.manage')")
     @PutMapping("/roles/{id}")
-    public RoleDto updateRole(@PathVariable UUID id, @RequestBody UpdateRoleRequest req) {
-        return repo.updateRole(id, req.name(), req.description(), req.screenKeys());
+    public RoleDto updateRole(@PathVariable UUID id, @Valid @RequestBody UpdateRoleRequest req) {
+        return repo.updateRole(id, req.name(), req.description(), req.screenKeys(), req.expectedVersion());
     }
 
     @PreAuthorize("@perm.can('role.manage')")

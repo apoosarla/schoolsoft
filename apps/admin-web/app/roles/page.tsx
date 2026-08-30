@@ -107,7 +107,15 @@ export default function RolesPage() {
     setSavingId(role.id);
     setError(null);
     try {
-      await updateRole(role.id, { name: role.name, description: role.description ?? undefined, screenKeys: editScreens });
+      await updateRole(role.id, {
+        name: role.name,
+        description: role.description ?? undefined,
+        screenKeys: editScreens,
+        // The version this row was loaded with. If somebody else saved the
+        // role since, the server refuses rather than letting this overwrite
+        // their change, and the 409 lands in `error` below.
+        expectedVersion: role.version,
+      });
       setEditingId(null);
       refreshRoles();
     } catch (err) {
