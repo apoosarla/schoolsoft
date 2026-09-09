@@ -31,8 +31,9 @@ import org.springframework.web.context.request.RequestContextHolder;
  * <h2>What a permission is not</h2>
  * A permission answers "may this caller use this endpoint at all". It does not
  * answer "for this student", "for this section" or "for this campus" — those
- * stay with {@link SelfScope}, {@link Authz#campusScopeOfCurrentUser()} and the
- * per-module authorizers, which run after the gate has let the call through.
+ * stay with {@link SelfScope}, {@link TeacherScope}, {@link DirectoryScope},
+ * {@link CampusScope} and the per-module authorizers, which run after the gate
+ * has let the call through.
  *
  * <h2>Caching</h2>
  * Resolution is one query, memoised into the current request's attributes. A

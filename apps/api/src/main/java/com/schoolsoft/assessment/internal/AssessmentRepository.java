@@ -192,6 +192,24 @@ public class AssessmentRepository {
         rs.getInt("sort_order")
     );
 
+    /**
+     * The section an assessment belongs to, for the teacher scoping that runs
+     * over the assessment-keyed reads (STF-05). Empty when the assessment does
+     * not exist — the caller answers 404 rather than 403 for a missing row.
+     */
+    public Optional<UUID> sectionOf(UUID assessmentId) {
+        return jdbc.query("SELECT section_id FROM assessment WHERE id = ?",
+            (rs, i) -> UUID.fromString(rs.getString(1)), assessmentId).stream().findFirst();
+    }
+
+    /** The same, reached through a component, for the marks grid. */
+    public Optional<UUID> sectionOfComponent(UUID componentId) {
+        return jdbc.query(
+            "SELECT a.section_id FROM assessment_component c JOIN assessment a ON a.id = c.assessment_id " +
+            "WHERE c.id = ?",
+            (rs, i) -> UUID.fromString(rs.getString(1)), componentId).stream().findFirst();
+    }
+
     public List<AssessmentComponentDto> listComponents(UUID assessmentId) {
         return jdbc.query(
             "SELECT id, assessment_id, code, name, max_marks, weight_pct, sort_order FROM assessment_component " +

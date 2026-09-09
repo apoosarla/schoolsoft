@@ -4,6 +4,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.enrolment.internal.EnrolmentRepository;
 import com.schoolsoft.iam.api.SelfScope;
+import com.schoolsoft.iam.api.TeacherScope;
 import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.enrolment.internal.StudentSubjectRepository;
 import jakarta.validation.constraints.NotNull;
@@ -21,13 +22,16 @@ public class EnrolmentController {
     private final StudentSubjectRepository subjects;
     private final SubjectSetResolver subjectSets;
     private final SelfScope selfScope;
+    private final TeacherScope teacherScope;
 
     public EnrolmentController(EnrolmentRepository repo, StudentSubjectRepository subjects,
-                               SubjectSetResolver subjectSets, SelfScope selfScope) {
+                               SubjectSetResolver subjectSets, SelfScope selfScope,
+                               TeacherScope teacherScope) {
         this.repo = repo;
         this.subjects = subjects;
         this.subjectSets = subjectSets;
         this.selfScope = selfScope;
+        this.teacherScope = teacherScope;
     }
 
     @PreAuthorize("@perm.canAnyOf('enrolment.view', 'enrolment.view.own')")
@@ -40,6 +44,9 @@ public class EnrolmentController {
     @PreAuthorize("@perm.can('enrolment.view')")
     @GetMapping("/sections/{sectionId}")
     public List<EnrolmentDto> roster(@PathVariable UUID sectionId, @RequestParam(defaultValue = "true") boolean activeOnly) {
+        // A class list is the section's, and a teacher gets the ones they
+        // teach (STF-05).
+        teacherScope.requireSection(sectionId);
         return repo.listBySection(sectionId, activeOnly);
     }
 

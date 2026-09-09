@@ -1,6 +1,7 @@
 package com.schoolsoft.people.internal;
 
 import com.schoolsoft.iam.api.CampusScope;
+import com.schoolsoft.iam.api.DirectoryScope;
 import com.schoolsoft.people.api.GuardianDto;
 import com.schoolsoft.people.api.PeopleController;
 import com.schoolsoft.people.api.StaffDto;
@@ -22,11 +23,14 @@ public class PeopleRepository {
 
     private final JdbcTemplate jdbc;
     private final CampusScope campusScope;
+    private final DirectoryScope directoryScope;
     private final NumberSeries numbers;
 
-    public PeopleRepository(JdbcTemplate jdbc, CampusScope campusScope, NumberSeries numbers) {
+    public PeopleRepository(JdbcTemplate jdbc, CampusScope campusScope, DirectoryScope directoryScope,
+                            NumberSeries numbers) {
         this.jdbc = jdbc;
         this.campusScope = campusScope;
+        this.directoryScope = directoryScope;
         this.numbers = numbers;
     }
 
@@ -208,6 +212,20 @@ public class PeopleRepository {
         );
         List<Object> args = new ArrayList<>();
         args.add(schoolId);
+
+        // A family sees staff, and only the staff they have a reason to
+        // contact (GAP-31). Narrowed here rather than at the controller
+        // because a directory read that forgets to narrow itself hands one
+        // parent every other family's phone number.
+        var visible = directoryScope.ofCurrentUser();
+        if (!visible.unrestricted()) {
+            if (visible.staffIds().isEmpty()) return List.of();
+            sql.append("AND ua.subject_type = 'staff' AND ua.subject_id IN (")
+               .append(String.join(",", java.util.Collections.nCopies(visible.staffIds().size(), "?")))
+               .append(") ");
+            args.addAll(visible.staffIds());
+        }
+
         if (subjectType != null && !subjectType.isBlank()) {
             sql.append("AND ua.subject_type = ? ");
             args.add(subjectType);

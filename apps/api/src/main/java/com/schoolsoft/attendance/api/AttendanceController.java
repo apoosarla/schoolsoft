@@ -4,6 +4,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.attendance.internal.AttendanceAmendmentService;
 import com.schoolsoft.attendance.internal.AttendanceAuthorizer;
 import com.schoolsoft.iam.api.SelfScope;
+import com.schoolsoft.iam.api.TeacherScope;
 import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.attendance.internal.AttendancePolicyRepository;
 import com.schoolsoft.attendance.internal.AttendanceRepository;
@@ -24,15 +25,17 @@ public class AttendanceController {
     private final AttendanceAmendmentService amendments;
     private final AttendancePolicyRepository policies;
     private final SelfScope selfScope;
+    private final TeacherScope teacherScope;
 
     public AttendanceController(AttendanceRepository repo, AttendanceAuthorizer authorizer,
                                 AttendanceAmendmentService amendments, AttendancePolicyRepository policies,
-                                SelfScope selfScope) {
+                                SelfScope selfScope, TeacherScope teacherScope) {
         this.repo = repo;
         this.authorizer = authorizer;
         this.amendments = amendments;
         this.policies = policies;
         this.selfScope = selfScope;
+        this.teacherScope = teacherScope;
     }
 
     public record MarkRequest(
@@ -72,6 +75,9 @@ public class AttendanceController {
     @PreAuthorize("@perm.can('attendance.view')")
     @GetMapping
     public List<AttendanceRecordDto> forSection(@RequestParam UUID sectionId, @RequestParam LocalDate onDate) {
+        // A register belongs to the people who teach it (STF-05). The office
+        // is unconfined and reads on as before.
+        teacherScope.requireSection(sectionId);
         return repo.forSectionOnDate(sectionId, onDate);
     }
 
@@ -81,6 +87,7 @@ public class AttendanceController {
         @PathVariable UUID studentId, @RequestParam LocalDate from, @RequestParam LocalDate to
     ) {
         selfScope.requireStudent(studentId, Perm.ATTENDANCE_VIEW);
+        teacherScope.requireStudent(studentId);
         return repo.forStudent(studentId, from, to);
     }
 
@@ -91,6 +98,7 @@ public class AttendanceController {
         @PathVariable UUID studentId, @RequestParam LocalDate from, @RequestParam LocalDate to
     ) {
         selfScope.requireStudent(studentId, Perm.ATTENDANCE_VIEW);
+        teacherScope.requireStudent(studentId);
         return repo.summaryForStudent(studentId, from, to);
     }
 

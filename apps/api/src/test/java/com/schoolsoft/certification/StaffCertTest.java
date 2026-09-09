@@ -124,10 +124,79 @@ class StaffCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("Row-level security is school-scoped only: a teacher's token can read any section, student "
-        + "or mark in their school, including another teacher's. Teacher-scope enforcement does not exist. "
-        + "New gap found in Phase 0 — security-relevant.")
     void cert_STF_05_teacherSeesOnlyTheirOwnSectionsAndMarks() {
+        var school = cbse();
+        UUID teacherStaffId = school.teacherStaffIds().get(0);
+        String teacher = teacherToken(school, 0);
+        String head = principalToken(school);
+
+        UUID mine = queryOne(
+            "SELECT sst.section_id FROM section_subject_teacher sst " +
+            "JOIN section s ON s.id = sst.section_id " +
+            "WHERE sst.teacher_staff_id = ? AND s.school_id = ? LIMIT 1",
+            UUID.class, teacherStaffId, school.id());
+
+        // A section this teacher neither holds a subject in nor is timetabled
+        // for. The focus sections are out by construction — every teacher has a
+        // slot in those — so this is one of the sections the round-robin
+        // assignment left them out of.
+        UUID theirs = queryOne(
+            "SELECT s.id FROM section s WHERE s.school_id = ? " +
+            "  AND s.id NOT IN (SELECT section_id FROM section_subject_teacher WHERE teacher_staff_id = ?) " +
+            "  AND s.id NOT IN (SELECT section_id FROM timetable_slot WHERE teacher_staff_id = ?) " +
+            "  AND EXISTS (SELECT 1 FROM enrolment e WHERE e.section_id = s.id AND e.status = 'active') LIMIT 1",
+            UUID.class, school.id(), teacherStaffId, teacherStaffId);
+
+        assertThat(mine).as("the fixture gives teacher 1 at least one section").isNotNull();
+        assertThat(theirs).as("the fixture leaves teacher 1 out of at least one section").isNotNull();
+
+        // Their own section reads exactly as before.
+        assertThat(get("/v1/enrolment/sections/" + mine, teacher).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Another teacher's section is refused outright — a roster, the day's
+        // register, and the section's assessments alike.
+        assertThat(get("/v1/enrolment/sections/" + theirs, teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/attendance?sectionId=" + theirs + "&onDate=2026-08-10", teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/assessment?sectionId=" + theirs, teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // ...and so is the marks grid hanging off it. The scenario makes its
+        // own assessment rather than borrowing a neighbour's.
+        UUID assessmentId = UUID.fromString(post("/v1/assessment", body(
+            "schoolId", school.id(), "sectionId", theirs, "subjectId", subjectOf(school, "MATH"),
+            "termId", termOf(school, school.currentAy().code(), "T2"),
+            "strategyCode", "CBSE-CCE-2024", "name", "STF-05 — another teacher's paper",
+            "assessmentType", "UT", "maxMarks", 20.0, "weightPct", 10.0,
+            "scheduledOn", "2026-09-21"), head).getBody().get("id").asText());
+        UUID componentId = UUID.fromString(post("/v1/assessment/" + assessmentId + "/components",
+            body("code", "THEORY", "name", "Theory paper", "maxMarks", 20.0, "weightPct", 100.0,
+                "sortOrder", 1), head).getBody().get("id").asText());
+
+        assertThat(get("/v1/assessment/" + assessmentId, teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/assessment/" + assessmentId + "/components", teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/assessment/components/" + componentId + "/marks", teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // A student in that section is not theirs to look through either.
+        UUID theirStudent = firstStudentIn(theirs);
+        assertThat(get("/v1/attendance/students/" + theirStudent + "?from=2026-08-01&to=2026-08-31", teacher)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // The head of school stands above the teaching layer and is not confined.
+        assertThat(get("/v1/enrolment/sections/" + theirs, head).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/assessment/components/" + componentId + "/marks", head).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+
+        // Plain student lookup is deliberately *not* narrowed: a staffroom
+        // finds a guardian's number for a child from another class.
+        assertThat(get("/v1/people/students?schoolId=" + school.id(), teacher).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/people/students/" + theirStudent, teacher).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
     }
 
     @Test @Tag("P1")

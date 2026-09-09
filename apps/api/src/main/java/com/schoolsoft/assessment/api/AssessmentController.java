@@ -5,6 +5,7 @@ import com.schoolsoft.assessment.internal.AssessmentPolicyRepository;
 import com.schoolsoft.assessment.internal.AssessmentRepository;
 import com.schoolsoft.assessment.internal.MarkService;
 import com.schoolsoft.iam.api.SelfScope;
+import com.schoolsoft.iam.api.TeacherScope;
 import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.assessment.internal.ReportCardService;
 import com.schoolsoft.audit.api.Audited;
@@ -26,26 +27,34 @@ public class AssessmentController {
     private final ReportCardService reportCards;
     private final AssessmentPolicyRepository policies;
     private final SelfScope selfScope;
+    private final TeacherScope teacherScope;
 
     public AssessmentController(AssessmentRepository repo, MarkService marks, ReportCardService reportCards,
-                                AssessmentPolicyRepository policies, SelfScope selfScope) {
+                                AssessmentPolicyRepository policies, SelfScope selfScope,
+                                TeacherScope teacherScope) {
         this.repo = repo;
         this.marks = marks;
         this.reportCards = reportCards;
         this.policies = policies;
         this.selfScope = selfScope;
+        this.teacherScope = teacherScope;
     }
 
     @PreAuthorize("@perm.can('assessment.view')")
     @GetMapping
     public List<AssessmentDto> listBySection(@RequestParam UUID sectionId) {
+        teacherScope.requireSection(sectionId);
         return repo.listBySection(sectionId);
     }
 
     @PreAuthorize("@perm.can('assessment.view')")
     @GetMapping("/{id}")
     public ResponseEntity<AssessmentDto> get(@PathVariable UUID id) {
-        return repo.find(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
+        // Scope before reading, but only once the assessment is known to
+        // exist: a missing id is a 404, not "you do not teach it".
+        var found = repo.find(id);
+        found.ifPresent(a -> teacherScope.requireSection(a.sectionId()));
+        return found.map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
     }
 
     public record CreateAssessmentRequest(
@@ -90,6 +99,7 @@ public class AssessmentController {
     @PreAuthorize("@perm.can('assessment.view')")
     @GetMapping("/{id}/components")
     public List<AssessmentComponentDto> components(@PathVariable UUID id) {
+        repo.sectionOf(id).ifPresent(teacherScope::requireSection);
         return repo.listComponents(id);
     }
 
@@ -111,6 +121,9 @@ public class AssessmentController {
         // A component's marks are the whole class. A family sees the rows that
         // are theirs and no others — refusing outright would take the marks
         // screen away from every parent app.
+        // ...and a teacher sees the grids for the sections they teach, not
+        // every grid in the school (STF-05).
+        repo.sectionOfComponent(componentId).ifPresent(teacherScope::requireSection);
         return selfScope.narrowToOwnStudents(marks.listMarks(componentId), MarkDto::studentId, Perm.MARK_VIEW);
     }
 

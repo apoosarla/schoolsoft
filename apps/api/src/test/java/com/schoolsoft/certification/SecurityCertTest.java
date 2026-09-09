@@ -221,10 +221,62 @@ class SecurityCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("Nothing scopes a guardian to their own children: /v1/people/students returns every student "
-        + "in the school for any authenticated caller, guardians included. New gap found in Phase 0 — "
-        + "security-relevant.")
     void cert_SEC_10_parentSeesOnlyTheirOwnChildren() {
+        var school = cbse();
+        UUID section = currentFocusSection(school);
+        var students = studentsIn(section);
+        UUID mine = students.get(0);
+        UUID somebodyElses = students.get(1);
+        String parent = guardianTokenFor(school, mine);
+
+        // The school-wide student list is not a parent's to call at all: the
+        // gate is `student.view`, and a guardian holds only `student.view.own`.
+        assertThat(get("/v1/people/students?schoolId=" + school.id(), parent).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Their own child reads; another family's child does not.
+        assertThat(get("/v1/people/students/" + mine, parent).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/people/students/" + somebodyElses, parent).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/people/students/" + somebodyElses + "/guardians", parent).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/attendance/students/" + somebodyElses + "?from=2026-08-01&to=2026-08-31", parent)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // The directory is the read that used to hand one parent the whole
+        // school's contact list (GAP-31). A family sees staff, and no other
+        // family at all.
+        var directory = get("/v1/people/directory?schoolId=" + school.id(), parent);
+        assertThat(directory.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(directory.getBody()).isNotEmpty();
+        for (var entry : directory.getBody()) {
+            assertThat(entry.get("subjectType").asText()).isEqualTo("staff");
+        }
+
+        // The staffroom's own directory is untouched — it still spans the school.
+        var staffView = get("/v1/people/directory?schoolId=" + school.id(), principalToken(school)).getBody();
+        assertThat(staffView.size()).isGreaterThan(directory.getBody().size());
+
+        // A guardian unlinked from a child loses them, without any other change.
+        UUID guardianId = queryOne(
+            "SELECT gs.guardian_id FROM guardian_student gs WHERE gs.student_id = ? ORDER BY gs.is_primary DESC "
+            + "LIMIT 1", UUID.class, mine);
+        var link = inChain(jdbc -> jdbc.queryForMap(
+            "SELECT relation, is_primary, is_custodial, is_payor, is_communications_recipient "
+            + "FROM guardian_student WHERE guardian_id = ? AND student_id = ?", guardianId, mine));
+        inChainDo(jdbc -> jdbc.update(
+            "DELETE FROM guardian_student WHERE guardian_id = ? AND student_id = ?", guardianId, mine));
+        try {
+            assertThat(get("/v1/people/students/" + mine, parent).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        } finally {
+            inChainDo(jdbc -> jdbc.update(
+                "INSERT INTO guardian_student (guardian_id, student_id, relation, is_primary, is_custodial, "
+                + "is_payor, is_communications_recipient) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                guardianId, mine, link.get("relation"), link.get("is_primary"), link.get("is_custodial"),
+                link.get("is_payor"), link.get("is_communications_recipient")));
+        }
+        assertThat(get("/v1/people/students/" + mine, parent).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
     // ---------------------------------------------------------------- helpers

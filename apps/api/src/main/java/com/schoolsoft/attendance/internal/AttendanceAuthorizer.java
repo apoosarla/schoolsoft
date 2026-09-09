@@ -19,9 +19,11 @@ import org.springframework.stereotype.Service;
  * cover has to authorise as well as inform.
  *
  * Note what this is not: it is not teacher scoping. A {@code class_teacher}
- * grant here is school-wide because that is how {@code staff_role} records it
- * today; narrowing a teacher to their own sections is STF-05's open gap, and
- * doing half of it here would only hide it.
+ * grant here is school-wide because that is how {@code staff_role} records it,
+ * and this class decides one question — may you mark <em>this</em> period.
+ * Confining a teacher's <em>reads</em> to their own sections is
+ * {@code iam.api.TeacherScope} (STF-05), which runs over the queries rather
+ * than over this decision.
  */
 @Service
 public class AttendanceAuthorizer {

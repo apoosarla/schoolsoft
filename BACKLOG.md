@@ -49,10 +49,12 @@ entries under **Done** below.
 - **Exam schedule reads do not filter unpublished.** `exam.view.own` lets a
   family read `/v1/exams/schedules` and the repository does not restrict to
   published. Pre-existing; the gate did not introduce it.
-- **Teacher grants are school-wide.** `class_teacher` and `subject_teacher`
-  hold `attendance.mark` and `mark.enter` across the school. Narrowing to their
-  own sections is STF-05, enforced today only where a contextual authorizer
-  exists (`AttendanceAuthorizer`).
+- ~~**Teacher grants are school-wide.**~~ Fixed 2026-09-09. The *grants* are
+  still school-wide — `class_teacher` and `subject_teacher` hold
+  `attendance.mark` and `mark.enter` across the school, which is what
+  `staff_role` records — but the section-keyed academic **reads** are now
+  confined by `TeacherScope`. See GAP-31 under "Gaps found by running the
+  certification suite" below.
 - **`AuditInterceptor` runs ahead of method security.** It is a web
   interceptor, so an `@Audited(requireReason = true)` endpoint called without a
   reason answers 400 about the payload even when the caller would have been
@@ -1281,13 +1283,44 @@ several are security-relevant.
 
 ### Security-relevant (P1 scenarios, no gap id previously)
 
-- **GAP-31 — Authorization stops at the school boundary.** Row-level security
-  scopes reads to `school_id` and nothing narrower. A teacher's token reads any
-  section, student, or mark in the school (STF-05); a guardian's token reads
-  every student in the school, not their own children (SEC-10). Needs a
-  teacher-scope predicate over `section_subject_teacher` / `staff_role` and a
-  guardian-scope predicate over `guardian_student`, applied in the repositories
-  rather than per-controller.
+- **GAP-31 — Authorization stops at the school boundary.** ✅ **Closed
+  2026-09-09.** Two new scopes alongside `CampusScope` and `SelfScope`:
+
+  - `iam/api/TeacherScope` confines a teacher to the sections they teach —
+    `section_subject_teacher`, a currently-effective `timetable_slot`, or a
+    cover handed to them today. Applied to the section-keyed academic reads:
+    the register (`GET /v1/attendance`), a student's attendance history and
+    summary, the roster (`GET /v1/enrolment/sections/{id}`), the section's
+    assessments, an assessment and its components, and a component's marks
+    grid. Plain student lookup is deliberately *not* narrowed — a staffroom
+    finds a guardian's number for a child from another class.
+
+    Confinement is derived from grants rather than role names, so a custom
+    role lands on the right side without a deploy: a caller holding a teaching
+    permission (`mark.enter` or `attendance.mark`) and **not** `teacher.assign`
+    is confined. That shape can only ever narrow a teacher — a registrar,
+    accountant or librarian holds no teaching permission and reads exactly what
+    they read before, and a head of school who also takes a class keeps the
+    whole school. A teacher with no duties recorded gets the empty set, not the
+    school.
+
+  - `iam/api/DirectoryScope` closes what turned out to be the real guardian
+    leak. The original finding named `/v1/people/students`, which V026 had
+    already shut (it gates on `student.view`, and a guardian holds only
+    `student.view.own`); `SelfScope` covered the rest. What nothing covered was
+    `/v1/people/directory` — `directory.view` is in `GUARDIAN_BASELINE` and
+    `listDirectory` narrowed by `school_id` alone, so one parent's token
+    returned every other parent's and student's name, email and phone. A family
+    now sees staff only, and of those the teachers of their children's current
+    sections plus the office (staff holding `guardian.view`). Staff callers are
+    untouched.
+
+  Certified by SEC-10 and STF-05, both previously `@Disabled`. No migration:
+  the vocabulary and the grants are unchanged, which is why `Perm` needed no
+  new constant and `no_orphan_permissions` still passes.
+
+  Still open, and deliberately out of this pass: the `driver` over-grant below,
+  which needs a route-scoped student read `transport` does not have.
 
 - **GAP-32 — Screen access is advisory.** `/v1/iam/me/screens` reports what the
   UI should show, but no endpoint checks it: a hand-crafted call to any module
