@@ -3,6 +3,7 @@ package com.schoolsoft.fees.internal;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.tenancy.api.NumberSeries;
+import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -111,13 +112,22 @@ public class FeeGenerationService {
 
     private record Enrolled(UUID studentId, UUID gradeId, UUID familyId, LocalDate admittedOn) {}
 
+    /**
+     * Who to bill: the children on the school's register on the run date. The
+     * date predicate rather than {@code status = 'active'} — a withdrawal filed
+     * three weeks before the last working day used to take the child off the
+     * bill the day the form was signed, so the term they actually attended went
+     * uninvoiced.
+     */
     private List<Enrolled> enrolledStudents(UUID schoolId, UUID academicYearId, UUID gradeId) {
+        LocalDate today = LocalDate.now();
         StringBuilder sql = new StringBuilder(
             "SELECT st.id AS student_id, sec.grade_id, st.family_id, e.starts_on " +
             "FROM enrolment e JOIN section sec ON sec.id = e.section_id " +
             "JOIN student st ON st.id = e.student_id " +
-            "WHERE e.school_id = ? AND e.academic_year_id = ? AND e.status = 'active'");
-        List<Object> args = new ArrayList<>(List.of(schoolId, academicYearId));
+            "WHERE e.school_id = ? AND e.academic_year_id = ? AND " + EnrolmentActivity.activeOn("e"));
+        List<Object> args = new ArrayList<>(List.of(
+            schoolId, academicYearId, Date.valueOf(today), Date.valueOf(today)));
         if (gradeId != null) {
             sql.append(" AND sec.grade_id = ?");
             args.add(gradeId);
@@ -241,13 +251,15 @@ public class FeeGenerationService {
             "  SELECT sib.id, row_number() OVER (" +
             "    ORDER BY e.starts_on, g.sort_order DESC, sib.admission_no) AS rn " +
             "  FROM student sib " +
-            "  JOIN enrolment e ON e.student_id = sib.id AND e.status = 'active' " +
+            "  JOIN enrolment e ON e.student_id = sib.id AND " + EnrolmentActivity.activeOn("e") + " " +
             "    AND e.academic_year_id = ? " +
             "  JOIN section sec ON sec.id = e.section_id " +
             "  JOIN grade g ON g.id = sec.grade_id " +
             "  WHERE sib.family_id = ?) " +
             "SELECT rn FROM household WHERE id = ?",
-            (rs, i) -> rs.getInt("rn"), academicYearId, student.familyId(), student.studentId());
+            (rs, i) -> rs.getInt("rn"),
+            Date.valueOf(LocalDate.now()), Date.valueOf(LocalDate.now()),
+            academicYearId, student.familyId(), student.studentId());
         Integer rank = ranks.isEmpty() ? null : ranks.get(0);
         if (rank == null || rank < 2) return 0;
 

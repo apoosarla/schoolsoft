@@ -1420,6 +1420,61 @@ several are security-relevant.
 
 ### Correctness
 
+- **The register was still asked as a status in eighteen more reads.** ✅
+  **Closed 2026-09-09.** `EnrolmentActivity` exists to be the only copy of "is
+  this child at the school?", but the conversion had stopped at the reads that
+  prompted it. Eighteen others still filtered on `enrolment.status = 'active'`,
+  which flips the day a withdrawal is *filed* rather than the day it takes
+  effect — so through the notice period a child was on the register or not
+  depending on who asked. What each did to a family working out that notice:
+
+  - `FeeGenerationService` stopped billing them, so the term they actually
+    attended went uninvoiced; the sibling-concession ranking dropped them out
+    of the household, promoting a younger sibling to eldest and changing
+    everybody else's discount.
+  - `FeeReportRepository` moved their outstanding dues to "(unassigned)" — out
+    of the grade and section report the office chases from.
+  - `DashboardRepository` shrank the denominator of today's attendance
+    percentage while the child was still being marked present, so a school
+    could read over 100% attendance.
+  - `TeacherScope` refused their own class teacher their record — while still
+    expecting that teacher to mark them present.
+  - `ReportCardService` left them out of the section's cards, and
+    `ExamScheduleRepository` left them without a hall ticket for a paper they
+    were sitting.
+  - `SectionCapacity` freed their seat to be offered to somebody else while
+    they were still sitting in it.
+  - `RollNumbers` offered their roll number to a new admission, and
+    `EnrolmentRepository.renumber` renumbered a different set than it parked,
+    which is a unique-index collision rather than a cosmetic problem.
+  - `EnrolmentRepository.findActiveByStudent` — the guard against a second
+    enrolment — opened, so a child could be enrolled elsewhere while still on
+    the old section's register.
+  - `StudentSubjectRepository` dropped their subjects, `BoardExportRepository`
+    left them out of the UDISE/CIE return, `ChainAdminController` off the HQ
+    headcount.
+
+  Three `ORDER BY (status = 'active') DESC` tie-breaks became
+  `(ends_on IS NULL) DESC`, matching `EnrolmentActivity.activeEnrolmentOn`:
+  `status` is the reason an enrolment closed, so it cannot order them.
+
+  **Deliberately still a status**, and now the documented allowlist on the new
+  rule: `WithdrawalRepository` and `RolloverService` *write* it, and rollover
+  (`RolloverReadiness`, `AllocationPlanner`) asks "who is continuing into next
+  year", which is not "who is on the register today" — a child leaving on the
+  last day of the year is on the register until then and is not promoted, and
+  only the status separates those. `AllocationPlanner` also counts seats taken
+  in *next* year's sections, whose enrolments have not started and which a date
+  predicate would count as zero.
+
+  `ArchitectureTest.enrolment_activity_is_asked_as_a_date` is the net: a source
+  line holding the literal within four lines of the word "enrolment", outside a
+  comment, fails the build unless its class is on that allowlist with a reason.
+  Confirmed to fail on a reintroduced offender. `cert_STF_06` had asked the
+  dashboard's question with the old predicate and disagreed by one — the single
+  withdrawn-but-still-enrolled child in the fixture — and now asserts the gap in
+  both directions.
+
 - **The family directory answered two date questions with a status and a
   missing window.** ✅ **Closed 2026-09-09.** `DirectoryScope` decides which
   staff a parent may contact — the teachers of their children's sections, plus
@@ -1436,12 +1491,8 @@ several are security-relevant.
   `cert_SEC_10` covers each half, and each was confirmed to fail on its own
   before the fix.
 
-  **Not fixed here:** roughly twenty other reads still spell the enrolment
-  question `status = 'active'` — fees, rollover, dashboards, report cards,
-  `RollNumbers`, `EnrolmentRepository` itself. Each has the same withdrawal
-  window bug in whatever it answers, and converting them is its own sweep.
-  There is no structural rule failing the build on a new one, which is what
-  would stop the count going back up.
+  **The rest of the sweep followed the same day** — every other read that spelled
+  the enrolment question as a status now asks the date. See the entry above.
 
 - **A timetable revision rewrote history instead of superseding it.** ✅
   **Closed 2026-09-09.** `timetable_slot` has carried

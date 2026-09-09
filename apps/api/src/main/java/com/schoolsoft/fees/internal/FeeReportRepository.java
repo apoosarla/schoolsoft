@@ -1,5 +1,6 @@
 package com.schoolsoft.fees.internal;
 
+import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
@@ -82,7 +83,16 @@ public class FeeReportRepository {
         StringBuilder where = new StringBuilder(
             "WHERE fi.school_id = ? AND fi.status IN ('open','partial','overdue') AND fi.total > fi.paid " +
             "  AND fi.student_id IS NOT NULL");
+        // The join carries the date parameters, and the join is written before
+        // the WHERE, so they are bound first. The grade and section a debtor is
+        // reported under is the one they are on the register in today — read as
+        // a status, a family working out their notice fell out of their grade
+        // the day the withdrawal was filed and their dues moved to
+        // "(unassigned)".
+        LocalDate today = LocalDate.now();
         List<Object> args = new java.util.ArrayList<>();
+        args.add(Date.valueOf(today));
+        args.add(Date.valueOf(today));
         args.add(schoolId);
         if (academicYearId != null) { where.append(" AND e.academic_year_id = ?"); args.add(academicYearId); }
         if (gradeId != null) { where.append(" AND sec.grade_id = ?"); args.add(gradeId); }
@@ -91,7 +101,7 @@ public class FeeReportRepository {
         String from =
             "FROM fee_invoice fi " +
             "JOIN student st ON st.id = fi.student_id " +
-            "LEFT JOIN enrolment e ON e.student_id = st.id AND e.status = 'active' " +
+            "LEFT JOIN enrolment e ON e.student_id = st.id AND " + EnrolmentActivity.activeOn("e") + " " +
             "LEFT JOIN section sec ON sec.id = e.section_id " +
             "LEFT JOIN grade g ON g.id = sec.grade_id ";
 

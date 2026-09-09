@@ -76,8 +76,22 @@ public class EnrolmentRepository {
             MAPPER, sectionId, Date.valueOf(date), Date.valueOf(date));
     }
 
+    /**
+     * The enrolment the child is on the books under today — the guard {@link
+     * #enrol} uses to refuse a second one.
+     *
+     * <p>The date predicate rather than the status: a withdrawal filed on the
+     * 1st for a last working day of the 30th sets {@code status = 'withdrawn'}
+     * immediately, and read that way the guard opened for the thirty days the
+     * child was still in the old section. Two overlapping enrolments is exactly
+     * what it is there to prevent.</p>
+     */
     public Optional<EnrolmentDto> findActiveByStudent(UUID studentId) {
-        var rows = jdbc.query(SELECT + "WHERE e.student_id = ? AND e.status = 'active'", MAPPER, studentId);
+        LocalDate today = LocalDate.now();
+        var rows = jdbc.query(
+            SELECT + "WHERE e.student_id = ? AND " + EnrolmentActivity.activeOn("e")
+                + " ORDER BY (e.ends_on IS NULL) DESC, e.starts_on DESC",
+            MAPPER, studentId, Date.valueOf(today), Date.valueOf(today));
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
@@ -147,14 +161,24 @@ public class EnrolmentRepository {
             (rs, i) -> UUID.fromString(rs.getString("school_id")), sectionId);
         if (schoolIds.isEmpty()) throw new NotFoundException("Section not found: " + sectionId);
 
+        // The register today, both times: a child whose last working day is
+        // three weeks out still holds a roll number until they leave, so the
+        // set that gets renumbered and the set that gets parked have to be the
+        // same one — a mismatch leaves a stale number behind for the unique
+        // index to trip over.
+        LocalDate today = LocalDate.now();
         List<UUID> ordered = jdbc.query(
             "SELECT e.id FROM enrolment e JOIN student s ON s.id = e.student_id " +
-            "WHERE e.section_id = ? AND e.status = 'active' ORDER BY s.admission_no",
-            (rs, i) -> UUID.fromString(rs.getString("id")), sectionId);
+            "WHERE e.section_id = ? AND " + EnrolmentActivity.activeOn("e") + " ORDER BY s.admission_no",
+            (rs, i) -> UUID.fromString(rs.getString("id")), sectionId,
+            Date.valueOf(today), Date.valueOf(today));
 
         // Park the old numbers first: the uniqueness index would otherwise trip
         // over an intermediate state where two enrolments both hold roll 3.
-        jdbc.update("UPDATE enrolment SET roll_no = NULL WHERE section_id = ? AND status = 'active'", sectionId);
+        jdbc.update(
+            "UPDATE enrolment SET roll_no = NULL WHERE section_id = ? AND "
+                + EnrolmentActivity.activeOn("enrolment"),
+            sectionId, Date.valueOf(today), Date.valueOf(today));
         for (int i = 0; i < ordered.size(); i++) {
             jdbc.update("UPDATE enrolment SET roll_no = ? WHERE id = ?",
                 String.format("%02d", i + 1), ordered.get(i));

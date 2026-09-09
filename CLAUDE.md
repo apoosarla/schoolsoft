@@ -268,6 +268,11 @@ Worth knowing before trusting a green build:
   `status = 'active'` cannot say that, which is why eighteen copies of it became
   one predicate. A new read that filters students embeds `activeOn(alias)`; one
   that asks about a single child calls `isActiveOn`.
+  `ArchitectureTest.enrolment_activity_is_asked_as_a_date` fails the build on a
+  new `enrolment.status = 'active'`. Its allowlist is the four places where the
+  question really is the status: the two writes, and rollover, which asks who is
+  *continuing* rather than who is on the register — and counts seats in next
+  year's sections, whose enrolments have not started yet.
 - **"What is on the timetable?" is a question about a date.** A
   `timetable_slot` carries `effective_from`/`effective_to`, and every read
   applies the window — `TimetableRepository.IN_FORCE` is the one copy of the

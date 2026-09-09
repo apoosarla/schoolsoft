@@ -205,9 +205,19 @@ class StaffCertTest extends AbstractCertificationTest {
         var overview = get("/v1/dashboards/schools/" + cbse().id() + "/overview", token);
         assertThat(overview.getStatusCode()).isEqualTo(HttpStatus.OK);
 
+        // The oracle asks the question the dashboard asks: who is on the
+        // register today. A child whose withdrawal is filed for a last working
+        // day still to come is one of them, and counted as a status they are
+        // not — which also makes the attendance percentage this number is the
+        // denominator of read over 100%.
         long activeEnrolments = overview.getBody().get("activeEnrolments").asLong();
         assertThat(activeEnrolments)
-            .isEqualTo(count("SELECT count(*) FROM enrolment WHERE school_id = ? AND status = 'active'", cbse().id()));
+            .isEqualTo(count(
+                "SELECT count(*) FROM enrolment WHERE school_id = ? "
+                + "AND starts_on <= current_date "
+                + "AND COALESCE(ends_on, 'infinity'::date) >= current_date", cbse().id()));
+        assertThat(activeEnrolments).isGreaterThan(
+            count("SELECT count(*) FROM enrolment WHERE school_id = ? AND status = 'active'", cbse().id()));
 
         // The same call pointed at the sibling school returns that school's rows to nobody:
         // row-level security answers with zeros rather than another school's aggregate.

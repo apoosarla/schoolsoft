@@ -131,16 +131,23 @@ public class TeacherScope {
 
         var jdbc = new JdbcTemplate(dataSource);
         String placeholders = String.join(",", Collections.nCopies(scope.sectionIds().size(), "?"));
-        Object[] args = new Object[scope.sectionIds().size() + 1];
+        java.sql.Date today = java.sql.Date.valueOf(LocalDate.now());
+        Object[] args = new Object[scope.sectionIds().size() + 3];
         args[0] = studentId;
-        for (int i = 0; i < scope.sectionIds().size(); i++) args[i + 1] = scope.sectionIds().get(i);
+        args[1] = today;
+        args[2] = today;
+        for (int i = 0; i < scope.sectionIds().size(); i++) args[i + 3] = scope.sectionIds().get(i);
 
         // Only the current enrolment counts. A student the teacher taught last
         // year is not theirs to look through this year, and every student
-        // carries a prior-year row.
+        // carries a prior-year row. Current is a date, not a status: a child
+        // working out their notice is still in the class, and read as a status
+        // their own teacher was refused their record the day the withdrawal was
+        // filed — while still being expected to mark them present.
         Integer n = jdbc.queryForObject(
-            "SELECT count(*) FROM enrolment WHERE student_id = ? AND status = 'active' " +
-            "  AND section_id IN (" + placeholders + ")",
+            "SELECT count(*) FROM enrolment e WHERE e.student_id = ? AND "
+                + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e") +
+            "  AND e.section_id IN (" + placeholders + ")",
             Integer.class, args);
         if (n == null || n == 0) throw new ForbiddenException("This student is not in your sections");
     }

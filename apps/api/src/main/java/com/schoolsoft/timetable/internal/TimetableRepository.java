@@ -91,9 +91,9 @@ public class TimetableRepository {
     public List<TimetableSlotDto> forStudent(UUID studentId, LocalDate onDate) {
         LocalDate date = onDate == null ? LocalDate.now() : onDate;
         var enrolments = jdbc.query(
-            "SELECT section_id FROM enrolment WHERE student_id = ? " +
-            "  AND starts_on <= ? AND COALESCE(ends_on, 'infinity'::date) >= ? " +
-            "ORDER BY (status = 'active') DESC, starts_on DESC LIMIT 1",
+            "SELECT e.section_id FROM enrolment e WHERE e.student_id = ? AND "
+                + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e") +
+            " ORDER BY (e.ends_on IS NULL) DESC, e.starts_on DESC LIMIT 1",
             (rs, i) -> UUID.fromString(rs.getString("section_id")),
             studentId, Date.valueOf(date), Date.valueOf(date));
         if (enrolments.isEmpty()) return List.of();

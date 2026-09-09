@@ -21,6 +21,7 @@ import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.AcademicYearGuard;
 import java.sql.Date;
+import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -192,9 +193,14 @@ public class ReportCardService {
     @Transactional
     public List<ReportCardDto> generateForSection(UUID schoolId, UUID sectionId, UUID academicYearId, UUID termId,
                                                   String strategyCode, String templateCode) {
+        // The section's register today, not its unclosed enrolments: a child
+        // working out their notice still sits in the class and still gets a
+        // card for the term they were there for.
+        LocalDate today = LocalDate.now();
         List<UUID> students = jdbc.queryForList(
-            "SELECT student_id FROM enrolment WHERE section_id = ? AND status = 'active' ORDER BY roll_no",
-            UUID.class, sectionId);
+            "SELECT e.student_id FROM enrolment e WHERE e.section_id = ? AND "
+                + EnrolmentActivity.activeOn("e") + " ORDER BY e.roll_no",
+            UUID.class, sectionId, java.sql.Date.valueOf(today), java.sql.Date.valueOf(today));
         List<ReportCardDto> cards = new ArrayList<>();
         for (UUID studentId : students) {
             cards.add(generate(new GenerateRequest(schoolId, studentId, academicYearId, termId, strategyCode,
@@ -414,7 +420,10 @@ public class ReportCardService {
             "       (g.sort_order = (SELECT max(sort_order) FROM grade WHERE school_id = g.school_id)) AS terminal " +
             "FROM enrolment e JOIN section s ON s.id = e.section_id JOIN grade g ON g.id = s.grade_id " +
             "WHERE e.student_id = ? AND s.academic_year_id = ? " +
-            "ORDER BY (e.status = 'active') DESC, e.starts_on DESC LIMIT 1",
+            // Prefer the enrolment still open over one already closed, the same
+            // tie-break EnrolmentActivity.activeEnrolmentOn uses. `status` is
+            // the reason an enrolment closed, so it cannot order these.
+            "ORDER BY (e.ends_on IS NULL) DESC, e.starts_on DESC LIMIT 1",
             (rs, i) -> new Object[]{UUID.fromString(rs.getString("section_id")),
                 UUID.fromString(rs.getString("grade_id")), rs.getBoolean("terminal"),
                 rs.getDate("starts_on").toLocalDate()},

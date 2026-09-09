@@ -111,7 +111,14 @@ public class ChainAdminController {
         try {
             var chainJdbc = new JdbcTemplate(dataSource);
             long schoolCount = chainJdbc.queryForObject("SELECT count(*) FROM school", Long.class);
-            long activeEnrolments = chainJdbc.queryForObject("SELECT count(*) FROM enrolment WHERE status = 'active'", Long.class);
+            // Children on a register today across the chain — the date
+            // predicate, not the status, so a filed withdrawal does not drop
+            // the headcount before the child has left.
+            java.sql.Date today = java.sql.Date.valueOf(java.time.LocalDate.now());
+            long activeEnrolments = chainJdbc.queryForObject(
+                "SELECT count(*) FROM enrolment e WHERE "
+                    + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e"),
+                Long.class, today, today);
             long staffCount = chainJdbc.queryForObject("SELECT count(*) FROM staff WHERE is_active", Long.class);
             double feeCollectedTotal = chainJdbc.queryForObject("SELECT COALESCE(sum(paid), 0) FROM fee_invoice", Double.class);
             return new ChainStatsDto(id, schoolCount, activeEnrolments, staffCount, feeCollectedTotal);

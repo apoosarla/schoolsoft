@@ -139,12 +139,15 @@ public class BoardExportRepository {
 
     // ------------------------------------------------------------- payloads
 
+    /** The children a board export declares: the register on the export date. */
     private List<Map<String, Object>> candidates(UUID sectionId, UUID studentId) {
+        java.sql.Date today = java.sql.Date.valueOf(java.time.LocalDate.now());
         String sql =
             "SELECT e.id AS enrolment_id, st.id AS student_id, st.admission_no, " +
             "       (st.first_name || ' ' || COALESCE(st.last_name, '')) AS full_name, st.dob, e.roll_no " +
             "FROM enrolment e JOIN student st ON st.id = e.student_id " +
-            "WHERE e.status = 'active' AND " + (sectionId != null ? "e.section_id = ?" : "e.student_id = ?") +
+            "WHERE " + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e") + " AND "
+                + (sectionId != null ? "e.section_id = ?" : "e.student_id = ?") +
             " ORDER BY e.roll_no, st.admission_no";
 
         return jdbc.query(sql, (rs, i) -> {
@@ -158,7 +161,7 @@ public class BoardExportRepository {
             candidate.put("subjects", subjectSets.forEnrolment(enrolmentId, java.time.LocalDate.now()).stream()
                 .map(StudentSubjectDto::subjectCode).toList());
             return candidate;
-        }, sectionId != null ? sectionId : studentId);
+        }, today, today, sectionId != null ? sectionId : studentId);
     }
 
     /** Minimal board schema: every candidate needs an identity and at least one subject. */

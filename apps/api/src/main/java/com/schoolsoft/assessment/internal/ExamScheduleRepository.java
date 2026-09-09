@@ -280,14 +280,18 @@ public class ExamScheduleRepository {
         int seq = jdbc.queryForObject(
             "SELECT count(*) FROM exam_hall_ticket WHERE exam_schedule_id = ?", Integer.class, scheduleId);
         for (UUID gradeId : grades) {
+            // Everyone on the register today sits the paper — including a child
+            // whose last working day is after it.
             List<UUID> students = jdbc.queryForList(
                 "SELECT e.student_id FROM enrolment e " +
                 "JOIN section s ON s.id = e.section_id AND s.grade_id = ? AND s.academic_year_id = ? " +
-                "WHERE e.status = 'active' " +
+                "WHERE " + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e") + " " +
                 "  AND NOT EXISTS (SELECT 1 FROM exam_hall_ticket t " +
                 "                  WHERE t.exam_schedule_id = ? AND t.student_id = e.student_id) " +
                 "ORDER BY e.roll_no",
-                UUID.class, gradeId, schedule.academicYearId(), scheduleId);
+                UUID.class, gradeId, schedule.academicYearId(),
+                java.sql.Date.valueOf(java.time.LocalDate.now()),
+                java.sql.Date.valueOf(java.time.LocalDate.now()), scheduleId);
             for (UUID studentId : students) {
                 seq++;
                 jdbc.update(

@@ -1,6 +1,9 @@
 package com.schoolsoft.tenancy.api;
 
 import com.schoolsoft.platform.web.NotFoundException;
+import com.schoolsoft.enrolment.api.EnrolmentActivity;
+import java.sql.Date;
+import java.time.LocalDate;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -24,12 +27,17 @@ public class SectionCapacity {
     public record Occupancy(UUID sectionId, Integer capacity, int active, Integer seatsLeft) {}
 
     public Occupancy occupancyOf(UUID sectionId) {
+        // Seats taken today. A child whose withdrawal is filed for the end of
+        // the month is still sitting in one of them, so the seat is not free to
+        // offer until they have actually gone.
+        LocalDate today = LocalDate.now();
         var rows = jdbc.query(
             "SELECT s.capacity, (SELECT count(*) FROM enrolment e " +
-            "                    WHERE e.section_id = s.id AND e.status = 'active') AS active " +
+            "                    WHERE e.section_id = s.id AND " + EnrolmentActivity.activeOn("e")
+                + ") AS active " +
             "FROM section s WHERE s.id = ?",
             (rs, i) -> new Object[]{ (Integer) rs.getObject("capacity"), rs.getInt("active") },
-            sectionId);
+            Date.valueOf(today), Date.valueOf(today), sectionId);
         if (rows.isEmpty()) throw new NotFoundException("Section not found: " + sectionId);
         Integer capacity = (Integer) rows.get(0)[0];
         int active = (Integer) rows.get(0)[1];

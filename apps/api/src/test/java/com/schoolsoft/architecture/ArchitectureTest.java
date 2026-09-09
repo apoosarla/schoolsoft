@@ -7,8 +7,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -117,6 +121,83 @@ class ArchitectureTest {
         assertThat(offenders)
                 .as("new repositories declaring their own transaction — put @Transactional on the "
                   + "service that owns the use case instead")
+                .isEmpty();
+    }
+
+    /**
+     * "Is this child at the school?" is a question about a date, and
+     * {@link com.schoolsoft.enrolment.api.EnrolmentActivity} holds the only
+     * copy of the answer. This fails the build on a read that spells it
+     * {@code enrolment.status = 'active'} instead.
+     *
+     * <p>The two are not the same question. {@code status} is the <em>reason</em>
+     * an enrolment closed — {@code withdrawn}, {@code transferred},
+     * {@code graduated}, {@code promoted}, {@code detained} — and it is written
+     * the day the paperwork is filed. {@code ends_on} is the last day the child
+     * counts. Between the two, for a withdrawal filed on the 1st with a last
+     * working day of the 30th, the status-shaped read drops the child a month
+     * early: off the bill, off the register, out of their own teacher's reach,
+     * and out of the family's copy of the school directory.</p>
+     *
+     * <p>The scan is deliberately crude — a source line holding the literal,
+     * within four lines of the word "enrolment", outside a comment. It is
+     * looking for the shape, and the shape is what recurs.</p>
+     *
+     * <p>The allowlist is not a backlog. Each entry is a place where the
+     * question really is about the status, and says which:</p>
+     * <ul>
+     *   <li>{@code WithdrawalRepository} — the conditional UPDATE that closes
+     *       an enrolment names the state it moves out of. That is the
+     *       convention, not a violation of it.</li>
+     *   <li>{@code RolloverService} — reopening an enrolment writes the status
+     *       back.</li>
+     *   <li>{@code RolloverReadiness}, {@code AllocationPlanner} — rollover asks
+     *       "who is continuing into next year", which is not "who is on the
+     *       register today". A child leaving on the last day of the year is on
+     *       the register until then and is not promoted; only the status can
+     *       tell those apart. {@code AllocationPlanner} also counts seats taken
+     *       in <em>next</em> year's sections, whose enrolments have not started
+     *       yet and which a date predicate would therefore count as zero.</li>
+     * </ul>
+     */
+    @Test
+    @DisplayName("the register is a date, not a status")
+    void enrolment_activity_is_asked_as_a_date() throws IOException {
+        List<String> asksAboutTheStatusOnPurpose = List.of(
+                "WithdrawalRepository",
+                "RolloverService",
+                "RolloverReadiness",
+                "AllocationPlanner");
+
+        Pattern literal = Pattern.compile("status\\s*(=|<>|!=)\\s*'active'");
+        var offenders = new TreeSet<String>();
+
+        Path root = Path.of("src/main/java");
+        try (var paths = Files.walk(root)) {
+            for (Path file : paths.filter(f -> f.toString().endsWith(".java")).toList()) {
+                String name = file.getFileName().toString().replace(".java", "");
+                if (asksAboutTheStatusOnPurpose.contains(name)) continue;
+
+                List<String> lines = Files.readAllLines(file);
+                for (int i = 0; i < lines.size(); i++) {
+                    String line = lines.get(i);
+                    String code = line.strip();
+                    if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) continue;
+                    if (!literal.matcher(line).find()) continue;
+
+                    boolean aboutEnrolment = false;
+                    for (int j = Math.max(0, i - 4); j < Math.min(lines.size(), i + 5); j++) {
+                        if (lines.get(j).toLowerCase().contains("enrolment")) aboutEnrolment = true;
+                    }
+                    if (aboutEnrolment) offenders.add(name + ":" + (i + 1));
+                }
+            }
+        }
+
+        assertThat(offenders)
+                .as("a read asking whether a child is at the school by status — use "
+                  + "EnrolmentActivity.activeOn(alias) and pass the date twice, or isActiveOn for one "
+                  + "child. If the question really is about the status, say why in the allowlist above")
                 .isEmpty();
     }
 

@@ -14,8 +14,15 @@ public class DashboardRepository {
     public DashboardRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
     public SchoolOverviewDto overview(UUID schoolId) {
+        // The denominator today's attendance percentage divides by, so it has
+        // to be the register today. Read as a status it shrank the moment a
+        // withdrawal was filed while the child was still being marked present,
+        // which showed the school an attendance rate over 100%.
+        java.sql.Date today = java.sql.Date.valueOf(java.time.LocalDate.now());
         long activeEnrolments = jdbc.queryForObject(
-            "SELECT count(*) FROM enrolment WHERE school_id = ? AND status = 'active'", Long.class, schoolId
+            "SELECT count(*) FROM enrolment e WHERE e.school_id = ? AND "
+                + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e"),
+            Long.class, schoolId, today, today
         );
 
         long presentToday = jdbc.queryForObject(

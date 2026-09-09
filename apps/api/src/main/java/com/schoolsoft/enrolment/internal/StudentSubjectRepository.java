@@ -1,5 +1,6 @@
 package com.schoolsoft.enrolment.internal;
 
+import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import com.schoolsoft.enrolment.api.StudentSubjectDto;
 import com.schoolsoft.platform.web.NotFoundException;
 import java.sql.Date;
@@ -81,12 +82,12 @@ public class StudentSubjectRepository {
         "JOIN section s ON s.id = e.section_id AND s.grade_id = ? AND s.academic_year_id = ? " +
         "JOIN section_subject_teacher sst ON sst.section_id = e.section_id AND NOT sst.is_elective " +
         "JOIN subject sub ON sub.id = sst.subject_id " +
-        "WHERE e.status = 'active' " +
+        "WHERE " + EnrolmentActivity.activeOn("e") + " " +
         "UNION " +
         "SELECT ss.id::text, ss.enrolment_id::text, e.student_id::text, sub.id::text, sub.code, sub.name, " +
         "       'elective', ss.elective_group_id::text, eg.code, ss.status, ss.effective_from, ss.effective_to " +
         "FROM student_subject ss " +
-        "JOIN enrolment e ON e.id = ss.enrolment_id AND e.status = 'active' " +
+        "JOIN enrolment e ON e.id = ss.enrolment_id AND " + EnrolmentActivity.activeOn("e") + " " +
         "JOIN section s ON s.id = e.section_id AND s.grade_id = ? AND s.academic_year_id = ? " +
         "JOIN subject sub ON sub.id = ss.subject_id " +
         "LEFT JOIN elective_group eg ON eg.id = ss.elective_group_id " +
@@ -94,17 +95,25 @@ public class StudentSubjectRepository {
         "  AND (? BETWEEN ss.effective_from AND COALESCE(ss.effective_to, 'infinity'::date)) " +
         "ORDER BY student_id, subject_code";
 
+    /**
+     * A grade's subject sets on a date. The enrolment halves ask the same date
+     * the elective window does — a child whose withdrawal is filed for the end
+     * of the month is still taking their subjects until then, and
+     * {@code status = 'active'} said otherwise the moment the paperwork was
+     * filed.
+     */
     public List<StudentSubjectDto> resolveForGrade(UUID gradeId, UUID academicYearId, LocalDate onDate) {
+        Date d = Date.valueOf(onDate);
         return jdbc.query(RESOLVE_GRADE_SQL, MAPPER,
-            gradeId, academicYearId, gradeId, academicYearId, Date.valueOf(onDate));
+            gradeId, academicYearId, d, d,
+            d, d, gradeId, academicYearId, d);
     }
 
     /** The enrolment a student holds on a date — elections hang off enrolments, not students. */
     public UUID enrolmentIdFor(UUID studentId, LocalDate onDate) {
         var rows = jdbc.query(
-            "SELECT id FROM enrolment WHERE student_id = ? " +
-            "  AND starts_on <= ? AND COALESCE(ends_on, 'infinity'::date) >= ? " +
-            "ORDER BY (status = 'active') DESC, starts_on DESC LIMIT 1",
+            "SELECT e.id FROM enrolment e WHERE e.student_id = ? AND " + EnrolmentActivity.activeOn("e") +
+            " ORDER BY (e.ends_on IS NULL) DESC, e.starts_on DESC LIMIT 1",
             (rs, i) -> UUID.fromString(rs.getString("id")),
             studentId, Date.valueOf(onDate), Date.valueOf(onDate));
         return rows.isEmpty() ? null : rows.get(0);
