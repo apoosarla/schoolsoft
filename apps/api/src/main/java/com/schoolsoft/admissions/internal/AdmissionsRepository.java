@@ -116,8 +116,11 @@ public class AdmissionsRepository implements PublicAdmissions {
 
     public List<AdmissionEventDto> listEvents(UUID applicationId) {
         return jdbc.query(
-            "SELECT id, application_id, event_type, from_state, to_state, occurred_at FROM admission_event " +
-            "WHERE application_id = ? ORDER BY occurred_at",
+            // admission_event carries no school_id and so no RLS policy; the
+            // join to the application is what bounds the trail to this school.
+            "SELECT e.id, e.application_id, e.event_type, e.from_state, e.to_state, e.occurred_at " +
+            "FROM admission_event e JOIN admission_application app ON app.id = e.application_id " +
+            "WHERE e.application_id = ? ORDER BY e.occurred_at",
             (rs, i) -> new AdmissionEventDto(
                 UUID.fromString(rs.getString("id")),
                 UUID.fromString(rs.getString("application_id")),

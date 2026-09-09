@@ -188,8 +188,12 @@ public class CurriculumRepository {
 
     public List<CurriculumNodeDto> listNodes(UUID curriculumId) {
         return jdbc.query(
-            "SELECT id, curriculum_id, parent_id, node_type, code, name, sort_order, path, depth " +
-            "FROM curriculum_node WHERE curriculum_id = ? ORDER BY path",
+            // curriculum_node carries no school_id and so no RLS policy of its
+            // own; the join to `curriculum` is what bounds the tree to the
+            // caller's school.
+            "SELECT n.id, n.curriculum_id, n.parent_id, n.node_type, n.code, n.name, n.sort_order, n.path, n.depth " +
+            "FROM curriculum_node n JOIN curriculum c ON c.id = n.curriculum_id " +
+            "WHERE n.curriculum_id = ? ORDER BY n.path",
             (rs, i) -> new CurriculumNodeDto(
                 UUID.fromString(rs.getString("id")),
                 UUID.fromString(rs.getString("curriculum_id")),
@@ -210,7 +214,8 @@ public class CurriculumRepository {
         int depth = 0;
         if (parentId != null) {
             var parents = jdbc.query(
-                "SELECT path, depth FROM curriculum_node WHERE id = ?",
+                "SELECT n.path, n.depth FROM curriculum_node n " +
+                "JOIN curriculum c ON c.id = n.curriculum_id WHERE n.id = ?",
                 (rs, i) -> new Object[]{rs.getString("path"), rs.getInt("depth")},
                 parentId
             );
@@ -231,8 +236,13 @@ public class CurriculumRepository {
 
     public List<LearningOutcomeDto> listLearningOutcomes(UUID nodeId) {
         return jdbc.query(
-            "SELECT id, curriculum_node_id, code, statement, bloom_level, sort_order " +
-            "FROM learning_outcome WHERE curriculum_node_id = ? ORDER BY sort_order",
+            // Two joins up to `curriculum`, which is the nearest ancestor that
+            // carries school_id and therefore an RLS policy.
+            "SELECT lo.id, lo.curriculum_node_id, lo.code, lo.statement, lo.bloom_level, lo.sort_order " +
+            "FROM learning_outcome lo " +
+            "JOIN curriculum_node n ON n.id = lo.curriculum_node_id " +
+            "JOIN curriculum c ON c.id = n.curriculum_id " +
+            "WHERE lo.curriculum_node_id = ? ORDER BY lo.sort_order",
             LO_MAPPER, nodeId
         );
     }

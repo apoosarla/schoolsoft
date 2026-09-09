@@ -301,8 +301,11 @@ public class SchoolRepository {
 
     public List<TermDto> listTerms(UUID academicYearId) {
         return jdbc.query(
-            "SELECT id, academic_year_id, code, name, starts_on, ends_on FROM term " +
-            "WHERE academic_year_id = ? ORDER BY starts_on",
+            // `term` carries no school_id and so no RLS policy; the join to
+            // academic_year is what bounds it to the caller's school.
+            "SELECT t.id, t.academic_year_id, t.code, t.name, t.starts_on, t.ends_on FROM term t " +
+            "JOIN academic_year ay ON ay.id = t.academic_year_id " +
+            "WHERE t.academic_year_id = ? ORDER BY t.starts_on",
             TERM, academicYearId
         );
     }
@@ -318,8 +321,9 @@ public class SchoolRepository {
                 year.code() + " (" + year.startsOn() + " .. " + year.endsOn() + ")");
         }
         List<String> overlapping = jdbc.queryForList(
-            "SELECT code || ' (' || starts_on || ' .. ' || ends_on || ')' FROM term " +
-            "WHERE academic_year_id = ? AND daterange(starts_on, ends_on, '[]') && daterange(?, ?, '[]')",
+            "SELECT t.code || ' (' || t.starts_on || ' .. ' || t.ends_on || ')' FROM term t " +
+            "JOIN academic_year ay ON ay.id = t.academic_year_id " +
+            "WHERE t.academic_year_id = ? AND daterange(t.starts_on, t.ends_on, '[]') && daterange(?, ?, '[]')",
             String.class, academicYearId, Date.valueOf(startsOn), Date.valueOf(endsOn));
         if (!overlapping.isEmpty()) {
             throw new IllegalArgumentException(
@@ -333,7 +337,8 @@ public class SchoolRepository {
             id, academicYearId, code, name, Date.valueOf(startsOn), Date.valueOf(endsOn)
         );
         return jdbc.queryForObject(
-            "SELECT id, academic_year_id, code, name, starts_on, ends_on FROM term WHERE id = ?", TERM, id
+            "SELECT t.id, t.academic_year_id, t.code, t.name, t.starts_on, t.ends_on FROM term t " +
+            "JOIN academic_year ay ON ay.id = t.academic_year_id WHERE t.id = ?", TERM, id
         );
     }
 

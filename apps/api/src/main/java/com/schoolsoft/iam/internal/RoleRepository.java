@@ -145,21 +145,34 @@ public class RoleRepository {
                 throw new IllegalArgumentException("Campus " + target + " is not in school " + schoolId);
             }
         }
-        jdbc.update(
+        // Selected from `staff` rather than inserted straight: staff_role
+        // carries no school_id and so no RLS policy, and nothing above this
+        // ties the request's schoolId to the caller's own. Without the select,
+        // one school's it_admin could grant a role to another school's staff.
+        // `staff` does carry the policy, and the explicit school_id keeps the
+        // grant inside the school it names.
+        int granted = jdbc.update(
             "INSERT INTO staff_role (id, staff_id, role_code, scope_type, scope_id) " +
-            "VALUES (gen_random_uuid(), ?, ?, ?, ?) " +
+            "SELECT gen_random_uuid(), s.id, ?, ?, ? FROM staff s WHERE s.id = ? AND s.school_id = ? " +
             "ON CONFLICT (staff_id, role_code, scope_type, scope_id) DO UPDATE SET revoked_at = NULL",
-            staffId, roleCode, scope, target
+            roleCode, scope, target, staffId, schoolId
         );
+        if (granted == 0) {
+            throw new NotFoundException("Staff " + staffId + " is not in school " + schoolId);
+        }
     }
 
     public void unassignRole(UUID staffId, UUID schoolId, String roleCode, String scopeType, UUID scopeId) {
         String scope = scopeType == null || scopeType.isBlank() ? "school" : scopeType;
         UUID target = "school".equals(scope) ? schoolId : scopeId;
+        // Bounded through `staff` for the same reason the grant is: a
+        // revocation that crosses the school boundary is as wrong as a grant.
         jdbc.update(
-            "UPDATE staff_role SET revoked_at = now() " +
-            "WHERE staff_id = ? AND role_code = ? AND scope_type = ? AND scope_id = ? AND revoked_at IS NULL",
-            staffId, roleCode, scope, target
+            "UPDATE staff_role sr SET revoked_at = now() FROM staff s " +
+            "WHERE s.id = sr.staff_id AND s.school_id = ? " +
+            "  AND sr.staff_id = ? AND sr.role_code = ? AND sr.scope_type = ? AND sr.scope_id = ? " +
+            "  AND sr.revoked_at IS NULL",
+            schoolId, staffId, roleCode, scope, target
         );
     }
 

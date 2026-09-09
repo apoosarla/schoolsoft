@@ -174,11 +174,22 @@ public class LmsRepository {
     );
 
     private static final String SUBMISSION_COLS =
-        "id, assignment_id, student_id, body, submitted_at, marks, feedback, graded_at";
+        "s.id, s.assignment_id, s.student_id, s.body, s.submitted_at, s.marks, s.feedback, s.graded_at";
+
+    /**
+     * assignment_submission, quiz_question and quiz_attempt carry no
+     * {@code school_id}, so V009's row-level security has no policy on any of
+     * them. Every read joins the parent that does carry one — a submission to
+     * its assignment, a question or an attempt to its quiz — so the school
+     * boundary is enforced by the same policy that guards the parent rather
+     * than by a filter each caller has to remember.
+     */
+    private static final String SUBMISSION_FROM =
+        " FROM assignment_submission s JOIN assignment a ON a.id = s.assignment_id ";
 
     public List<AssignmentSubmissionDto> listSubmissions(UUID assignmentId) {
         return jdbc.query(
-            "SELECT " + SUBMISSION_COLS + " FROM assignment_submission WHERE assignment_id = ? ORDER BY submitted_at",
+            "SELECT " + SUBMISSION_COLS + SUBMISSION_FROM + "WHERE s.assignment_id = ? ORDER BY s.submitted_at",
             SUBMISSION_MAPPER, assignmentId
         );
     }
@@ -191,7 +202,7 @@ public class LmsRepository {
             id, assignmentId, studentId, body
         );
         return jdbc.queryForObject(
-            "SELECT " + SUBMISSION_COLS + " FROM assignment_submission WHERE assignment_id = ? AND student_id = ?",
+            "SELECT " + SUBMISSION_COLS + SUBMISSION_FROM + "WHERE s.assignment_id = ? AND s.student_id = ?",
             SUBMISSION_MAPPER, assignmentId, studentId
         );
     }
@@ -202,7 +213,8 @@ public class LmsRepository {
             marks, feedback, gradedByStaffId, submissionId
         );
         if (updated == 0) throw new NotFoundException("Submission not found: " + submissionId);
-        return jdbc.queryForObject("SELECT " + SUBMISSION_COLS + " FROM assignment_submission WHERE id = ?", SUBMISSION_MAPPER, submissionId);
+        return jdbc.queryForObject(
+            "SELECT " + SUBMISSION_COLS + SUBMISSION_FROM + "WHERE s.id = ?", SUBMISSION_MAPPER, submissionId);
     }
 
     // -------------------------- Quiz --------------------------
@@ -247,8 +259,9 @@ public class LmsRepository {
 
     public List<QuizQuestionDto> listQuestions(UUID quizId) {
         return jdbc.query(
-            "SELECT id, quiz_id, curriculum_node_id, kind, prompt, marks, sort_order FROM quiz_question " +
-            "WHERE quiz_id = ? ORDER BY sort_order",
+            "SELECT q.id, q.quiz_id, q.curriculum_node_id, q.kind, q.prompt, q.marks, q.sort_order " +
+            "FROM quiz_question q JOIN quiz z ON z.id = q.quiz_id " +
+            "WHERE q.quiz_id = ? ORDER BY q.sort_order",
             QUESTION_MAPPER, quizId
         );
     }
@@ -263,7 +276,8 @@ public class LmsRepository {
             id, quizId, curriculumNodeId, kind, prompt, jsonb(options), jsonb(answer), marks, sortOrder
         );
         return jdbc.queryForObject(
-            "SELECT id, quiz_id, curriculum_node_id, kind, prompt, marks, sort_order FROM quiz_question WHERE id = ?",
+            "SELECT q.id, q.quiz_id, q.curriculum_node_id, q.kind, q.prompt, q.marks, q.sort_order " +
+            "FROM quiz_question q JOIN quiz z ON z.id = q.quiz_id WHERE q.id = ?",
             QUESTION_MAPPER, id
         );
     }
@@ -281,7 +295,8 @@ public class LmsRepository {
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO quiz_attempt (id, quiz_id, student_id) VALUES (?, ?, ?)", id, quizId, studentId);
         return jdbc.queryForObject(
-            "SELECT id, quiz_id, student_id, started_at, submitted_at, score FROM quiz_attempt WHERE id = ?",
+            "SELECT t.id, t.quiz_id, t.student_id, t.started_at, t.submitted_at, t.score " +
+            "FROM quiz_attempt t JOIN quiz z ON z.id = t.quiz_id WHERE t.id = ?",
             ATTEMPT_MAPPER, id
         );
     }
@@ -293,14 +308,16 @@ public class LmsRepository {
         );
         if (updated == 0) throw new NotFoundException("Quiz attempt not found: " + attemptId);
         return jdbc.queryForObject(
-            "SELECT id, quiz_id, student_id, started_at, submitted_at, score FROM quiz_attempt WHERE id = ?",
+            "SELECT t.id, t.quiz_id, t.student_id, t.started_at, t.submitted_at, t.score " +
+            "FROM quiz_attempt t JOIN quiz z ON z.id = t.quiz_id WHERE t.id = ?",
             ATTEMPT_MAPPER, attemptId
         );
     }
 
     public List<QuizAttemptDto> listAttempts(UUID quizId) {
         return jdbc.query(
-            "SELECT id, quiz_id, student_id, started_at, submitted_at, score FROM quiz_attempt WHERE quiz_id = ? ORDER BY started_at",
+            "SELECT t.id, t.quiz_id, t.student_id, t.started_at, t.submitted_at, t.score " +
+            "FROM quiz_attempt t JOIN quiz z ON z.id = t.quiz_id WHERE t.quiz_id = ? ORDER BY t.started_at",
             ATTEMPT_MAPPER, quizId
         );
     }

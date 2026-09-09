@@ -88,13 +88,21 @@ public class LibraryRepository {
     );
 
     public List<LibraryCopyDto> listCopies(UUID titleId) {
-        return jdbc.query("SELECT id, title_id, barcode, status FROM library_copy WHERE title_id = ? ORDER BY barcode", COPY_MAPPER, titleId);
+        // library_copy carries no school_id, so it has no RLS policy: the
+        // join to library_title is what keeps one school's shelves out of
+        // another's.
+        return jdbc.query(
+            "SELECT c.id, c.title_id, c.barcode, c.status FROM library_copy c " +
+            "JOIN library_title t ON t.id = c.title_id WHERE c.title_id = ? ORDER BY c.barcode",
+            COPY_MAPPER, titleId);
     }
 
     public LibraryCopyDto addCopy(UUID titleId, String barcode) {
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO library_copy (id, title_id, barcode) VALUES (?, ?, ?)", id, titleId, barcode);
-        return jdbc.queryForObject("SELECT id, title_id, barcode, status FROM library_copy WHERE id = ?", COPY_MAPPER, id);
+        return jdbc.queryForObject(
+            "SELECT c.id, c.title_id, c.barcode, c.status FROM library_copy c " +
+            "JOIN library_title t ON t.id = c.title_id WHERE c.id = ?", COPY_MAPPER, id);
     }
 
     // -------------------------- Issue / Return --------------------------

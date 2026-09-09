@@ -168,7 +168,12 @@ public class FeesRepository {
 
     public List<FeeInvoiceLineDto> listInvoiceLines(UUID invoiceId) {
         return jdbc.query(
-            "SELECT id, fee_invoice_id, fee_head_id, description, amount, discount, gst FROM fee_invoice_line WHERE fee_invoice_id = ?",
+            // Joined to the invoice, which carries school_id and therefore an
+            // RLS policy; fee_invoice_line carries neither, so keyed by
+            // invoice id alone this read crosses the school boundary.
+            "SELECT l.id, l.fee_invoice_id, l.fee_head_id, l.description, l.amount, l.discount, l.gst " +
+            "FROM fee_invoice_line l JOIN fee_invoice i ON i.id = l.fee_invoice_id " +
+            "WHERE l.fee_invoice_id = ?",
             (rs, i) -> new FeeInvoiceLineDto(
                 UUID.fromString(rs.getString("id")),
                 UUID.fromString(rs.getString("fee_invoice_id")),

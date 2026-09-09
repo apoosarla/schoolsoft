@@ -58,12 +58,20 @@ entries under **Done** below.
   read by vehicle id alone, so any staff or parent token (every guardian holds
   `transport.track`) could follow any bus in the chain, another school's
   included. Fixed 2026-09-09 by joining `vehicle`; pinned in `cert_SEC_04`,
-  which fails without the join. **The rest of that list is unaudited**:
-  `route_assignment`, `timetable_slot`, `section_subject_teacher`,
-  `staff_role`, `guardian_student`, `term`, `message`, `library_copy`,
-  `assessment_component`, `fee_invoice_line`, `quiz_question` and a dozen more
-  carry no `school_id`. Each is presumed reachable only through a parent that
-  is covered — presumed, not checked, one query at a time.
+  which fails without the join.
+
+  **Audited 2026-09-09.** All 33 chain tables without `school_id`, and all 139
+  SQL statements touching one. Twelve reads and one write did not join a
+  covered parent, each returning or writing another school's rows to a valid
+  token: invoice lines, assessment components, library copies, terms,
+  curriculum nodes, learning outcomes, thread messages, assignment
+  submissions, quiz questions, quiz attempts, admission events, a bus's GPS
+  trail — and `assignRole`, which wrote a `staff_role` row onto another
+  school's staff because nothing tied the request's `schoolId` to the caller's
+  own. All fixed by joining the covered parent; `CrossSchoolIsolationTest`
+  (harness) is the regression net and each case was confirmed to fail before
+  the fix. `role`, `role_perm`, `feature_flag`, `outbox`, `ledger_account` and
+  `flyway_schema_history` are chain-global by design and stay unpolicied.
 - **Exam schedule reads do not filter unpublished.** `exam.view.own` lets a
   family read `/v1/exams/schedules` and the repository does not restrict to
   published. Pre-existing; the gate did not introduce it.

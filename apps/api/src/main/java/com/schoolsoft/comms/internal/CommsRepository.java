@@ -140,7 +140,10 @@ public class CommsRepository {
 
     public List<MessageDto> listMessages(UUID threadId) {
         return jdbc.query(
-            "SELECT id, thread_id, sender_user_id, body, sent_at FROM message WHERE thread_id = ? ORDER BY sent_at",
+            // `message` carries no school_id; message_thread does, and its RLS
+            // policy is what keeps one school's conversations out of another's.
+            "SELECT m.id, m.thread_id, m.sender_user_id, m.body, m.sent_at FROM message m " +
+            "JOIN message_thread t ON t.id = m.thread_id WHERE m.thread_id = ? ORDER BY m.sent_at",
             MESSAGE_MAPPER, threadId
         );
     }
@@ -150,7 +153,8 @@ public class CommsRepository {
         jdbc.update("INSERT INTO message (id, thread_id, sender_user_id, body) VALUES (?, ?, ?, ?)", id, threadId, senderUserId, body);
         jdbc.update("UPDATE message_thread SET last_message_at = now() WHERE id = ?", threadId);
         return jdbc.queryForObject(
-            "SELECT id, thread_id, sender_user_id, body, sent_at FROM message WHERE id = ?", MESSAGE_MAPPER, id
+            "SELECT m.id, m.thread_id, m.sender_user_id, m.body, m.sent_at FROM message m " +
+            "JOIN message_thread t ON t.id = m.thread_id WHERE m.id = ?", MESSAGE_MAPPER, id
         );
     }
 }

@@ -212,8 +212,12 @@ public class AssessmentRepository {
 
     public List<AssessmentComponentDto> listComponents(UUID assessmentId) {
         return jdbc.query(
-            "SELECT id, assessment_id, code, name, max_marks, weight_pct, sort_order FROM assessment_component " +
-            "WHERE assessment_id = ? ORDER BY sort_order",
+            // assessment_component has no school_id and so no RLS policy of
+            // its own; the join to `assessment` is what bounds the read to the
+            // caller's school.
+            "SELECT c.id, c.assessment_id, c.code, c.name, c.max_marks, c.weight_pct, c.sort_order " +
+            "FROM assessment_component c JOIN assessment a ON a.id = c.assessment_id " +
+            "WHERE c.assessment_id = ? ORDER BY c.sort_order",
             COMPONENT_MAPPER, assessmentId
         );
     }
@@ -235,7 +239,8 @@ public class AssessmentRepository {
             id, assessmentId, code, name, maxMarks, weightPct, sortOrder
         );
         return jdbc.queryForObject(
-            "SELECT id, assessment_id, code, name, max_marks, weight_pct, sort_order FROM assessment_component WHERE id = ?",
+            "SELECT c.id, c.assessment_id, c.code, c.name, c.max_marks, c.weight_pct, c.sort_order " +
+            "FROM assessment_component c JOIN assessment a ON a.id = c.assessment_id WHERE c.id = ?",
             COMPONENT_MAPPER, id
         );
     }
