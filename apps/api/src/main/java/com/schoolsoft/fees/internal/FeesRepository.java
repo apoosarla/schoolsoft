@@ -36,6 +36,22 @@ public class FeesRepository {
         this.adjustments = adjustments;
     }
 
+    /**
+     * The year the school is currently operating in, or the one containing
+     * today when nothing is flagged current. Null only for a school with no
+     * academic years at all, which keeps the column as forgiving as it was.
+     */
+    private UUID currentAcademicYear(UUID schoolId) {
+        var current = jdbc.query(
+            "SELECT id FROM academic_year WHERE school_id = ? AND is_current LIMIT 1",
+            (rs, i) -> UUID.fromString(rs.getString("id")), schoolId);
+        if (!current.isEmpty()) return current.get(0);
+        return jdbc.query(
+            "SELECT id FROM academic_year WHERE school_id = ? AND CURRENT_DATE BETWEEN starts_on AND ends_on "
+            + "LIMIT 1",
+            (rs, i) -> UUID.fromString(rs.getString("id")), schoolId).stream().findFirst().orElse(null);
+    }
+
     // -------------------------- Fee Head --------------------------
 
     private static final RowMapper<FeeHeadDto> HEAD_MAPPER = (rs, i) -> new FeeHeadDto(
@@ -122,11 +138,23 @@ public class FeesRepository {
         double gst = lines.stream().mapToDouble(InvoiceLineInput::gst).sum();
         double total = subtotal + gst;
 
+        // An invoice records the year it was raised in. Leaving it null made the
+        // manual path the only one that did not, and year-end carry-forward
+        // then had nothing but the issue date to go on: a bill keyed in after
+        // the new year had begun looked like it belonged to the new year, and
+        // the family's arrears silently vanished at rollover instead of
+        // following them. Same resolution FeeChargeRouter already uses — the
+        // school's own current year, which is what the office means when it
+        // raises a bill.
+        UUID academicYearId = currentAcademicYear(schoolId);
+
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO fee_invoice (id, school_id, student_id, invoice_no, cycle_label, due_on, subtotal, gst, total) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            id, schoolId, studentId, invoiceNo, cycleLabel, Date.valueOf(dueOnWorkingDay), subtotal, gst, total
+            "INSERT INTO fee_invoice (id, school_id, student_id, academic_year_id, invoice_no, cycle_label, " +
+            "  due_on, subtotal, gst, total) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            id, schoolId, studentId, academicYearId, invoiceNo, cycleLabel,
+            Date.valueOf(dueOnWorkingDay), subtotal, gst, total
         );
         for (InvoiceLineInput line : lines) {
             jdbc.update(

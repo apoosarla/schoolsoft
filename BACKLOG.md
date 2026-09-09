@@ -834,6 +834,17 @@ Worth keeping a record of these since none were caught until something
 actually exercised the code path — a reminder that "compiles" and "correct"
 are different claims:
 
+- `FeesRepository.createInvoice`: a manually raised invoice recorded no
+  `academic_year_id`, alone among the paths that write one (`FeeGenerationService`
+  and `FeeChargeRouter` both set it). `CarryForward` therefore fell back to
+  "issued before the new year starts" for those rows, so a bill keyed in after
+  the new year had begun read as belonging to the new year and the family's
+  arrears silently vanished at rollover instead of following them. Latent since
+  V020 and invisible until the wall clock crossed a target year's start date,
+  which is what turned FEE-16 and YEC-06 red on 2026-09-01 with no code change
+  behind it. Now stamps the school's current year, the same resolution
+  `FeeChargeRouter` already used. Fixed 2026-09-09.
+
 - `NotificationRepository`: uncaught `SQLException` from `PGobject.setValue`
   — the whole module had never compiled before.
 - `DataSourceConfig`: bean name collision on `DataSourceProperties` surfaced
