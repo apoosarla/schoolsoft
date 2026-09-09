@@ -150,7 +150,10 @@ role. The short version:
   `SelfScope`.
 - Campus/section/period scoping is a separate axis (`CampusScope`,
   `AttendanceAuthorizer`, `LeaveAuthorizer`, `AssessmentAuthorizer`) that runs
-  *after* the permission check.
+  *after* the permission check. So is confinement — "of whose": `TeacherScope`
+  (a teacher's sections), `RouteScope` (a driver's routes), `DirectoryScope` (a
+  family's view of the directory). Each derives confinement from grants rather
+  than role names, so a custom role lands on the right side without a deploy.
 - A role check never lives in a repository — `ArchitectureTest` fails the build
   on one. `CampusScope` is the exception and is not a decision: it answers "of
   what", its result is a `WHERE` clause, and that belongs next to the SQL

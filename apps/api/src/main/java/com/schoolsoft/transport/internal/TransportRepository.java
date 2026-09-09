@@ -5,6 +5,7 @@ import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.transport.api.DriverDto;
 import com.schoolsoft.transport.api.GeofenceStatusDto;
 import com.schoolsoft.transport.api.GpsPingDto;
+import com.schoolsoft.transport.api.RouteRiderDto;
 import com.schoolsoft.transport.api.StudentTransportDto;
 import com.schoolsoft.transport.api.TransportRouteDto;
 import com.schoolsoft.transport.api.TransportStopDto;
@@ -188,15 +189,25 @@ public class TransportRepository {
      * effective-dated, so "who rides this bus" is a question about a day, not
      * about the newest row (TRN-06). Passing no date asks about today.
      */
-    public List<StudentTransportDto> listStudentsOnRoute(UUID routeId, LocalDate onDate) {
+    public List<RouteRiderDto> listStudentsOnRoute(UUID routeId, LocalDate onDate) {
         LocalDate date = onDate == null ? LocalDate.now() : onDate;
         return jdbc.query(
-            "SELECT id, student_id, route_id, stop_id, starts_on, ends_on FROM student_transport " +
-            "WHERE route_id = ? AND starts_on <= ? AND COALESCE(ends_on, 'infinity'::date) >= ?",
-            (rs, i) -> new StudentTransportDto(
+            "SELECT st.id, st.student_id, st.route_id, st.stop_id, st.starts_on, st.ends_on, " +
+            "       s.admission_no, s.first_name, s.last_name, " +
+            "       (g.code || '-' || sec.code) AS section_label " +
+            "FROM student_transport st " +
+            "JOIN student s ON s.id = st.student_id " +
+            "LEFT JOIN enrolment e ON e.student_id = s.id AND e.status = 'active' " +
+            "LEFT JOIN section sec ON sec.id = e.section_id " +
+            "LEFT JOIN grade   g   ON g.id = sec.grade_id " +
+            "WHERE st.route_id = ? AND st.starts_on <= ? AND COALESCE(st.ends_on, 'infinity'::date) >= ? " +
+            "ORDER BY st.stop_id, s.first_name",
+            (rs, i) -> new RouteRiderDto(
                 UUID.fromString(rs.getString("id")), UUID.fromString(rs.getString("student_id")),
                 UUID.fromString(rs.getString("route_id")), UUID.fromString(rs.getString("stop_id")),
-                rs.getDate("starts_on").toLocalDate(), rs.getDate("ends_on") == null ? null : rs.getDate("ends_on").toLocalDate()
+                rs.getDate("starts_on").toLocalDate(), rs.getDate("ends_on") == null ? null : rs.getDate("ends_on").toLocalDate(),
+                rs.getString("admission_no"), rs.getString("first_name"), rs.getString("last_name"),
+                rs.getString("section_label")
             ),
             routeId, Date.valueOf(date), Date.valueOf(date)
         );

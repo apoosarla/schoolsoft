@@ -248,6 +248,70 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             .isEqualTo(HttpStatus.FORBIDDEN);
     }
 
+    // ===================== the driver's bus, and only the driver's bus =====================
+
+    /**
+     * The last of GAP-31's neighbours. {@code driver} held school-wide
+     * {@code student.view} because the roster returned bare ids and the app
+     * read each rider out of {@code /v1/people/students/&#123;id&#125;} — a
+     * whole school's student directory, on a bus. V029 revokes the grant; the
+     * roster carries the names instead.
+     */
+    @Test
+    @DisplayName("a driver reads their route's riders by name and no student out of the directory")
+    void driverReadsRidersWithoutTheStudentDirectory() {
+        String driver = driverToken(cbse());
+
+        var roster = get("/v1/transport/routes/" + cbse().routeId() + "/students", driver);
+        assertThat(roster.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(roster.getBody()).isNotEmpty();
+        assertThat(roster.getBody().get(0).get("firstName").asText()).isNotBlank();
+        assertThat(roster.getBody().get(0).get("admissionNo").asText()).isNotBlank();
+
+        UUID rider = UUID.fromString(roster.getBody().get(0).get("studentId").asText());
+        assertThat(get("/v1/people/students/" + rider, driver).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/people/students?schoolId=" + cbse().id(), driver).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * {@code transport.drive} says a driver may run a trip. It does not say
+     * whose. Confinement comes from {@code route_assignment}, so the other
+     * school's route is refused even though the token is a valid driver's —
+     * and trip start is scoped too, or a driver could mint themselves a route
+     * by starting a trip on it and then reading its roster.
+     */
+    @Test
+    @DisplayName("a driver is confined to the routes they are rostered to drive")
+    void driverIsConfinedToTheirOwnRoutes() {
+        String driver = driverToken(cbse());
+        UUID someoneElsesRoute = cie().routeId();
+
+        assertThat(get("/v1/transport/routes/" + someoneElsesRoute + "/students", driver).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/transport/trips/start", body(
+            "schoolId", cie().id(), "routeId", someoneElsesRoute,
+            "vehicleId", UUID.randomUUID(), "driverId", UUID.randomUUID(),
+            "direction", "pickup"), driver).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * The scope narrows a driver and nobody else. The office assigns riders to
+     * routes and has to see every one of them — and holds no {@code driver}
+     * record at all, so a scope that confined it would return nothing rather
+     * than everything.
+     */
+    @Test
+    @DisplayName("the office is not route-confined")
+    void transportManagerIsNotConfined() {
+        var roster = get("/v1/transport/routes/" + cbse().routeId() + "/students", principalToken(cbse()));
+
+        assertThat(roster.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(roster.getBody()).isNotEmpty();
+    }
+
     /**
      * The public site posts an application with no token at all. The gate on
      * those handlers is {@code permitAll()}, and it has to keep working — a

@@ -21,10 +21,10 @@ import {
   listTransportStops,
   listTripsForSchool,
   listVehicles,
+  RouteRiderDto,
   Session,
   StudentDto,
   studentsOnRoute,
-  StudentTransportDto,
   TransportRouteDto,
   TransportStopDto,
   TripDto,
@@ -68,7 +68,7 @@ export default function TransportPage() {
   const [stops, setStops] = useState<TransportStopDto[] | null>(null);
   const [stopForm, setStopForm] = useState({ name: "", lat: "", lng: "", fee: "" });
   const [addingStop, setAddingStop] = useState(false);
-  const [routeStudents, setRouteStudents] = useState<StudentTransportDto[] | null>(null);
+  const [routeStudents, setRouteStudents] = useState<RouteRiderDto[] | null>(null);
 
   const [studentQ, setStudentQ] = useState("");
   const [studentResults, setStudentResults] = useState<StudentDto[] | null>(null);
@@ -496,6 +496,7 @@ export default function TransportPage() {
                 <thead>
                   <tr>
                     <th>Student</th>
+                    <th>Class</th>
                     <th>Stop</th>
                     <th>Since</th>
                   </tr>
@@ -503,7 +504,11 @@ export default function TransportPage() {
                 <tbody>
                   {routeStudents.map((rs) => (
                     <tr key={rs.id}>
-                      <td>{rs.studentId.slice(0, 8)}</td>
+                      <td>
+                        {`${rs.firstName} ${rs.lastName ?? ""}`.trim()}
+                        <div className="list-row-sub">{rs.admissionNo}</div>
+                      </td>
+                      <td>{rs.sectionLabel ?? "—"}</td>
                       <td>{stops?.find((s) => s.id === rs.stopId)?.name ?? rs.stopId.slice(0, 8)}</td>
                       <td>{rs.startsOn}</td>
                     </tr>
