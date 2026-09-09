@@ -49,7 +49,9 @@ public class PermissionChecker {
      * What a guardian may do without any role grant: read their own children's
      * school life, talk to the school, and apply for leave on their behalf.
      * Every entry is either self-scoped or harmless school-wide (announcements
-     * are published to them by definition).
+     * are published to them by definition; the calendar is the same day
+     * resolution {@code /v1/public/schools/{chain}/{school}/calendar}
+     * already serves with no token at all).
      */
     static final Set<Perm> GUARDIAN_BASELINE = EnumSet.of(
         Perm.STUDENT_VIEW_OWN,
@@ -68,7 +70,8 @@ public class PermissionChecker {
         Perm.MARK_REEVAL_REQUEST,
         Perm.DIRECTORY_VIEW,
         Perm.TRANSPORT_TRACK,
-        Perm.STRUCTURE_VIEW
+        Perm.STRUCTURE_VIEW,
+        Perm.CALENDAR_VIEW
     );
 
     /** A student sees their own, and submits their own work. */
@@ -86,7 +89,8 @@ public class PermissionChecker {
         Perm.LMS_CONTENT_VIEW,
         Perm.LMS_SUBMIT,
         Perm.LIBRARY_VIEW,
-        Perm.STRUCTURE_VIEW
+        Perm.STRUCTURE_VIEW,
+        Perm.CALENDAR_VIEW
     );
 
     /**

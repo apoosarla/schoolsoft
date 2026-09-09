@@ -99,6 +99,7 @@ public class CertificationFixture {
         UUID accountantStaffId, UUID accountantUserId,
         UUID registrarStaffId, UUID registrarUserId,
         UUID librarianStaffId, UUID librarianUserId,
+        UUID driverStaffId, UUID driverUserId, UUID routeId,
         List<UUID> teacherStaffIds, List<UUID> teacherUserIds,
         List<String> gradeCodes, List<String> sectionCodes, List<String> subjectCodes,
         String focusGradeCode, String terminalGradeCode
@@ -208,7 +209,7 @@ public class CertificationFixture {
         seedReportCards(jdbc, schoolId, slug, focusSectionPrior, priorAy, strategyCode);
         seedFees(jdbc, schoolId, slug, grades, priorAy, currentAy);
         seedLibrary(jdbc, schoolId, slug, focusSectionCurrent);
-        seedTransport(jdbc, schoolId, slug, focusSectionCurrent);
+        seedTransport(jdbc, schoolId, slug, focusSectionCurrent, staff.driverStaffId);
 
         return new SchoolSeed(schoolId, slug, name, boardCode, strategyCode,
             mainCampus, annexCampus, priorAy, currentAy, curriculumId,
@@ -216,6 +217,7 @@ public class CertificationFixture {
             staff.accountantStaffId, staff.accountantUserId,
             staff.registrarStaffId, staff.registrarUserId,
             staff.librarianStaffId, staff.librarianUserId,
+            staff.driverStaffId, staff.driverUserId, id(slug + ":route:1"),
             staff.teacherStaffIds, staff.teacherUserIds,
             gradeCodes, sectionCodes, List.copyOf(subjects.keySet()),
             focusGradeCode, terminalGradeCode);
@@ -283,6 +285,7 @@ public class CertificationFixture {
                              UUID accountantStaffId, UUID accountantUserId,
                              UUID registrarStaffId, UUID registrarUserId,
                              UUID librarianStaffId, UUID librarianUserId,
+                             UUID driverStaffId, UUID driverUserId,
                              List<UUID> teacherStaffIds, List<UUID> teacherUserIds) {}
 
     private StaffSeed seedStaff(JdbcTemplate jdbc, UUID schoolId, String slug) {
@@ -290,6 +293,9 @@ public class CertificationFixture {
         UUID accountant = staffMember(jdbc, schoolId, slug, "accountant", "Suresh", "Iyer", "accountant");
         UUID registrar = staffMember(jdbc, schoolId, slug, "registrar", "Fatima", "Sheikh", "registrar");
         UUID librarian = staffMember(jdbc, schoolId, slug, "librarian", "Anil", "Kumar", "librarian");
+        // The driver logs in as staff like everybody else; `driver.staff_id`
+        // is what RouteScope walks to find the routes they are rostered to.
+        UUID driver = staffMember(jdbc, schoolId, slug, "driver", "Ramesh", "Yadav", "driver");
 
         List<UUID> teacherStaffIds = new ArrayList<>();
         List<UUID> teacherUserIds = new ArrayList<>();
@@ -307,6 +313,7 @@ public class CertificationFixture {
             accountant, id(slug + ":user:accountant"),
             registrar, id(slug + ":user:registrar"),
             librarian, id(slug + ":user:librarian"),
+            driver, id(slug + ":user:driver"),
             teacherStaffIds, teacherUserIds);
     }
 
@@ -760,7 +767,8 @@ public class CertificationFixture {
 
     // -------------------------------------------------------------- transport
 
-    private void seedTransport(JdbcTemplate jdbc, UUID schoolId, String slug, UUID focusSectionId) {
+    private void seedTransport(JdbcTemplate jdbc, UUID schoolId, String slug, UUID focusSectionId,
+                               UUID driverStaffId) {
         UUID vehicleId = id(slug + ":vehicle:1");
         UUID driverId = id(slug + ":driver:1");
         UUID routeId = id(slug + ":route:1");
@@ -768,8 +776,9 @@ public class CertificationFixture {
             "INSERT INTO vehicle (id, school_id, registration_no, model, capacity) VALUES (?, ?, ?, 'Tata Starbus', 40)",
             vehicleId, schoolId, "TS09UB" + (slug.equals("oakridge") ? "1234" : "5678"));
         jdbc.update(
-            "INSERT INTO driver (id, school_id, name, phone, license_no) VALUES (?, ?, 'Ramesh Yadav', '+919812345678', 'TS0120200012345')",
-            driverId, schoolId);
+            "INSERT INTO driver (id, school_id, staff_id, name, phone, license_no) " +
+            "VALUES (?, ?, ?, 'Ramesh Yadav', '+919812345678', 'TS0120200012345')",
+            driverId, schoolId, driverStaffId);
         jdbc.update(
             "INSERT INTO transport_route (id, school_id, code, name, direction) VALUES (?, ?, 'R1', 'Route 1 — Jubilee Hills', 'both')",
             routeId, schoolId);

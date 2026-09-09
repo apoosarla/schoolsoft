@@ -104,6 +104,11 @@ public abstract class AbstractCertificationTest {
         return tokenFor(school, school.librarianUserId(), "staff");
     }
 
+    /** Rostered to route R1 of their own school, and to nothing else. */
+    protected String driverToken(SchoolSeed school) {
+        return tokenFor(school, school.driverUserId(), "staff");
+    }
+
     /** Teacher 1 is the class teacher of every focus section. */
     protected String teacherToken(SchoolSeed school, int index) {
         return tokenFor(school, school.teacherUserIds().get(index), "staff");

@@ -219,27 +219,25 @@ export function checkIn(tripId: string, studentId: string, status: string): Prom
   });
 }
 
-export type StudentTransportDto = {
+/**
+ * A rider as the roster returns them — named, so the check-in screen needs no
+ * second call. The driver role holds no school-wide `student.view`: reading a
+ * student out of /v1/people is refused, and the route roster is scoped to the
+ * routes this driver is rostered to drive today.
+ */
+export type RouteRiderDto = {
   id: string;
   studentId: string;
   routeId: string;
   stopId: string;
   startsOn: string;
   endsOn: string | null;
-};
-
-export function studentsOnRoute(routeId: string): Promise<StudentTransportDto[]> {
-  return apiFetch<StudentTransportDto[]>(`/v1/transport/routes/${routeId}/students`);
-}
-
-export type StudentDto = {
-  id: string;
   admissionNo: string;
   firstName: string;
   lastName: string | null;
-  currentSectionLabel: string | null;
+  sectionLabel: string | null;
 };
 
-export function getStudent(id: string): Promise<StudentDto> {
-  return apiFetch<StudentDto>(`/v1/people/students/${id}`);
+export function studentsOnRoute(routeId: string): Promise<RouteRiderDto[]> {
+  return apiFetch<RouteRiderDto[]>(`/v1/transport/routes/${routeId}/students`);
 }

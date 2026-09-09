@@ -43,9 +43,27 @@ entries under **Done** below.
 
 ### Gaps opened by the authorization work
 
-- **`driver` holds school-wide `student.view`.** A driver needs the students on
-  their own route; this grants them the school. Needs a route-scoped student
-  read that transport does not have.
+- ~~**`driver` holds school-wide `student.view`.**~~ Fixed 2026-09-09. The
+  route roster is the route-scoped student read that was missing: it returns
+  the rider's name, admission number and section, so driver-app no longer walks
+  `/v1/people/students/{id}` per rider, `V029` revokes the grant, and
+  `RouteScope` narrows the roster to the routes the caller is rostered to drive
+  today. See GAP-31 below.
+- **RLS covers a table only if it carries `school_id`.** V009 (and the blocks
+  V021/V022/V025 copied from it) enable row-level security on every table that
+  has the column, so cross-school isolation inside a chain is the database's
+  job and not the handler's. A table without the column has no policy, and is
+  safe only while every read of it joins an RLS-covered parent.
+  `gps_ping` was the one that did not — `GET /v1/transport/vehicles/{id}/gps-pings`
+  read by vehicle id alone, so any staff or parent token (every guardian holds
+  `transport.track`) could follow any bus in the chain, another school's
+  included. Fixed 2026-09-09 by joining `vehicle`; pinned in `cert_SEC_04`,
+  which fails without the join. **The rest of that list is unaudited**:
+  `route_assignment`, `timetable_slot`, `section_subject_teacher`,
+  `staff_role`, `guardian_student`, `term`, `message`, `library_copy`,
+  `assessment_component`, `fee_invoice_line`, `quiz_question` and a dozen more
+  carry no `school_id`. Each is presumed reachable only through a parent that
+  is covered — presumed, not checked, one query at a time.
 - **Exam schedule reads do not filter unpublished.** `exam.view.own` lets a
   family read `/v1/exams/schedules` and the repository does not restrict to
   published. Pre-existing; the gate did not introduce it.
@@ -1295,7 +1313,7 @@ several are security-relevant.
 ### Security-relevant (P1 scenarios, no gap id previously)
 
 - **GAP-31 — Authorization stops at the school boundary.** ✅ **Closed
-  2026-09-09.** Two new scopes alongside `CampusScope` and `SelfScope`:
+  2026-09-09.** Three new scopes alongside `CampusScope` and `SelfScope`:
 
   - `iam/api/TeacherScope` confines a teacher to the sections they teach —
     `section_subject_teacher`, a currently-effective `timetable_slot`, or a
@@ -1330,8 +1348,24 @@ several are security-relevant.
   the vocabulary and the grants are unchanged, which is why `Perm` needed no
   new constant and `no_orphan_permissions` still passes.
 
-  Still open, and deliberately out of this pass: the `driver` over-grant below,
-  which needs a route-scoped student read `transport` does not have.
+  - `iam/api/RouteScope` closes the last of them: the `driver` over-grant. V026
+    granted `driver` school-wide `student.view` and said so in a comment,
+    because the route roster returned bare student ids and driver-app read
+    every rider back out of `/v1/people/students/{id}` — a school's whole
+    student directory, on a bus. The roster now returns `RouteRiderDto` (name,
+    admission number, section — what the check-in screen shows and nothing
+    else), the grant is revoked in `V029`, and the roster is narrowed to the
+    routes the caller is rostered to drive today. Confinement is derived from
+    grants like `TeacherScope`'s: `transport.drive` without `transport.manage`.
+    Read from `route_assignment` and never from `trip`, because trip start
+    names its own route — `POST /v1/transport/trips/start` is scoped too, or a
+    driver could mint a route by starting a trip on it and then reading its
+    roster. `transport.view` stays: picking a route and a vehicle at trip start
+    is not student data.
+
+    Certified by three cases in `RbacEnforcementTest`. The certification
+    fixture now seeds the driver as a staff account with a `driver.staff_id`
+    link, which is what a real driver login looks like.
 
 - **GAP-32 — Screen access is advisory.** `/v1/iam/me/screens` reports what the
   UI should show, but no endpoint checks it: a hand-crafted call to any module

@@ -1,0 +1,21 @@
+-- The driver over-grant, closed.
+--
+-- V026 gave `driver` school-wide `student.view` and said so in a comment: a
+-- driver needs the students on their own route, and that grant handed them the
+-- school. It was logged rather than papered over because the alternative that
+-- day was a broken check-in screen — the route roster returned student ids and
+-- nothing else, so driver-app read every rider back out of
+-- `/v1/people/students/{id}`, which needs `student.view`.
+--
+-- The roster now carries the name, admission number and section the check-in
+-- screen actually displays (`RouteRiderDto`), so the per-rider lookup is gone
+-- and the grant with it. `iam/api/RouteScope` narrows the roster to the routes
+-- the caller is rostered to drive today, the way `TeacherScope` narrows a
+-- teacher to their sections: confinement is derived from grants, so a caller
+-- holding `transport.drive` and not `transport.manage` is confined, and a
+-- school's custom driving role lands on the right side with no deploy.
+--
+-- `transport.view` stays. A driver picks a route and a vehicle at the start of
+-- a trip, and neither is student data.
+
+DELETE FROM role_perm WHERE role_code = 'driver' AND perm_code = 'student.view';

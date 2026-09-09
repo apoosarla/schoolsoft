@@ -1722,8 +1722,16 @@ export type StudentTransportDto = {
   endsOn: string | null;
 };
 
-export function studentsOnRoute(routeId: string): Promise<StudentTransportDto[]> {
-  return apiFetch<StudentTransportDto[]>(`/v1/transport/routes/${routeId}/students`);
+/** A rider as the route roster returns them: the assignment, plus the name. */
+export type RouteRiderDto = StudentTransportDto & {
+  admissionNo: string;
+  firstName: string;
+  lastName: string | null;
+  sectionLabel: string | null;
+};
+
+export function studentsOnRoute(routeId: string): Promise<RouteRiderDto[]> {
+  return apiFetch<RouteRiderDto[]>(`/v1/transport/routes/${routeId}/students`);
 }
 
 export function assignStudentTransport(req: {

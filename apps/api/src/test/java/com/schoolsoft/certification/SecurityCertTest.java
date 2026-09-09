@@ -65,6 +65,26 @@ class SecurityCertTest extends AbstractCertificationTest {
         assertThat(get("/v1/assessment?sectionId=" + cieSection, cbseToken).getBody()).isEmpty();
         assertThat(get("/v1/comms/announcements?schoolId=" + cie().id(), cbseToken).getBody()).isEmpty();
 
+        // The route-keyed transport reads are the same shape: the path names a
+        // route id and no school, so nothing above the database narrows them.
+        // RLS on the school_id-carrying tables is what makes the answer empty.
+        assertThat(get("/v1/transport/routes/" + cie().routeId() + "/students", cbseToken).getBody()).isEmpty();
+        assertThat(get("/v1/transport/routes/" + cie().routeId() + "/stops", cbseToken).getBody()).isEmpty();
+        assertThat(get("/v1/transport/vehicles?schoolId=" + cie().id(), cbseToken).getBody()).isEmpty();
+        assertThat(get("/v1/transport/trips?schoolId=" + cie().id(), cbseToken).getBody()).isEmpty();
+
+        // A bus's GPS trail is the one transport read the database cannot
+        // narrow on its own: `gps_ping` carries no school_id, so V009 gave it
+        // no policy, and every guardian holds `transport.track`. The read
+        // joins `vehicle` to borrow the policy that exists.
+        UUID cieVehicle = queryOne("SELECT id FROM vehicle WHERE school_id = ? LIMIT 1", UUID.class, cie().id());
+        inChainDo(jdbc -> jdbc.update(
+            "INSERT INTO gps_ping (vehicle_id, occurred_at, lat, lng) VALUES (?, now(), 17.44, 78.44)",
+            cieVehicle));
+        assertThat(get("/v1/transport/vehicles/" + cieVehicle + "/gps-pings", cbseToken).getBody()).isEmpty();
+        assertThat(get("/v1/transport/vehicles/" + cieVehicle + "/gps-pings", principalToken(cie())).getBody())
+            .isNotEmpty();
+
         // And the same reads succeed for the school that owns them.
         assertThat(get("/v1/people/students/" + cieStudent, principalToken(cie())).getStatusCode())
             .isEqualTo(HttpStatus.OK);

@@ -1,6 +1,7 @@
 package com.schoolsoft.transport.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import com.schoolsoft.iam.api.RouteScope;
 import com.schoolsoft.transport.internal.TransportRepository;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -16,7 +17,12 @@ import org.springframework.web.bind.annotation.*;
 public class TransportController {
 
     private final TransportRepository repo;
-    public TransportController(TransportRepository repo) { this.repo = repo; }
+    private final RouteScope routes;
+
+    public TransportController(TransportRepository repo, RouteScope routes) {
+        this.repo = repo;
+        this.routes = routes;
+    }
 
     // -------------------------- Vehicles --------------------------
 
@@ -92,13 +98,25 @@ public class TransportController {
         return repo.assignStudent(req.schoolId(), req.studentId(), req.routeId(), req.stopId(), req.startsOn());
     }
 
+    /**
+     * The route's riders, named. This is the route-scoped student read the
+     * driver role used to lack: the roster carries the three fields a check-in
+     * screen shows, so driver-app no longer walks
+     * {@code /v1/people/students/&#123;id&#125;} per rider and {@code driver}
+     * no longer holds school-wide {@code student.view} (V029).
+     *
+     * <p>{@code transport.drive} gets a driver through the gate;
+     * {@link RouteScope} decides whose bus. A driver rostered to no route today
+     * reads nothing, and the office ({@code transport.manage}) is unconfined.</p>
+     */
     @PreAuthorize("@perm.canAny('transport.view', 'transport.drive')")
     @GetMapping("/routes/{routeId}/students")
-    public List<StudentTransportDto> studentsOnRoute(
+    public List<RouteRiderDto> studentsOnRoute(
         @PathVariable UUID routeId,
         @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(
             iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate onDate
     ) {
+        routes.requireRoute(routeId);
         return repo.listStudentsOnRoute(routeId, onDate);
     }
 
@@ -145,9 +163,16 @@ public class TransportController {
 
     public record StartTripRequest(@NotNull UUID schoolId, @NotNull UUID routeId, @NotNull UUID vehicleId, @NotNull UUID driverId, @NotBlank String direction) {}
 
+    /**
+     * Scoped as well as gated: without {@link RouteScope} here a confined
+     * driver could name any route, start a trip on it, and read its roster
+     * through the trip — which is why the scope is derived from
+     * {@code route_assignment} and never from {@code trip}.
+     */
     @PreAuthorize("@perm.can('transport.drive')")
     @PostMapping("/trips/start")
     public TripDto startTrip(@RequestBody StartTripRequest req) {
+        routes.requireRoute(req.routeId());
         return repo.startTrip(req.schoolId(), req.routeId(), req.vehicleId(), req.driverId(), req.direction());
     }
 
@@ -180,6 +205,7 @@ public class TransportController {
     @PreAuthorize("@perm.can('transport.drive')")
     @PostMapping("/trips/{id}/checkin")
     public TripDto checkIn(@PathVariable UUID id, @RequestBody CheckInRequest req) {
+        routes.requireTrip(id);
         return repo.checkIn(id, req.studentId(), req.status());
     }
 

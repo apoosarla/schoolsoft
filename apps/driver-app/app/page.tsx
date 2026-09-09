@@ -7,21 +7,20 @@ import {
   DriverDto,
   endTrip,
   getSession,
-  getStudent,
   listRoutes,
   listVehicles,
   myDriverProfile,
   recordGpsPing,
+  RouteRiderDto,
   Session,
   startTrip,
-  StudentTransportDto,
   studentsOnRoute,
   TransportRouteDto,
   TripDto,
   VehicleDto,
 } from "@/lib/api";
 
-type RosterEntry = { studentId: string; name: string };
+type RosterEntry = { studentId: string; name: string; sectionLabel: string | null };
 
 const PING_INTERVAL_MS = 20000;
 
@@ -130,14 +129,14 @@ export default function HomePage() {
       }, 1000);
 
       studentsOnRoute(routeId)
-        .then(async (assignments: StudentTransportDto[]) => {
-          const withNames = await Promise.all(
-            assignments.map(async (a) => {
-              const s = await getStudent(a.studentId);
-              return { studentId: a.studentId, name: `${s.firstName} ${s.lastName ?? ""}`.trim() };
-            })
+        .then((riders: RouteRiderDto[]) => {
+          setRoster(
+            riders.map((r) => ({
+              studentId: r.studentId,
+              name: `${r.firstName} ${r.lastName ?? ""}`.trim(),
+              sectionLabel: r.sectionLabel,
+            }))
           );
-          setRoster(withNames);
         })
         .catch((err) => setError(describeError(err)));
     } catch (err) {
@@ -276,7 +275,9 @@ export default function HomePage() {
               >
                 <div>
                   <div>{r.name}</div>
-                  {state && <div className="list-row-sub">{state}</div>}
+                  <div className="list-row-sub">
+                    {[r.sectionLabel, state].filter(Boolean).join(" · ")}
+                  </div>
                 </div>
                 <div className="form-row" style={{ marginBottom: 0 }}>
                   <button
