@@ -1420,6 +1420,29 @@ several are security-relevant.
 
 ### Correctness
 
+- **A timetable revision rewrote history instead of superseding it.** ✅
+  **Closed 2026-09-09.** `timetable_slot` has carried
+  `effective_from`/`effective_to` since V004, and the date-keyed reads
+  (`/sections/{id}/day`, `/teachers/{id}/day`, `TeachingDuties.teachesOn`,
+  `TeacherScope`) already applied the window — but the *week* reads,
+  `TimetableRepository.forSection` and `forTeacher`, selected every row for the
+  section or teacher regardless of it. So a school that moved a period mid-year
+  had no way to file the change: creating the replacement left both slots in
+  the week, and the only way to remove the old one was `DELETE`, which takes
+  the period out of the weeks it was actually taught. `publishWarnings` counted
+  the same way, so a teacher's load included periods they had stopped teaching.
+
+  The window predicate is now one constant applied by every read, the week
+  reads take an optional `onDate` (default today — "the timetable" with no date
+  is not a thing a school has), and `POST /v1/timetable/slots/{id}/retire`
+  closes a slot from a named last day: one conditional UPDATE, idempotent on a
+  retry, refusing to *lengthen* a window because that puts a period back into a
+  week already taught. Retiring beside deleting is the distinction — DELETE is
+  for a slot authored by mistake, retire is for one the school has taught.
+  `V032` adds the `effective_to >= effective_from` check the table never had
+  and the two window indexes. Certified by `cert_TT_05`, previously disabled.
+  admin-web's timetable grid gained an "in force on" date and a Retire action.
+
 - **GAP-35 — Notification producers are unwired.** ✅ **Closed 2026-09-09
   (Phase 8).** Four write paths now send: a public enquiry is acknowledged to
   the applicant (ADM-01) and told the outcome (ADM-14), an absence reaches the

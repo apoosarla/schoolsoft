@@ -2,6 +2,7 @@ package com.schoolsoft.timetable.internal;
 
 import com.schoolsoft.enrolment.api.StudentSubjectDto;
 import com.schoolsoft.enrolment.api.SubjectSetResolver;
+import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.timetable.api.SectionDayDto;
@@ -57,12 +58,29 @@ public class TimetableRepository {
         "       t.period_no, t.starts_at, t.ends_at, t.room, t.effective_from, t.effective_to " +
         "FROM timetable_slot t JOIN subject sub ON sub.id = t.subject_id ";
 
-    public List<TimetableSlotDto> forSection(UUID sectionId) {
-        return jdbc.query(SELECT + "WHERE t.section_id = ? ORDER BY t.day_of_week, t.period_no", MAPPER, sectionId);
+    /**
+     * The window predicate, in one place. A slot is part of the timetable on a
+     * date; "the timetable" with no date is not a thing the school has, because
+     * a mid-year revision supersedes rather than replaces (TT-05). Takes the
+     * date twice.
+     */
+    private static final String IN_FORCE =
+        "  AND t.effective_from <= ? AND COALESCE(t.effective_to, 'infinity'::date) >= ? ";
+
+    /** The section's week as it stands on {@code onDate}, superseded slots excluded. */
+    public List<TimetableSlotDto> forSection(UUID sectionId, LocalDate onDate) {
+        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        return jdbc.query(
+            SELECT + "WHERE t.section_id = ? " + IN_FORCE + "ORDER BY t.day_of_week, t.period_no",
+            MAPPER, sectionId, Date.valueOf(date), Date.valueOf(date));
     }
 
-    public List<TimetableSlotDto> forTeacher(UUID teacherStaffId) {
-        return jdbc.query(SELECT + "WHERE t.teacher_staff_id = ? ORDER BY t.day_of_week, t.period_no", MAPPER, teacherStaffId);
+    /** The teacher's week as it stands on {@code onDate}. */
+    public List<TimetableSlotDto> forTeacher(UUID teacherStaffId, LocalDate onDate) {
+        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        return jdbc.query(
+            SELECT + "WHERE t.teacher_staff_id = ? " + IN_FORCE + "ORDER BY t.day_of_week, t.period_no",
+            MAPPER, teacherStaffId, Date.valueOf(date), Date.valueOf(date));
     }
 
     /**
@@ -82,7 +100,7 @@ public class TimetableRepository {
 
         var studied = subjectSets.forStudent(studentId, date).stream()
             .map(StudentSubjectDto::subjectId).collect(java.util.stream.Collectors.toSet());
-        return forSection(enrolments.get(0)).stream()
+        return forSection(enrolments.get(0), date).stream()
             .filter(slot -> studied.contains(slot.subjectId()))
             .toList();
     }
@@ -120,11 +138,8 @@ public class TimetableRepository {
                 List.of(), List.of(), true, papers);
         }
 
-        // A date is known here, so the slot's effective window is applied — the
-        // week view has no date to apply it with (TT-05 remains open).
         List<TimetableSlotDto> slots = jdbc.query(
-            SELECT + "WHERE t.section_id = ? AND t.day_of_week = ? " +
-            "  AND t.effective_from <= ? AND COALESCE(t.effective_to, 'infinity'::date) >= ? " +
+            SELECT + "WHERE t.section_id = ? AND t.day_of_week = ? " + IN_FORCE +
             "ORDER BY t.period_no",
             MAPPER, sectionId, date.getDayOfWeek().getValue(), Date.valueOf(date), Date.valueOf(date));
         return SectionDayDto.teaching(date, true, status.reason(), status.calendarKind(), slots,
@@ -153,8 +168,7 @@ public class TimetableRepository {
             .collect(java.util.stream.Collectors.toSet());
 
         List<TimetableSlotDto> own = jdbc.query(
-            SELECT + "WHERE t.teacher_staff_id = ? AND t.day_of_week = ? " +
-            "  AND t.effective_from <= ? AND COALESCE(t.effective_to, 'infinity'::date) >= ? " +
+            SELECT + "WHERE t.teacher_staff_id = ? AND t.day_of_week = ? " + IN_FORCE +
             "ORDER BY t.period_no",
             MAPPER, teacherStaffId, date.getDayOfWeek().getValue(),
             Date.valueOf(date), Date.valueOf(date)).stream()
@@ -259,28 +273,76 @@ public class TimetableRepository {
      * school publishes an imperfect timetable on purpose in week one; it should
      * do so knowing what is wrong with it.
      */
-    public List<String> publishWarnings(UUID sectionId) {
+    public List<String> publishWarnings(UUID sectionId, LocalDate onDate) {
+        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        Date d = Date.valueOf(date);
         List<String> warnings = new java.util.ArrayList<>();
 
+        // A teacher's load is the load they carry on the date being published,
+        // not every period they have ever been timetabled for: a slot the
+        // revision superseded is somebody else's problem now.
         warnings.addAll(jdbc.query(
             "SELECT (st.first_name || ' ' || COALESCE(st.last_name, '')) AS name, " +
             "       st.max_weekly_periods AS ceiling, count(*) AS load " +
             "FROM timetable_slot t JOIN staff st ON st.id = t.teacher_staff_id " +
-            "WHERE st.max_weekly_periods IS NOT NULL " +
-            "  AND st.id IN (SELECT teacher_staff_id FROM timetable_slot WHERE section_id = ?) " +
+            "WHERE st.max_weekly_periods IS NOT NULL " + IN_FORCE +
+            "  AND st.id IN (SELECT teacher_staff_id FROM timetable_slot l WHERE l.section_id = ? " +
+            "                  AND l.effective_from <= ? " +
+            "                  AND COALESCE(l.effective_to, 'infinity'::date) >= ?) " +
             "GROUP BY st.id, st.first_name, st.last_name, st.max_weekly_periods " +
             "HAVING count(*) > st.max_weekly_periods",
             (rs, i) -> rs.getString("name").trim() + " is timetabled for " + rs.getInt("load")
                 + " periods a week, over their maximum of " + rs.getInt("ceiling"),
-            sectionId));
+            d, d, sectionId, d, d));
 
         Integer unroomed = jdbc.queryForObject(
-            "SELECT count(*) FROM timetable_slot WHERE section_id = ? AND (room IS NULL OR room = '')",
-            Integer.class, sectionId);
+            "SELECT count(*) FROM timetable_slot t WHERE t.section_id = ? AND (t.room IS NULL OR t.room = '') "
+                + IN_FORCE,
+            Integer.class, sectionId, d, d);
         if (unroomed != null && unroomed > 0) {
             warnings.add(unroomed + " slot(s) have no room assigned");
         }
         return warnings;
+    }
+
+    /**
+     * Retires a slot from the end of {@code lastDay} — the supersession half of
+     * a mid-year revision (TT-05). The slot keeps existing, so the attendance,
+     * lesson plans and cover already hung off it still resolve; it simply stops
+     * being part of the timetable from the day after. The replacement is an
+     * ordinary {@code createSlot} with {@code effectiveFrom = lastDay + 1},
+     * which the clash checks then let through because the windows do not meet.
+     *
+     * <p>One conditional UPDATE naming the window it moves out of: a slot may
+     * only have its window shortened, never lengthened, because lengthening one
+     * puts a period back into a week that has already been taught. Re-running
+     * the same retirement is not an error.
+     */
+    public TimetableSlotDto retireSlot(UUID id, LocalDate lastDay) {
+        var current = jdbc.query(
+            "SELECT effective_from, effective_to FROM timetable_slot WHERE id = ?",
+            (rs, i) -> new LocalDate[]{
+                rs.getDate("effective_from").toLocalDate(),
+                rs.getDate("effective_to") == null ? null : rs.getDate("effective_to").toLocalDate()
+            },
+            id);
+        if (current.isEmpty()) throw new NotFoundException("Timetable slot not found: " + id);
+        if (lastDay.isBefore(current.get(0)[0])) {
+            throw new IllegalArgumentException(
+                "A slot cannot be retired before it starts (it runs from " + current.get(0)[0]
+                    + "); delete it instead");
+        }
+
+        int rows = jdbc.update(
+            "UPDATE timetable_slot SET effective_to = ? " +
+            "WHERE id = ? AND COALESCE(effective_to, 'infinity'::date) >= ?",
+            Date.valueOf(lastDay), id, Date.valueOf(lastDay));
+        if (rows == 0) {
+            throw new ConflictException(
+                "That slot already stopped running on " + current.get(0)[1]
+                    + "; a window can be shortened but not lengthened");
+        }
+        return jdbc.queryForObject(SELECT + "WHERE t.id = ?", MAPPER, id);
     }
 
     public void deleteSlot(UUID id) {

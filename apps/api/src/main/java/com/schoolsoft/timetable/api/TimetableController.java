@@ -33,11 +33,21 @@ public class TimetableController {
         this.selfScope = selfScope;
     }
 
+    /**
+     * The section's week as it stands on {@code onDate}, which defaults to
+     * today. A mid-year revision supersedes rather than overwrites, so slots
+     * that have been retired stay readable at the date they ran — and next
+     * term's grid is read by asking for a date in next term (TT-05).
+     */
     @PreAuthorize("@perm.canAnyOf('timetable.view', 'timetable.view.own')")
     @GetMapping("/sections/{sectionId}")
-    public List<TimetableSlotDto> forSection(@PathVariable UUID sectionId) {
+    public List<TimetableSlotDto> forSection(
+        @PathVariable UUID sectionId,
+        @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate onDate
+    ) {
         selfScope.requireSection(sectionId, Perm.TIMETABLE_VIEW);
-        return repo.forSection(sectionId);
+        return repo.forSection(sectionId, onDate);
     }
 
     /** One date's periods, or the reason the school is closed that day (CAL-03). */
@@ -64,10 +74,15 @@ public class TimetableController {
         return repo.forStudent(studentId, onDate);
     }
 
+    /** The teacher's week as it stands on {@code onDate}, defaulting to today. */
     @PreAuthorize("@perm.can('timetable.view')")
     @GetMapping("/teachers/{teacherStaffId}")
-    public List<TimetableSlotDto> forTeacher(@PathVariable UUID teacherStaffId) {
-        return repo.forTeacher(teacherStaffId);
+    public List<TimetableSlotDto> forTeacher(
+        @PathVariable UUID teacherStaffId,
+        @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate onDate
+    ) {
+        return repo.forTeacher(teacherStaffId, onDate);
     }
 
     /** A teacher's day including cover taken and cover given away (TT-08). */
@@ -179,12 +194,30 @@ public class TimetableController {
             req.gradeIds());
     }
 
-    /** Warnings a section's timetable carries at publish time (TT-04). */
+    /** Warnings a section's timetable carries at publish time (TT-04), as of a date. */
     @PreAuthorize("@perm.can('timetable.manage')")
     @GetMapping("/sections/{sectionId}/publish-warnings")
-    public Map<String, Object> publishWarnings(@PathVariable UUID sectionId) {
-        List<String> warnings = repo.publishWarnings(sectionId);
+    public Map<String, Object> publishWarnings(
+        @PathVariable UUID sectionId,
+        @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate onDate
+    ) {
+        List<String> warnings = repo.publishWarnings(sectionId, onDate);
         return Map.of("sectionId", sectionId, "warnings", warnings, "publishable", true);
+    }
+
+    public record RetireSlotRequest(@NotNull LocalDate lastDay) {}
+
+    /**
+     * Stops a slot running after {@code lastDay} without deleting it, which is
+     * how a mid-year revision is filed: retire the old slot, then create its
+     * replacement from the following day. DELETE is for a slot authored by
+     * mistake; this is for one the school has actually taught (TT-05).
+     */
+    @PreAuthorize("@perm.can('timetable.manage')")
+    @PostMapping("/slots/{id}/retire")
+    public TimetableSlotDto retireSlot(@PathVariable UUID id, @RequestBody RetireSlotRequest req) {
+        return repo.retireSlot(id, req.lastDay());
     }
 
     @PreAuthorize("@perm.can('timetable.manage')")

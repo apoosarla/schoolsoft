@@ -507,8 +507,15 @@ export type TimetableSlotDto = {
   effectiveTo: string | null;
 };
 
-export function timetableForSection(sectionId: string): Promise<TimetableSlotDto[]> {
-  return apiFetch<TimetableSlotDto[]>(`/v1/timetable/sections/${sectionId}`);
+/**
+ * The section's week as it stands on `onDate` (default: today). A revision
+ * supersedes rather than overwrites, so the grid for next term is read by
+ * asking for a date in next term, and last term's grid still comes back at
+ * last term's dates.
+ */
+export function timetableForSection(sectionId: string, onDate?: string): Promise<TimetableSlotDto[]> {
+  const q = onDate ? `?onDate=${onDate}` : "";
+  return apiFetch<TimetableSlotDto[]>(`/v1/timetable/sections/${sectionId}${q}`);
 }
 
 /**
@@ -536,6 +543,18 @@ export function createTimetableSlot(req: {
 
 export function deleteTimetableSlot(id: string): Promise<void> {
   return apiFetch<void>(`/v1/timetable/slots/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Stops a slot running after `lastDay` instead of deleting it, so the
+ * attendance and lesson plans already hung off it keep resolving. Delete is
+ * for a slot authored by mistake; this is for one the school has taught.
+ */
+export function retireTimetableSlot(id: string, lastDay: string): Promise<TimetableSlotDto> {
+  return apiFetch<TimetableSlotDto>(`/v1/timetable/slots/${id}/retire`, {
+    method: "POST",
+    body: JSON.stringify({ lastDay }),
+  });
 }
 
 export const ASSESSMENT_STATUSES = [
@@ -2002,10 +2021,12 @@ export function createBellSchedule(req: {
 
 /** Room clashes and teachers over their weekly load — advisory, not a block. */
 export function timetablePublishWarnings(
-  sectionId: string
+  sectionId: string,
+  onDate?: string
 ): Promise<{ sectionId: string; warnings: string[]; publishable: boolean }> {
+  const q = onDate ? `?onDate=${onDate}` : "";
   return apiFetch<{ sectionId: string; warnings: string[]; publishable: boolean }>(
-    `/v1/timetable/sections/${sectionId}/publish-warnings`
+    `/v1/timetable/sections/${sectionId}/publish-warnings${q}`
   );
 }
 

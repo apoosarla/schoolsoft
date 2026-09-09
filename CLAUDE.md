@@ -268,6 +268,16 @@ Worth knowing before trusting a green build:
   `status = 'active'` cannot say that, which is why eighteen copies of it became
   one predicate. A new read that filters students embeds `activeOn(alias)`; one
   that asks about a single child calls `isActiveOn`.
+- **"What is on the timetable?" is a question about a date.** A
+  `timetable_slot` carries `effective_from`/`effective_to`, and every read
+  applies the window — `TimetableRepository.IN_FORCE` is the one copy of the
+  predicate. A mid-year revision retires the old slot from a last day
+  (`POST /v1/timetable/slots/{id}/retire`) and creates its replacement from the
+  next; the row is never deleted, so the attendance and lesson plans already
+  hung off it still resolve. A window may be shortened, never lengthened —
+  lengthening puts a period back into a week that has already been taught.
+  `DELETE` is for a slot authored by mistake, before anyone taught it.
+
 - **A certificate is frozen at issue, and the freeze is byte-exact.**
   `certificate.payload` is `json`, not `jsonb`, because jsonb normalises key
   order and `payload_hash` is over bytes — verification re-hashes the stored

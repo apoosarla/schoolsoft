@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.schoolsoft.certification.support.AbstractCertificationTest;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.HashSet;
@@ -159,7 +160,12 @@ class TimetableCertTest extends AbstractCertificationTest {
         UUID sectionId = currentFocusSection(cbse());
         UUID teacherId = cbse().teacherStaffIds().get(0);
 
-        long load = count("SELECT count(*) FROM timetable_slot WHERE teacher_staff_id = ?", teacherId);
+        // The load the warning is about is the load in force today, not every
+        // period the teacher has ever been timetabled for (TT-05).
+        long load = count(
+            "SELECT count(*) FROM timetable_slot WHERE teacher_staff_id = ? "
+                + "AND effective_from <= current_date "
+                + "AND COALESCE(effective_to, 'infinity'::date) >= current_date", teacherId);
         assertThat(load).isGreaterThan(0);
 
         // A ceiling the existing timetable already breaches.
@@ -183,10 +189,144 @@ class TimetableCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("Slots carry effective_from/effective_to, but every read ignores them: "
-        + "TimetableRepository.forSection/forTeacher select all rows for the section, so a revision "
-        + "rewrites history instead of superseding it from a date. New gap found in Phase 0.")
     void cert_TT_05_midYearRevisionResolvesAgainstTheTimetableInForceOnADate() {
+        String token = principalToken(cbse());
+        UUID sectionId = currentFocusSection(cbse());
+        LocalDate ranFrom = cbse().currentAy().startsOn();
+        LocalDate revisedOn = ranFrom.plusMonths(2);
+        LocalDate lastDayOfTheOldSlot = revisedOn.minusDays(1);
+        LocalDate whileTheOldOneRan = ranFrom.plusDays(7);
+
+        UUID outgoingTeacher = cbse().teacherStaffIds().get(2);
+        UUID incomingTeacher = cbse().teacherStaffIds().get(3);
+
+        // Monday period 9 at 16:00 — after the fixture's grid, which runs
+        // periods 1..6 between 09:00 and 14:45, so the revision collides with
+        // nothing.
+        var outgoing = post("/v1/timetable/slots", body(
+            "sectionId", sectionId, "subjectId", subjectOf(cbse(), cbse().subjectCodes().get(0)),
+            "teacherStaffId", outgoingTeacher, "dayOfWeek", 1, "periodNo", 9,
+            "startsAt", "16:00:00", "endsAt", "16:45:00", "room", "TT05-OLD",
+            "effectiveFrom", ranFrom.toString()), token);
+        assertThat(outgoing.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID outgoingSlot = UUID.fromString(outgoing.getBody().get("id").asText());
+
+        try {
+            // The revision: the old slot stops after a named last day, and its
+            // replacement starts the next. Neither is a delete.
+            var retired = post("/v1/timetable/slots/" + outgoingSlot + "/retire",
+                body("lastDay", lastDayOfTheOldSlot.toString()), token);
+            assertThat(retired.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(retired.getBody().get("effectiveTo").asText())
+                .isEqualTo(lastDayOfTheOldSlot.toString());
+
+            var incoming = post("/v1/timetable/slots", body(
+                "sectionId", sectionId, "subjectId", subjectOf(cbse(), cbse().subjectCodes().get(1)),
+                "teacherStaffId", incomingTeacher, "dayOfWeek", 1, "periodNo", 9,
+                "startsAt", "16:00:00", "endsAt", "16:45:00", "room", "TT05-NEW",
+                "effectiveFrom", revisedOn.toString()), token);
+            assertThat(incoming.getStatusCode()).isEqualTo(HttpStatus.OK);
+            UUID incomingSlot = UUID.fromString(incoming.getBody().get("id").asText());
+
+            // The section's week is a question about a date. Before the
+            // revision it answers with the slot that was actually taught.
+            assertThat(sectionSlotIds(sectionId, whileTheOldOneRan, token))
+                .contains(outgoingSlot).doesNotContain(incomingSlot);
+            assertThat(sectionSlotIds(sectionId, lastDayOfTheOldSlot, token))
+                .contains(outgoingSlot).doesNotContain(incomingSlot);
+            assertThat(sectionSlotIds(sectionId, revisedOn, token))
+                .contains(incomingSlot).doesNotContain(outgoingSlot);
+
+            // And so is a teacher's. The outgoing teacher keeps the period in
+            // the weeks they taught it and loses it from the changeover.
+            assertThat(teacherSlotIds(outgoingTeacher, whileTheOldOneRan, token)).contains(outgoingSlot);
+            assertThat(teacherSlotIds(outgoingTeacher, revisedOn, token)).doesNotContain(outgoingSlot);
+            assertThat(teacherSlotIds(incomingTeacher, whileTheOldOneRan, token)).doesNotContain(incomingSlot);
+            assertThat(teacherSlotIds(incomingTeacher, revisedOn, token)).contains(incomingSlot);
+
+            // The day view agrees with the week: a teaching Monday in each half
+            // shows the slot that was in force on it. The calendar decides
+            // which Mondays those are, so they are looked up rather than
+            // assumed.
+            LocalDate oldMonday = teachingMondayOnOrAfter(sectionId, whileTheOldOneRan, token);
+            LocalDate newMonday = teachingMondayOnOrAfter(sectionId, revisedOn, token);
+            assertThat(oldMonday).as("a teaching Monday while the old slot ran").isNotNull();
+            assertThat(newMonday).as("a teaching Monday after the revision").isNotNull();
+            assertThat(daySlotIds(sectionId, oldMonday, token))
+                .contains(outgoingSlot).doesNotContain(incomingSlot);
+            assertThat(daySlotIds(sectionId, newMonday, token))
+                .contains(incomingSlot).doesNotContain(outgoingSlot);
+
+            // Nothing was deleted: both rows are still there, which is what
+            // lets an attendance record taken in April still name the period
+            // that was on the timetable in April.
+            assertThat(count("SELECT count(*) FROM timetable_slot WHERE id IN (?, ?)",
+                outgoingSlot, incomingSlot)).isEqualTo(2);
+
+            // Omitting the date asks about today, and says so consistently.
+            Set<UUID> defaulted = new HashSet<>();
+            get("/v1/timetable/sections/" + sectionId, token).getBody()
+                .forEach(slot -> defaulted.add(UUID.fromString(slot.get("id").asText())));
+            assertThat(defaulted).isEqualTo(
+                sectionSlotIds(sectionId, LocalDate.now(), token));
+
+            // Filing the same retirement twice is not an error — a retry must
+            // not fail because the first attempt worked.
+            assertThat(post("/v1/timetable/slots/" + outgoingSlot + "/retire",
+                body("lastDay", lastDayOfTheOldSlot.toString()), token).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+            // Putting the period back into a week that has already been taught
+            // is refused: a window shortens, it does not grow.
+            var lengthened = post("/v1/timetable/slots/" + outgoingSlot + "/retire",
+                body("lastDay", revisedOn.plusMonths(1).toString()), token);
+            assertThat(lengthened.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+            // Retiring a slot before it ever started is a delete, not a
+            // revision, and is refused as one.
+            var beforeItStarted = post("/v1/timetable/slots/" + incomingSlot + "/retire",
+                body("lastDay", ranFrom.minusDays(1).toString()), token);
+            assertThat(beforeItStarted.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(beforeItStarted.getBody().get("message").asText()).contains("before it starts");
+        } finally {
+            inChainDo(jdbc -> jdbc.update("DELETE FROM timetable_slot WHERE room LIKE 'TT05-%'"));
+        }
+    }
+
+    private Set<UUID> sectionSlotIds(UUID sectionId, LocalDate onDate, String token) {
+        Set<UUID> ids = new HashSet<>();
+        get("/v1/timetable/sections/" + sectionId + "?onDate=" + onDate, token).getBody()
+            .forEach(slot -> ids.add(UUID.fromString(slot.get("id").asText())));
+        return ids;
+    }
+
+    private Set<UUID> teacherSlotIds(UUID staffId, LocalDate onDate, String token) {
+        Set<UUID> ids = new HashSet<>();
+        get("/v1/timetable/teachers/" + staffId + "?onDate=" + onDate, token).getBody()
+            .forEach(slot -> ids.add(UUID.fromString(slot.get("id").asText())));
+        return ids;
+    }
+
+    private Set<UUID> daySlotIds(UUID sectionId, LocalDate date, String token) {
+        Set<UUID> ids = new HashSet<>();
+        get("/v1/timetable/sections/" + sectionId + "/day?date=" + date, token)
+            .getBody().get("slots").forEach(slot -> ids.add(UUID.fromString(slot.get("id").asText())));
+        return ids;
+    }
+
+    /**
+     * The first Monday from {@code from} that the section actually teaches on —
+     * not a holiday, not an exam day. Eight weeks is more than the fixture's
+     * calendar can be closed for.
+     */
+    private LocalDate teachingMondayOnOrAfter(UUID sectionId, LocalDate from, String token) {
+        LocalDate d = from;
+        while (d.getDayOfWeek().getValue() != 1) d = d.plusDays(1);
+        for (int week = 0; week < 8; week++, d = d.plusWeeks(1)) {
+            JsonNode day = get("/v1/timetable/sections/" + sectionId + "/day?date=" + d, token).getBody();
+            if (day.get("working").asBoolean() && !day.get("examDay").asBoolean()) return d;
+        }
+        return null;
     }
 
     @Test @Tag("P1")

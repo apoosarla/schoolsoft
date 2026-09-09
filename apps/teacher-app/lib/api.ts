@@ -137,8 +137,13 @@ export type TimetableSlotDto = {
   effectiveTo: string | null;
 };
 
-export function timetableForTeacher(teacherStaffId: string): Promise<TimetableSlotDto[]> {
-  return apiFetch<TimetableSlotDto[]>(`/v1/timetable/teachers/${teacherStaffId}`);
+/** The teacher's week as it stands on `onDate` (default: today). */
+export function timetableForTeacher(
+  teacherStaffId: string,
+  onDate?: string
+): Promise<TimetableSlotDto[]> {
+  const q = onDate ? `?onDate=${onDate}` : "";
+  return apiFetch<TimetableSlotDto[]>(`/v1/timetable/teachers/${teacherStaffId}${q}`);
 }
 
 export type TimetableCoverDto = {

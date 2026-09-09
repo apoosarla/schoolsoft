@@ -13,6 +13,7 @@ import {
   listSections,
   listStaff,
   listSubjects,
+  retireTimetableSlot,
   SectionDayDto,
   sectionDay,
   SectionDto,
@@ -58,6 +59,12 @@ export default function TimetablePage() {
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // The week is a question about a date: a revision supersedes rather than
+  // overwrites, so "the timetable" without one is not a thing the school has.
+  const [asOf, setAsOf] = useState(todayIso());
+  const [retiringId, setRetiringId] = useState<string | null>(null);
+  const [retireDate, setRetireDate] = useState(todayIso());
+  const [retiring, setRetiring] = useState(false);
   const [dayDate, setDayDate] = useState(todayIso());
   const [day, setDay] = useState<SectionDayDto | null>(null);
   const [bell, setBell] = useState<BellScheduleDto | null>(null);
@@ -85,24 +92,25 @@ export default function TimetablePage() {
       .catch((err) => setError(describeError(err)));
   }, [router]);
 
-  function refresh(id: string) {
+  function refresh(id: string, onDate: string) {
     setLoading(true);
     setError(null);
-    timetableForSection(id)
+    timetableForSection(id, onDate)
       .then(setSlots)
       .catch((err) => setError(describeError(err)))
       .finally(() => setLoading(false));
     // Room clashes and teachers over their weekly load: advisory at publish
     // time, so they are shown beside the grid rather than blocking an edit.
-    timetablePublishWarnings(id)
+    // Both are about the load carried on the date being published.
+    timetablePublishWarnings(id, onDate)
       .then((w) => setWarnings(w.warnings))
       .catch(() => setWarnings(null));
   }
 
   useEffect(() => {
     if (!sectionId) return;
-    refresh(sectionId);
-  }, [sectionId]);
+    refresh(sectionId, asOf);
+  }, [sectionId, asOf]);
 
   useEffect(() => {
     if (!sectionId) return;
@@ -147,7 +155,7 @@ export default function TimetablePage() {
         effectiveTo: form.effectiveTo || undefined,
       });
       setShowForm(false);
-      refresh(sectionId);
+      refresh(sectionId, asOf);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -160,11 +168,25 @@ export default function TimetablePage() {
     setError(null);
     try {
       await deleteTimetableSlot(id);
-      refresh(sectionId);
+      refresh(sectionId, asOf);
     } catch (err) {
       setError(describeError(err));
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function onRetire(id: string) {
+    setRetiring(true);
+    setError(null);
+    try {
+      await retireTimetableSlot(id, retireDate);
+      setRetiringId(null);
+      refresh(sectionId, asOf);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setRetiring(false);
     }
   }
 
@@ -187,7 +209,16 @@ export default function TimetablePage() {
               </option>
             ))}
           </select>
+          <label className="hint" htmlFor="as-of">
+            in force on
+          </label>
+          <input id="as-of" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
         </div>
+        <p className="hint">
+          A revision supersedes rather than overwrites: a slot is retired from a last day and its
+          replacement starts the next, so last term&rsquo;s grid still reads back at last term&rsquo;s
+          dates. Move this date to see the week that was — or the one that will be.
+        </p>
 
         {showForm && (
           <div className="form-row" style={{ flexWrap: "wrap" }}>
@@ -288,7 +319,9 @@ export default function TimetablePage() {
             </ul>
           </div>
         )}
-        {slots && slots.length === 0 && <p className="hint">No timetable slots for this section yet.</p>}
+        {slots && slots.length === 0 && (
+          <p className="hint">Nothing was on this section&rsquo;s timetable on {asOf}.</p>
+        )}
 
         {slots && slots.length > 0 && (
           <table>
@@ -300,6 +333,7 @@ export default function TimetablePage() {
                 <th>Subject</th>
                 <th>Teacher</th>
                 <th>Room</th>
+                <th>In force</th>
                 <th></th>
               </tr>
             </thead>
@@ -320,9 +354,41 @@ export default function TimetablePage() {
                       <td>{teacher ? `${teacher.firstName} ${teacher.lastName ?? ""}` : "—"}</td>
                       <td>{slot.room ?? "—"}</td>
                       <td>
-                        <button type="button" onClick={() => onDelete(slot.id)} disabled={deletingId === slot.id}>
-                          {deletingId === slot.id ? "…" : "Delete"}
-                        </button>
+                        {slot.effectiveFrom}
+                        {slot.effectiveTo ? ` – ${slot.effectiveTo}` : " –"}
+                      </td>
+                      <td>
+                        {retiringId === slot.id ? (
+                          <span className="form-row" style={{ margin: 0 }}>
+                            <input
+                              type="date"
+                              value={retireDate}
+                              min={slot.effectiveFrom}
+                              onChange={(e) => setRetireDate(e.target.value)}
+                            />
+                            <button type="button" onClick={() => onRetire(slot.id)} disabled={retiring}>
+                              {retiring ? "…" : "Last day"}
+                            </button>
+                            <button type="button" onClick={() => setRetiringId(null)} disabled={retiring}>
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRetiringId(slot.id);
+                                setRetireDate(slot.effectiveTo ?? todayIso());
+                              }}
+                            >
+                              Retire
+                            </button>{" "}
+                            <button type="button" onClick={() => onDelete(slot.id)} disabled={deletingId === slot.id}>
+                              {deletingId === slot.id ? "…" : "Delete"}
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   );

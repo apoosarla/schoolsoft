@@ -220,6 +220,14 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             "academicYearId", cbse().currentAy().id(),
             "cycleLabel", "should-never-run"), teacher).getStatusCode())
             .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Reading the timetable is a teacher's job; revising it is not. Retiring
+        // a slot is a timetable.manage write behind an ordinary-looking POST.
+        UUID anySlot = queryOne("SELECT id FROM timetable_slot WHERE section_id = ? LIMIT 1",
+            UUID.class, currentFocusSection(cbse()));
+        assertThat(post("/v1/timetable/slots/" + anySlot + "/retire",
+            body("lastDay", cbse().currentAy().startsOn().plusMonths(1).toString()), teacher)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     // ===================== the principals that hold no role row =====================
