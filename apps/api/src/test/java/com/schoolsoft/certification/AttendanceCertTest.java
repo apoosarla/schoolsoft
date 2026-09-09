@@ -64,10 +64,66 @@ class AttendanceCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("No producer raises an absence event: nothing calls DomainEvents or NotificationService from "
-        + "the attendance path, so no parent notification is dispatched and the duplicate-suppression rule "
-        + "has nothing to suppress. New gap found in Phase 0.")
     void cert_ATT_03_absenceNotifiesTheParentWithoutDuplicating() {
+        String token = teacherToken(cbse(), 0);
+        UUID sectionId = currentFocusSection(cbse());
+        // A student and a day no other scenario marks, so the register is this
+        // test's alone and the dispatch count means what it says.
+        UUID studentId = studentsIn(sectionId).get(8);
+        String onDate = "2026-08-11";
+        String dedupeKey = "attendance:absent:" + studentId + ":" + onDate;
+
+        long recipients = count("SELECT count(*) FROM guardian_student gs JOIN guardian g "
+            + "ON g.id = gs.guardian_id WHERE gs.student_id = ? AND gs.is_communications_recipient "
+            + "AND g.opt_in_email AND g.email IS NOT NULL", studentId);
+        assertThat(recipients).isGreaterThan(0);
+
+        // A child who is present is not news.
+        assertThat(markStatus(token, sectionId, studentId, onDate, "present").getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(absenceDispatches(dedupeKey)).isZero();
+
+        // The correction to absent is, and it goes out on the spot rather than
+        // in a nightly batch: a parent who is told at 16:00 learns nothing.
+        java.time.Instant beforeMark = java.time.Instant.now();
+        assertThat(markStatus(token, sectionId, studentId, onDate, "absent").getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(absenceDispatches(dedupeKey)).isEqualTo(recipients);
+
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE dedupe_key = ? "
+            + "AND status = 'sent' AND sent_at IS NOT NULL", dedupeKey)).isEqualTo(recipients);
+        long slowest = count("SELECT coalesce(max(extract(epoch FROM (sent_at - ?::timestamptz)) * 1000), 0)::bigint "
+            + "FROM notification_dispatch WHERE dedupe_key = ?", java.sql.Timestamp.from(beforeMark), dedupeKey);
+        assertThat(slowest).isLessThan(30_000);
+
+        assertThat(queryOne("SELECT template_code FROM notification_dispatch WHERE dedupe_key = ? LIMIT 1",
+            String.class, dedupeKey)).isEqualTo("attendance_absent");
+        assertThat(queryOne("SELECT variables::text FROM notification_dispatch WHERE dedupe_key = ? LIMIT 1",
+            String.class, dedupeKey)).contains(onDate);
+
+        // Correcting it back and forth is one absence as far as the family is
+        // concerned. The suppression is on the event, not on the write, so a
+        // re-saved register sends nothing however it moved in between.
+        markStatus(token, sectionId, studentId, onDate, "present");
+        markStatus(token, sectionId, studentId, onDate, "absent");
+        markStatus(token, sectionId, studentId, onDate, "absent");
+        assertThat(absenceDispatches(dedupeKey)).isEqualTo(recipients);
+
+        // A different day is a different absence, and does get its own message.
+        String nextDay = "2026-08-12";
+        markStatus(token, sectionId, studentId, nextDay, "absent");
+        assertThat(absenceDispatches("attendance:absent:" + studentId + ":" + nextDay)).isEqualTo(recipients);
+    }
+
+    private org.springframework.http.ResponseEntity<com.fasterxml.jackson.databind.JsonNode> markStatus(
+            String token, UUID sectionId, UUID studentId, String onDate, String status) {
+        return post("/v1/attendance/mark", body("schoolId", cbse().id(), "studentId", studentId,
+            "sectionId", sectionId, "onDate", onDate, "status", status,
+            "markedByStaffId", cbse().teacherStaffIds().get(0)), token);
+    }
+
+    private long absenceDispatches(String dedupeKey) {
+        return count("SELECT count(*) FROM notification_dispatch WHERE dedupe_key = ?", dedupeKey);
     }
 
     @Test @Tag("P1")

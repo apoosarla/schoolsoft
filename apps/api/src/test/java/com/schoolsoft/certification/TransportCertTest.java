@@ -47,10 +47,80 @@ class TransportCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("A trip can be started, checked into and ended, but boarding and alighting raise no parent "
-        + "notification: nothing calls NotificationService from the transport path. New gap found in "
-        + "Phase 0.")
     void cert_TRN_03_tripCheckInsNotifyParentsOnBoardingAndAlighting() {
+        String driver = driverToken(cbse());
+        UUID routeId = queryOne("SELECT id FROM transport_route WHERE school_id = ? AND code = 'R1'",
+            UUID.class, cbse().id());
+        UUID vehicleId = queryOne("SELECT vehicle_id FROM route_assignment WHERE route_id = ?",
+            UUID.class, routeId);
+        UUID driverId = queryOne("SELECT driver_id FROM route_assignment WHERE route_id = ?",
+            UUID.class, routeId);
+        UUID studentId = queryOne(
+            "SELECT student_id FROM student_transport WHERE route_id = ? ORDER BY student_id LIMIT 1",
+            UUID.class, routeId);
+
+        long recipients = count("SELECT count(*) FROM guardian_student gs JOIN guardian g "
+            + "ON g.id = gs.guardian_id WHERE gs.student_id = ? AND gs.is_communications_recipient "
+            + "AND g.opt_in_email AND g.email IS NOT NULL", studentId);
+        assertThat(recipients).isGreaterThan(0);
+
+        var trip = post("/v1/transport/trips/start", body(
+            "schoolId", cbse().id(), "routeId", routeId, "vehicleId", vehicleId,
+            "driverId", driverId, "direction", "pickup"), driver);
+        assertThat(trip.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID tripId = UUID.fromString(trip.getBody().get("id").asText());
+
+        // Starting the trip tells nobody: the parent cares that the child is on
+        // the bus, not that the bus left.
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE related_type = 'trip' "
+            + "AND related_id = ?", tripId)).isZero();
+
+        String boardedKey = "trip:" + tripId + ":" + studentId + ":boarded";
+        var boarded = post("/v1/transport/trips/" + tripId + "/checkin",
+            Map.of("studentId", studentId, "status", "boarded"), driver);
+        assertThat(boarded.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(boarded.getBody().get("manifest").get(studentId.toString()).get("status").asText())
+            .isEqualTo("boarded");
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE dedupe_key = ?", boardedKey))
+            .isEqualTo(recipients);
+        assertThat(queryOne("SELECT template_code FROM notification_dispatch WHERE dedupe_key = ? LIMIT 1",
+            String.class, boardedKey)).isEqualTo("transport_boarded");
+        assertThat(queryOne("SELECT variables::text FROM notification_dispatch WHERE dedupe_key = ? LIMIT 1",
+            String.class, boardedKey)).contains("Route 1");
+
+        // A driver on a patchy connection taps twice. That is one boarding.
+        post("/v1/transport/trips/" + tripId + "/checkin",
+            Map.of("studentId", studentId, "status", "boarded"), driver);
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE dedupe_key = ?", boardedKey))
+            .isEqualTo(recipients);
+
+        // Getting off is its own event, and gets its own message.
+        String droppedKey = "trip:" + tripId + ":" + studentId + ":dropped";
+        var dropped = post("/v1/transport/trips/" + tripId + "/checkin",
+            Map.of("studentId", studentId, "status", "dropped"), driver);
+        assertThat(dropped.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE dedupe_key = ?", droppedKey))
+            .isEqualTo(recipients);
+        assertThat(queryOne("SELECT template_code FROM notification_dispatch WHERE dedupe_key = ? LIMIT 1",
+            String.class, droppedKey)).isEqualTo("transport_alighted");
+
+        // A child marked absent at the stop is a roster fact for the office, not
+        // a message telling the parent their child boarded a bus they did not.
+        UUID otherStudentId = queryOne(
+            "SELECT student_id FROM student_transport WHERE route_id = ? AND student_id <> ? "
+            + "ORDER BY student_id LIMIT 1", UUID.class, routeId, studentId);
+        post("/v1/transport/trips/" + tripId + "/checkin",
+            Map.of("studentId", otherStudentId, "status", "absent"), driver);
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE dedupe_key LIKE ?",
+            "trip:" + tripId + ":" + otherStudentId + ":%")).isZero();
+
+        var ended = post("/v1/transport/trips/" + tripId + "/end", null, driver);
+        assertThat(ended.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(ended.getBody().get("endedAt").asText()).isNotBlank();
+
+        // Two events, both attributed to the trip they happened on.
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE related_type = 'trip' "
+            + "AND related_id = ?", tripId)).isEqualTo(recipients * 2);
     }
 
     @Test @Tag("P1")

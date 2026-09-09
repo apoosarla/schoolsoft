@@ -12,15 +12,19 @@ import java.util.UUID;
  * Channels are advisory — if the recipient hasn't opted-in to a channel it
  * is skipped silently (logged in audit). 'whatsapp' additionally requires
  * an approved template inside the 24-hr window (per §10).
+ *
+ * Most producers build this from a {@link Notice} rather than by hand, so the
+ * recipient side is filled in by the notification module.
  */
 public record NotifyRequest(
     UUID schoolId,
-    String recipientType,           // 'guardian' | 'staff' | 'student'
+    String recipientType,           // 'guardian' | 'staff' | 'student' | 'applicant'
     UUID recipientId,
     String templateCode,            // matches platform.whatsapp_template.code OR an email template code
     String language,                // 'en' | 'hi' | ...
     Map<String, Object> variables,
     List<String> channels,          // ordered preference, e.g. ['whatsapp','push','email']
     String relatedType,
-    UUID relatedId
+    UUID relatedId,
+    String dedupeKey                // names the event; a repeat sends nothing. Null = always send.
 ) {}

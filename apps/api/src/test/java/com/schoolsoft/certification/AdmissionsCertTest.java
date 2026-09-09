@@ -16,10 +16,52 @@ import org.springframework.http.HttpStatus;
 class AdmissionsCertTest extends AbstractCertificationTest {
 
     @Test @Tag("P1")
-    @Disabled("Application is created correctly with source 'website', but nothing acknowledges it: no "
-        + "module publishes a domain event or calls NotificationService, so no dispatch row is written. "
-        + "New gap found in Phase 0 — notification producers are unwired.")
     void cert_ADM_01_publicEnquiryCreatesLeadAndAcknowledgesTheGuardian() {
+        // Digits only: the tracking lookup round-trips the phone through a query parameter.
+        String phone = "919222" + (100000 + (int) (Math.random() * 800000));
+        String email = "ack." + UUID.randomUUID().toString().substring(0, 6) + "@example.test";
+
+        var applied = post("/v1/public/schools/" + seed.chainSlug() + "/" + cbse().slug() + "/admissions/apply",
+            body("applicantFirstName", "Ira", "applicantLastName", "Nair",
+                "applicantDob", "2020-05-11", "applicantGender", "female",
+                "gradeId", gradeOf(cbse(), "1"), "guardianName", "Meera Nair",
+                "guardianPhone", phone, "guardianEmail", email), null);
+        assertThat(applied.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String applicationNo = applied.getBody().get("applicationNo").asText();
+
+        var tracked = get("/v1/public/schools/" + seed.chainSlug() + "/" + cbse().slug()
+            + "/admissions/track?applicationNo=" + applicationNo + "&guardianPhone=" + phone, null);
+        assertThat(tracked.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(tracked.getBody().get("state").asText()).isEqualTo("lead");
+        assertThat(tracked.getBody().get("source").asText()).isEqualTo("website");
+        UUID applicationId = UUID.fromString(tracked.getBody().get("id").asText());
+
+        // The acknowledgement is addressed to the applicant, not to a guardian:
+        // the family has no guardian row and no login until conversion, so the
+        // details they typed into the form are the only ones the school holds.
+        List<String> channels = queryList(
+            "SELECT channel FROM notification_dispatch WHERE recipient_type = 'applicant' "
+            + "AND recipient_id = ? AND template_code = 'admission_received' ORDER BY channel",
+            String.class, applicationId);
+        assertThat(channels).containsExactly("email", "sms");
+
+        // Nothing to push to and no WhatsApp opt-in: a form is not consent to
+        // an approved-template message on a channel §10 gates separately.
+        assertThat(channels).doesNotContain("push", "whatsapp");
+
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE recipient_id = ? "
+            + "AND status = 'sent' AND sent_at IS NOT NULL", applicationId)).isEqualTo(2);
+
+        // It carries the number the family will quote back when they track it.
+        String variables = queryOne(
+            "SELECT variables::text FROM notification_dispatch WHERE recipient_id = ? LIMIT 1",
+            String.class, applicationId);
+        assertThat(variables).contains(applicationNo).contains("Ira Nair");
+
+        // The acknowledgement is tied to the application, so the office can see
+        // what went out without reading the dispatch table by recipient type.
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE related_type = 'admission' "
+            + "AND related_id = ?", applicationId)).isEqualTo(2);
     }
 
     @Test @Tag("P1")
@@ -198,9 +240,42 @@ class AdmissionsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("Rejection transition works, but the guardian notification has no producer (see ADM-01). "
-        + "New gap found in Phase 0.")
     void cert_ADM_14_rejectedApplicantIsNotifiedAndStaysOffRosters() {
+        String token = registrarToken(cbse());
+        var application = createApplication("walkin", "REJ-" + UUID.randomUUID().toString().substring(0, 8));
+        UUID id = UUID.fromString(application.getBody().get("id").asText());
+
+        var rejected = post("/v1/admissions/applications/" + id + "/transition",
+            Map.of("toState", "rejected"), token);
+        assertThat(rejected.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(rejected.getBody().get("state").asText()).isEqualTo("rejected");
+
+        // Told, on the channels the form gave the school.
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE recipient_type = 'applicant' "
+            + "AND recipient_id = ? AND template_code = 'admission_rejected'", id)).isEqualTo(2);
+
+        // Re-running a transition that already happened is not an error, and it
+        // is not a second rejection letter either.
+        var again = post("/v1/admissions/applications/" + id + "/transition",
+            Map.of("toState", "rejected"), token);
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE recipient_id = ? "
+            + "AND template_code = 'admission_rejected'", id)).isEqualTo(2);
+
+        // Retained, and nowhere near a roster: the applicant never became a
+        // student, so no enrolment, no section, no register.
+        assertThat(queryOne("SELECT state FROM admission_application WHERE id = ?", String.class, id))
+            .isEqualTo("rejected");
+        assertThat(count("SELECT count(*) FROM admission_application WHERE id = ? "
+            + "AND converted_student_id IS NULL", id)).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM student s JOIN admission_application a "
+            + "ON a.converted_student_id = s.id WHERE a.id = ?", id)).isZero();
+
+        // The trail of the decision survives the rejection.
+        var events = get("/v1/admissions/applications/" + id + "/events", token).getBody();
+        List<String> states = new ArrayList<>();
+        events.forEach(node -> states.add(node.get("toState").asText()));
+        assertThat(states).contains("rejected");
     }
 
     @Test @Tag("P2")

@@ -1,7 +1,9 @@
 package com.schoolsoft.comms.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import com.schoolsoft.comms.internal.AnnouncementPublisher;
 import com.schoolsoft.comms.internal.CommsRepository;
+import com.schoolsoft.notification.api.DeliveryStats;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.util.List;
@@ -14,7 +16,12 @@ import org.springframework.web.bind.annotation.*;
 public class CommsController {
 
     private final CommsRepository repo;
-    public CommsController(CommsRepository repo) { this.repo = repo; }
+    private final AnnouncementPublisher announcementPublisher;
+
+    public CommsController(CommsRepository repo, AnnouncementPublisher announcementPublisher) {
+        this.repo = repo;
+        this.announcementPublisher = announcementPublisher;
+    }
 
     // -------------------------- Announcements --------------------------
 
@@ -26,19 +33,31 @@ public class CommsController {
 
     public record CreateAnnouncementRequest(
         @NotNull UUID schoolId, @NotBlank String scopeType, List<UUID> scopeIds, @NotBlank String title,
-        @NotBlank String body, List<String> channels, UUID createdByUserId
+        @NotBlank String body, List<String> channels, UUID createdByUserId, String priority
     ) {}
 
     @PreAuthorize("@perm.can('announcement.manage')")
     @PostMapping("/announcements")
     public AnnouncementDto createAnnouncement(@RequestBody CreateAnnouncementRequest req) {
-        return repo.create(req.schoolId(), req.scopeType(), req.scopeIds(), req.title(), req.body(), req.channels(), req.createdByUserId());
+        return repo.create(req.schoolId(), req.scopeType(), req.scopeIds(), req.title(), req.body(),
+            req.channels(), req.createdByUserId(), req.priority());
     }
 
     @PreAuthorize("@perm.can('announcement.manage')")
     @PostMapping("/announcements/{id}/publish")
     public AnnouncementDto publish(@PathVariable UUID id) {
-        return repo.publish(id);
+        return announcementPublisher.publish(id);
+    }
+
+    /**
+     * What actually went out. The office publishes a closure notice and needs
+     * to answer "did it reach them, on what, and how fast" without reading the
+     * dispatch table by hand (COMM-06).
+     */
+    @PreAuthorize("@perm.can('announcement.manage')")
+    @GetMapping("/announcements/{id}/delivery")
+    public DeliveryStats delivery(@PathVariable UUID id) {
+        return announcementPublisher.deliveryFor(id);
     }
 
     @PreAuthorize("@perm.can('announcement.view')")

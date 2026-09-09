@@ -3,6 +3,7 @@ package com.schoolsoft.transport.api;
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.iam.api.RouteScope;
 import com.schoolsoft.transport.internal.TransportRepository;
+import com.schoolsoft.transport.internal.TripService;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
@@ -17,10 +18,12 @@ import org.springframework.web.bind.annotation.*;
 public class TransportController {
 
     private final TransportRepository repo;
+    private final TripService trips;
     private final RouteScope routes;
 
-    public TransportController(TransportRepository repo, RouteScope routes) {
+    public TransportController(TransportRepository repo, TripService trips, RouteScope routes) {
         this.repo = repo;
+        this.trips = trips;
         this.routes = routes;
     }
 
@@ -206,7 +209,7 @@ public class TransportController {
     @PostMapping("/trips/{id}/checkin")
     public TripDto checkIn(@PathVariable UUID id, @RequestBody CheckInRequest req) {
         routes.requireTrip(id);
-        return repo.checkIn(id, req.studentId(), req.status());
+        return trips.checkIn(id, req.studentId(), req.status());
     }
 
     // -------------------------- Geofencing --------------------------

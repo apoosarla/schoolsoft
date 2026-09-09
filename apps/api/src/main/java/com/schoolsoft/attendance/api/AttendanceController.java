@@ -21,16 +21,19 @@ import org.springframework.web.bind.annotation.*;
 public class AttendanceController {
 
     private final AttendanceRepository repo;
+    private final AttendanceMarking marking;
     private final AttendanceAuthorizer authorizer;
     private final AttendanceAmendmentService amendments;
     private final AttendancePolicyRepository policies;
     private final SelfScope selfScope;
     private final TeacherScope teacherScope;
 
-    public AttendanceController(AttendanceRepository repo, AttendanceAuthorizer authorizer,
+    public AttendanceController(AttendanceRepository repo, AttendanceMarking marking,
+                                AttendanceAuthorizer authorizer,
                                 AttendanceAmendmentService amendments, AttendancePolicyRepository policies,
                                 SelfScope selfScope, TeacherScope teacherScope) {
         this.repo = repo;
+        this.marking = marking;
         this.authorizer = authorizer;
         this.amendments = amendments;
         this.policies = policies;
@@ -47,7 +50,7 @@ public class AttendanceController {
     @PostMapping("/mark")
     public AttendanceRecordDto mark(@RequestBody MarkRequest req) {
         authorizer.requireMayMark(req.sectionId(), req.onDate(), req.periodNo());
-        return repo.mark(
+        return marking.mark(
             req.schoolId(), req.studentId(), req.sectionId(), req.onDate(), req.periodNo(),
             req.status(), req.source() == null ? "manual" : req.source(), req.markedByStaffId(), req.notes()
         );
@@ -65,7 +68,7 @@ public class AttendanceController {
     public List<AttendanceRecordDto> markBulk(@RequestBody BulkMarkRequest req) {
         authorizer.requireMayMark(req.sectionId(), req.onDate(), req.periodNo());
         return req.entries().stream()
-            .map(e -> repo.mark(
+            .map(e -> marking.mark(
                 req.schoolId(), e.studentId(), req.sectionId(), req.onDate(), req.periodNo(),
                 e.status(), req.source() == null ? "manual" : req.source(), req.markedByStaffId(), e.notes()
             ))

@@ -1,7 +1,6 @@
 package com.schoolsoft.admissions.internal;
 
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
-import com.schoolsoft.admissions.api.PublicAdmissions;
 import com.schoolsoft.admissions.api.AdmissionEventDto;
 import com.schoolsoft.enrolment.api.RollNumbers;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -17,7 +16,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class AdmissionsRepository implements PublicAdmissions {
+public class AdmissionsRepository {
 
     private final JdbcTemplate jdbc;
     private final SectionCapacity capacity;
@@ -70,7 +69,6 @@ public class AdmissionsRepository implements PublicAdmissions {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
-    @Override
     public Optional<AdmissionApplicationDto> findByApplicationNoAndPhone(String applicationNo, String guardianPhone) {
         var rows = jdbc.query(
             "SELECT " + COLS + " FROM admission_application WHERE application_no = ? AND guardian_phone = ?",
@@ -79,7 +77,6 @@ public class AdmissionsRepository implements PublicAdmissions {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
-    @Override
     public AdmissionApplicationDto create(
         UUID schoolId, UUID academicYearId, UUID gradeId, String applicationNo,
         String firstName, String lastName, LocalDate dob, String gender,

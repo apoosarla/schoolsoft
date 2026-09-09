@@ -57,11 +57,13 @@ public class CommsRepository {
         rs.getTimestamp("published_at") == null ? null : rs.getTimestamp("published_at").toInstant(),
         rs.getTimestamp("expires_at") == null ? null : rs.getTimestamp("expires_at").toInstant(),
         rs.getString("created_by_user_id") == null ? null : UUID.fromString(rs.getString("created_by_user_id")),
-        rs.getTimestamp("created_at").toInstant()
+        rs.getTimestamp("created_at").toInstant(),
+        rs.getString("priority")
     );
 
     private static final String ANNOUNCEMENT_COLS =
-        "id, school_id, scope_type, scope_ids, title, body, channels, published_at, expires_at, created_by_user_id, created_at";
+        "id, school_id, scope_type, scope_ids, title, body, channels, published_at, expires_at, "
+        + "created_by_user_id, created_at, priority";
 
     public List<AnnouncementDto> list(UUID schoolId) {
         return jdbc.query(
@@ -72,22 +74,82 @@ public class CommsRepository {
 
     public AnnouncementDto create(
         UUID schoolId, String scopeType, List<UUID> scopeIds, String title, String body,
-        List<String> channels, UUID createdByUserId
+        List<String> channels, UUID createdByUserId, String priority
     ) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO announcement (id, school_id, scope_type, scope_ids, title, body, channels, created_by_user_id) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO announcement (id, school_id, scope_type, scope_ids, title, body, channels, " +
+            "  created_by_user_id, priority) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             id, schoolId, scopeType, uuidArray(scopeIds), title, body,
-            channels == null || channels.isEmpty() ? textArray(List.of("push", "email")) : textArray(channels), createdByUserId
+            channels == null || channels.isEmpty() ? textArray(List.of("push", "email")) : textArray(channels),
+            createdByUserId, priority == null ? "normal" : priority
         );
-        return jdbc.queryForObject("SELECT " + ANNOUNCEMENT_COLS + " FROM announcement WHERE id = ?", ANNOUNCEMENT_MAPPER, id);
+        return find(id);
     }
 
-    public AnnouncementDto publish(UUID id) {
-        int updated = jdbc.update("UPDATE announcement SET published_at = now() WHERE id = ?", id);
-        if (updated == 0) throw new NotFoundException("Announcement not found: " + id);
-        return jdbc.queryForObject("SELECT " + ANNOUNCEMENT_COLS + " FROM announcement WHERE id = ?", ANNOUNCEMENT_MAPPER, id);
+    public AnnouncementDto find(UUID id) {
+        var rows = jdbc.query("SELECT " + ANNOUNCEMENT_COLS + " FROM announcement WHERE id = ?", ANNOUNCEMENT_MAPPER, id);
+        if (rows.isEmpty()) throw new NotFoundException("Announcement not found: " + id);
+        return rows.get(0);
+    }
+
+    /**
+     * Stamps the publish time, once. Returns false when the announcement was
+     * already published — a retry of a publish that worked is not an error,
+     * but it is not a second broadcast either.
+     */
+    public boolean markPublished(UUID id) {
+        int updated = jdbc.update(
+            "UPDATE announcement SET published_at = now() WHERE id = ? AND published_at IS NULL", id);
+        if (updated == 0) find(id);   // 404 for an id that never existed, rather than a silent false
+        return updated == 1;
+    }
+
+    /**
+     * Who an announcement is addressed to, as students — the notification
+     * module turns those into the guardians that actually receive it.
+     *
+     * <p>Only an active enrolment is in scope: a circular to "the school" is a
+     * circular to the children currently at it.</p>
+     */
+    public List<UUID> audienceStudentIds(AnnouncementDto announcement) {
+        List<UUID> scopeIds = announcement.scopeIds() == null ? List.of() : announcement.scopeIds();
+        return switch (announcement.scopeType()) {
+            case "school" -> jdbc.query(
+                "SELECT DISTINCT e.student_id FROM enrolment e WHERE e.school_id = ? AND e.status = 'active'",
+                (rs, i) -> UUID.fromString(rs.getString("student_id")),
+                announcement.schoolId());
+            case "grade" -> scopeIds.isEmpty() ? List.of() : jdbc.query(
+                "SELECT DISTINCT e.student_id FROM enrolment e JOIN section s ON s.id = e.section_id " +
+                "WHERE e.school_id = ? AND e.status = 'active' AND s.grade_id IN (" + placeholders(scopeIds) + ")",
+                (rs, i) -> UUID.fromString(rs.getString("student_id")),
+                prepend(announcement.schoolId(), scopeIds));
+            case "section" -> scopeIds.isEmpty() ? List.of() : jdbc.query(
+                "SELECT DISTINCT e.student_id FROM enrolment e " +
+                "WHERE e.school_id = ? AND e.status = 'active' AND e.section_id IN (" + placeholders(scopeIds) + ")",
+                (rs, i) -> UUID.fromString(rs.getString("student_id")),
+                prepend(announcement.schoolId(), scopeIds));
+            // 'custom' names the children directly. Still filtered through
+            // enrolment so a hand-typed id from another school reaches nobody.
+            case "custom" -> scopeIds.isEmpty() ? List.of() : jdbc.query(
+                "SELECT DISTINCT e.student_id FROM enrolment e " +
+                "WHERE e.school_id = ? AND e.status = 'active' AND e.student_id IN (" + placeholders(scopeIds) + ")",
+                (rs, i) -> UUID.fromString(rs.getString("student_id")),
+                prepend(announcement.schoolId(), scopeIds));
+            default -> List.of();
+        };
+    }
+
+    private static String placeholders(List<UUID> ids) {
+        return String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
+    }
+
+    private static Object[] prepend(UUID first, List<UUID> rest) {
+        Object[] args = new Object[rest.size() + 1];
+        args[0] = first;
+        for (int i = 0; i < rest.size(); i++) args[i + 1] = rest.get(i);
+        return args;
     }
 
     public void markRead(UUID announcementId, UUID userAccountId) {

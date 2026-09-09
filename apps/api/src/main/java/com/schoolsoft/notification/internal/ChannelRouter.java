@@ -35,7 +35,12 @@ public class ChannelRouter {
         for (String ch : requested) {
             boolean ok = switch (ch) {
                 case "whatsapp" -> r.optInWhatsapp() && r.phone() != null;
-                case "push"     -> r.optInPush();
+                // A recipient with push on and no device registered has nowhere
+                // to be pushed to. That is a channel this person does not have,
+                // not a send that failed: recording it as a failure would put a
+                // permanent, unfixable failure against every broadcast and
+                // leave the delivery stats unreadable.
+                case "push"     -> r.optInPush() && !devices.tokensForRecipient(r.type(), r.id()).isEmpty();
                 case "email"    -> r.optInEmail() && r.email() != null;
                 case "sms"      -> r.optInSms() && r.phone() != null;
                 default -> false;

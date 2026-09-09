@@ -115,10 +115,72 @@ class CommsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("An emergency announcement can be created and published, but no module fans it out to "
-        + "channels: NotificationService has no callers, so there are no delivery stats to meet an SLA "
-        + "against. New gap found in Phase 0.")
     void cert_COMM_06_emergencyBroadcastReachesAllGuardiansWithStats() {
+        String token = principalToken(cbse());
+
+        var created = post("/v1/comms/announcements", body(
+            "schoolId", cbse().id(), "scopeType", "school",
+            "title", "School closed tomorrow",
+            "body", "Cyclone warning: the school will remain closed on 12 August. Buses will not run.",
+            "channels", List.of("email", "push"), "priority", "emergency",
+            "createdByUserId", cbse().principalUserId()), token);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(created.getBody().get("priority").asText()).isEqualTo("emergency");
+        UUID announcementId = UUID.fromString(created.getBody().get("id").asText());
+
+        // Nothing goes out until it is published — a draft closure notice that
+        // reached the school would be worse than one that never went.
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE related_type = 'announcement' "
+            + "AND related_id = ?", announcementId)).isZero();
+
+        // Every guardian of a currently enrolled child, reachable on one of the
+        // channels the announcement names. Computed from the data rather than
+        // hard-coded: the point is that nobody in scope is left out.
+        long reachable = count(
+            "SELECT count(DISTINCT gs.guardian_id) FROM guardian_student gs "
+            + "JOIN enrolment e ON e.student_id = gs.student_id AND e.status = 'active' "
+            + "JOIN guardian g ON g.id = gs.guardian_id "
+            + "WHERE e.school_id = ? AND gs.is_communications_recipient "
+            + "  AND g.opt_in_email AND g.email IS NOT NULL", cbse().id());
+        assertThat(reachable).isGreaterThan(50);      // a school-wide fan-out, not a section's
+
+        java.time.Instant beforePublish = java.time.Instant.now();
+        var published = post("/v1/comms/announcements/" + announcementId + "/publish", null, token);
+        assertThat(published.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(published.getBody().get("publishedAt").asText()).isNotBlank();
+
+        var stats = get("/v1/comms/announcements/" + announcementId + "/delivery", token);
+        assertThat(stats.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(stats.getBody().get("recipients").asInt()).isEqualTo((int) reachable);
+        assertThat(stats.getBody().get("byChannel").get("email").asInt()).isEqualTo((int) reachable);
+        assertThat(stats.getBody().get("sent").asInt()).isEqualTo((int) reachable);
+        assertThat(stats.getBody().get("failed").asInt()).isZero();
+        assertThat(stats.getBody().get("pending").asInt()).isZero();
+
+        // The SLA is read off the fan-out itself, not inferred from the publish
+        // timestamp: "published" and "delivered" are the two things this
+        // scenario exists to keep apart.
+        assertThat(stats.getBody().get("elapsedMs").asLong()).isLessThan(60_000);
+        assertThat(java.time.Instant.parse(stats.getBody().get("lastSentAt").asText()))
+            .isAfterOrEqualTo(beforePublish.minusSeconds(1));
+
+        // An emergency is its own template — on WhatsApp it has to be, and a
+        // closure notice should not read like a newsletter anywhere else.
+        assertThat(queryOne("SELECT DISTINCT template_code FROM notification_dispatch "
+            + "WHERE related_id = ?", String.class, announcementId)).isEqualTo("emergency_broadcast");
+
+        // Publishing again is a retry, not a second siren.
+        int dispatches = stats.getBody().get("dispatches").asInt();
+        var republished = post("/v1/comms/announcements/" + announcementId + "/publish", null, token);
+        assertThat(republished.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(republished.getBody().get("publishedAt").asText())
+            .isEqualTo(published.getBody().get("publishedAt").asText());
+        assertThat(get("/v1/comms/announcements/" + announcementId + "/delivery", token)
+            .getBody().get("dispatches").asInt()).isEqualTo(dispatches);
+
+        // And it reached this school only.
+        assertThat(count("SELECT count(*) FROM notification_dispatch WHERE related_id = ? "
+            + "AND school_id <> ?", announcementId, cbse().id())).isZero();
     }
 
     @Test @Tag("P2")

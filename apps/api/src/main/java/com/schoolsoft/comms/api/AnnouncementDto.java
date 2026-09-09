@@ -15,5 +15,6 @@ public record AnnouncementDto(
     Instant publishedAt,
     Instant expiresAt,
     UUID createdByUserId,
-    Instant createdAt
+    Instant createdAt,
+    String priority
 ) {}

@@ -2,6 +2,7 @@ package com.schoolsoft.admissions.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.admissions.internal.AdmissionsRepository;
+import com.schoolsoft.admissions.internal.AdmissionsService;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -17,7 +18,12 @@ import org.springframework.web.bind.annotation.*;
 public class AdmissionsController {
 
     private final AdmissionsRepository repo;
-    public AdmissionsController(AdmissionsRepository repo) { this.repo = repo; }
+    private final AdmissionsService applications;
+
+    public AdmissionsController(AdmissionsRepository repo, AdmissionsService applications) {
+        this.repo = repo;
+        this.applications = applications;
+    }
 
     @PreAuthorize("@perm.can('admission.view')")
     @GetMapping("/applications")
@@ -40,7 +46,7 @@ public class AdmissionsController {
     @PreAuthorize("@perm.can('admission.manage')")
     @PostMapping("/applications")
     public AdmissionApplicationDto create(@RequestBody CreateApplicationRequest req) {
-        return repo.create(
+        return applications.create(
             req.schoolId(), req.academicYearId(), req.gradeId(), req.applicationNo(),
             req.applicantFirstName(), req.applicantLastName(), req.applicantDob(), req.applicantGender(),
             req.guardianName(), req.guardianPhone(), req.guardianEmail(), req.source()
@@ -54,7 +60,7 @@ public class AdmissionsController {
     public AdmissionApplicationDto transition(@PathVariable UUID id, @RequestBody TransitionRequest req) {
         var snap = TenantContext.get();
         UUID actor = snap == null ? null : snap.userAccountId();
-        return repo.transition(id, req.toState(), actor);
+        return applications.transition(id, req.toState(), actor);
     }
 
     public record TestScoreRequest(double score, String notes) {}

@@ -331,6 +331,13 @@ public class TransportRepository {
      * (one driver's phone, a few dozen students per trip); a real fleet-scale
      * version would move check-ins to their own table.
      */
+    /** The route's name for a message a parent reads; null when the route is gone. */
+    public String routeName(UUID routeId) {
+        var names = jdbc.query("SELECT name FROM transport_route WHERE id = ?",
+            (rs, i) -> rs.getString("name"), routeId);
+        return names.isEmpty() ? null : names.get(0);
+    }
+
     public TripDto checkIn(UUID tripId, UUID studentId, String status) {
         TripDto trip = findTrip(tripId);
         Map<String, Object> manifest = new HashMap<>(trip.manifest());

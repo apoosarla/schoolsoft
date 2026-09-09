@@ -1391,11 +1391,46 @@ several are security-relevant.
 
 ### Correctness
 
-- **GAP-35 — Notification producers are unwired.** `NotificationService` and
-  `DomainEvents` exist and have no callers anywhere: no absence alert, no
-  admission acknowledgement, no boarding notification, no emergency fan-out
-  (ADM-01/14, ATT-03, COMM-06, TRN-03). GAP-21 covers preferences and delivery
-  management on top of a pipeline that nothing currently feeds.
+- **GAP-35 — Notification producers are unwired.** ✅ **Closed 2026-09-09
+  (Phase 8).** Four write paths now send: a public enquiry is acknowledged to
+  the applicant (ADM-01) and told the outcome (ADM-14), an absence reaches the
+  family the moment the register is saved (ATT-03), a published announcement
+  fans out to every guardian of a currently enrolled child and reports what
+  went out (COMM-06), and a check-in tells the parent the child is on the bus
+  or off it (TRN-03).
+
+  Three things had to exist first. `notification_dispatch` gained a
+  `dedupe_key`, unique per (key, recipient, channel) and written with
+  `ON CONFLICT DO NOTHING`, so the message is tied to the *event* rather than
+  the write: a register re-saved, an announcement re-published or a check-in
+  tapped twice sends nothing the second time, and two concurrent saves race on
+  the index rather than on a read. `recipient_type` gained `applicant`,
+  because a family with no guardian row and no login is reachable only through
+  the details they typed on the form. And `announcement` gained `priority`, so
+  "emergency broadcast" is something the row can say.
+
+  Each producer is a service in its own module calling `notification.api` —
+  `AdmissionsService`, `AttendanceMarking`, `AnnouncementPublisher`,
+  `TripService` — with recipient resolution kept in one place behind
+  `NotificationService.notifyGuardiansOfStudent(s)`: the
+  `guardian_student` join, the `is_communications_recipient` flag and the
+  child's name are one rule, not four.
+
+  Two smaller corrections came with it. A push to a recipient with no
+  registered device is now a channel they do not have rather than a dispatch
+  that failed — recorded as a permanent failure it made every broadcast's
+  delivery stats unreadable. And `announcement.publish` is now a conditional
+  UPDATE naming the state it moves out of, so a re-publish is a retry that
+  stamps nothing and sends nothing rather than a second siren with a fresh
+  timestamp.
+
+  Still open, and deliberately: an amendment approved outside the marking
+  window changes a register without notifying anyone — the alert fires on the
+  marking path only. GAP-21 still owns quiet hours, category mute, the
+  emergency override that would read the new `priority` column, and retrying a
+  failed dispatch. `DomainEvents` still has no callers; producers call the
+  notification module directly, which is what the one existing caller
+  (`DunningService`) already did.
 
 - **GAP-36 — Dates are derived in the JVM's zone, not the school's.**
   `school.timezone` is stored and never read; `DeviceController` and
