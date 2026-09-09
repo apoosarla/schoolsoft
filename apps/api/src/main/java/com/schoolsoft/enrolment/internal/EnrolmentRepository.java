@@ -1,5 +1,6 @@
 package com.schoolsoft.enrolment.internal;
 
+import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import com.schoolsoft.enrolment.api.EnrolmentDto;
 import com.schoolsoft.enrolment.api.RollNumbers;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -53,8 +54,26 @@ public class EnrolmentRepository {
     }
 
     public List<EnrolmentDto> listBySection(UUID sectionId, boolean activeOnly) {
-        String sql = SELECT + "WHERE e.section_id = ?" + (activeOnly ? " AND e.status = 'active'" : "") + " ORDER BY e.roll_no";
-        return jdbc.query(sql, MAPPER, sectionId);
+        return listBySection(sectionId, activeOnly, null);
+    }
+
+    /**
+     * A section's register as it stood on {@code onDate} (today by default).
+     *
+     * <p>"Who is in 8B" is a question about a day, not about a status column: a
+     * child whose withdrawal is filed on the 1st for a last working day of the
+     * 30th is on this list until the 30th and off it on the 1st, and last
+     * March's list still returns last March's children (XFER-03). {@link
+     * EnrolmentActivity} holds the predicate.</p>
+     */
+    public List<EnrolmentDto> listBySection(UUID sectionId, boolean activeOnly, LocalDate onDate) {
+        if (!activeOnly) {
+            return jdbc.query(SELECT + "WHERE e.section_id = ? ORDER BY e.roll_no", MAPPER, sectionId);
+        }
+        LocalDate date = EnrolmentActivity.orToday(onDate);
+        return jdbc.query(
+            SELECT + "WHERE e.section_id = ? AND " + EnrolmentActivity.activeOn("e") + " ORDER BY e.roll_no",
+            MAPPER, sectionId, Date.valueOf(date), Date.valueOf(date));
     }
 
     public Optional<EnrolmentDto> findActiveByStudent(UUID studentId) {
@@ -88,9 +107,14 @@ public class EnrolmentRepository {
         var current = find(enrolmentId).orElseThrow(() -> new NotFoundException("Enrolment not found: " + enrolmentId));
         String override = capacity.reserveSeat(newSectionId, overCapacityReason);
         LocalDate today = LocalDate.now();
+        // Closed the day before the new one opens. `ends_on` is the last day an
+        // enrolment counts, so closing it at `today` while the replacement
+        // starts at `today` put the child on two registers for a day — which the
+        // active-on-date predicate then had to break a tie over. V031 corrects
+        // the rows this already made.
         jdbc.update(
             "UPDATE enrolment SET status = 'transferred', ends_on = ? WHERE id = ?",
-            Date.valueOf(today), enrolmentId
+            Date.valueOf(today.minusDays(1)), enrolmentId
         );
         UUID newId = UUID.randomUUID();
         jdbc.update(

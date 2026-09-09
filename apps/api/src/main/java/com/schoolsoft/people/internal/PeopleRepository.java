@@ -49,13 +49,27 @@ public class PeopleRepository {
         rs.getString("roll_no")
     );
 
+    /**
+     * "Which class is this child in?", as at today.
+     *
+     * <p>The active-on-date predicate rather than {@code status = 'active'}: a
+     * child whose withdrawal is filed three weeks before their last day is still
+     * in 8B, and the directory should say so until the day they actually leave
+     * (XFER-03). {@link com.schoolsoft.enrolment.api.EnrolmentActivity} holds the
+     * one copy of it.</p>
+     */
+    private static String liveEnrolment() {
+        return com.schoolsoft.enrolment.api.EnrolmentActivity
+            .activeOnDateLiteral("e", LocalDate.now());
+    }
+
     public List<StudentDto> listStudents(UUID schoolId, UUID sectionId, String q, int limit) {
         StringBuilder sql = new StringBuilder(
             "SELECT s.id, s.school_id, s.admission_no, s.first_name, s.middle_name, s.last_name, " +
             "       s.dob, s.gender, s.status, " +
             "       e.section_id, (g.code || '-' || sec.code) AS section_label, e.roll_no " +
             "FROM student s " +
-            "LEFT JOIN enrolment e ON e.student_id = s.id AND e.status = 'active' " +
+            "LEFT JOIN enrolment e ON e.student_id = s.id AND " + liveEnrolment() + " " +
             "LEFT JOIN section sec ON sec.id = e.section_id " +
             "LEFT JOIN grade   g   ON g.id = sec.grade_id " +
             "WHERE s.school_id = ? "
@@ -79,7 +93,7 @@ public class PeopleRepository {
             "       s.dob, s.gender, s.status, " +
             "       e.section_id, (g.code || '-' || sec.code) AS section_label, e.roll_no " +
             "FROM student s " +
-            "LEFT JOIN enrolment e ON e.student_id = s.id AND e.status = 'active' " +
+            "LEFT JOIN enrolment e ON e.student_id = s.id AND " + liveEnrolment() + " " +
             "LEFT JOIN section sec ON sec.id = e.section_id " +
             "LEFT JOIN grade   g   ON g.id = sec.grade_id " +
             "WHERE s.id = ?",
@@ -110,7 +124,7 @@ public class PeopleRepository {
             "       e.section_id, (g.code || '-' || sec.code) AS section_label, e.roll_no " +
             "FROM student s " +
             "JOIN guardian_student gs ON gs.student_id = s.id " +
-            "LEFT JOIN enrolment e ON e.student_id = s.id AND e.status = 'active' " +
+            "LEFT JOIN enrolment e ON e.student_id = s.id AND " + liveEnrolment() + " " +
             "LEFT JOIN section sec ON sec.id = e.section_id " +
             "LEFT JOIN grade   g   ON g.id = sec.grade_id " +
             "WHERE gs.guardian_id = ? " +

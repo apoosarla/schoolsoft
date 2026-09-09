@@ -249,8 +249,58 @@ class TransportCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("GAP-03 — withdrawal has no workflow, so nothing removes a withdrawn student from the route "
-        + "roster (Phase 7).")
     void cert_TRN_09_withdrawnStudentLeavesTheRouteRoster() {
+        String token = principalToken(cbse());
+        var route = post("/v1/transport/routes?schoolId=" + cbse().id(),
+            Map.of("code", "R-TRN09-" + UUID.randomUUID().toString().substring(0, 5),
+                "name", "Leavers route", "direction", "pickup"), token);
+        UUID routeId = UUID.fromString(route.getBody().get("id").asText());
+        UUID stopId = UUID.fromString(post("/v1/transport/routes/" + routeId + "/stops",
+            Map.of("name", "Kondapur", "sortOrder", 1, "lat", 17.46, "lng", 78.36, "fee", 5000.0), token)
+            .getBody().get("id").asText());
+
+        // A child of this scenario's own, so withdrawing them does not empty a
+        // seat another scenario is reading.
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        UUID studentId = UUID.fromString(post("/v1/people/students", body(
+            "schoolId", cbse().id(), "admissionNo", "TRN09-" + suffix,
+            "firstName", "TRN09", "lastName", "Rider",
+            "dob", "2015-03-03", "gender", "female"), token).getBody().get("id").asText());
+        UUID enrolmentId = UUID.fromString(post("/v1/enrolment", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", currentFocusSection(cbse()),
+            "academicYearId", cbse().currentAy().id(), "startsOn", "2026-04-01",
+            "overCapacityReason", "Certification scenario TRN-09"), token).getBody().get("id").asText());
+
+        post("/v1/transport/student-assignments", Map.of(
+            "schoolId", cbse().id(), "studentId", studentId, "routeId", routeId,
+            "stopId", stopId, "startsOn", "2026-04-01"), token);
+        assertThat(get("/v1/transport/routes/" + routeId + "/students", token).getBody()).hasSize(1);
+
+        // The exit is filed with a last working day a fortnight out. The child is
+        // still on the bus until then — the driver's list has to be right on the
+        // day they read it, not on the day the paperwork was done.
+        java.time.LocalDate lastDay = java.time.LocalDate.now().plusDays(14);
+        UUID withdrawalId = UUID.fromString(post("/v1/enrolment/withdrawals", body(
+            "enrolmentId", enrolmentId, "reasonCode", "relocation",
+            "reason", "Family relocating", "lastWorkingDate", lastDay.toString()), token)
+            .getBody().get("id").asText());
+        for (String area : java.util.List.of("fees", "library", "transport", "assets")) {
+            post("/v1/enrolment/withdrawals/" + withdrawalId + "/clearance/" + area,
+                body("reason", "Checked"), token);
+        }
+        post("/v1/enrolment/withdrawals/" + withdrawalId + "/complete", body("reason", "Cleared"), token);
+
+        assertThat(get("/v1/transport/routes/" + routeId + "/students?onDate=" + lastDay, token)
+            .getBody()).hasSize(1);
+        // ...and off it the next morning, with nothing scheduled to run.
+        assertThat(get("/v1/transport/routes/" + routeId + "/students?onDate=" + lastDay.plusDays(1), token)
+            .getBody()).isEmpty();
+
+        // The assignment is closed rather than deleted, so last month's roster
+        // still says who was on which bus.
+        assertThat(queryOne("SELECT ends_on::text FROM student_transport WHERE student_id = ?",
+            String.class, studentId)).isEqualTo(lastDay.toString());
+        assertThat(get("/v1/transport/routes/" + routeId + "/students?onDate=2026-06-01", token)
+            .getBody()).hasSize(1);
     }
 }

@@ -1051,15 +1051,43 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   the single largest missing capability in the product. Blocks all of
   YEC-01..11, GRAD-01/06, FEE-16, ENR-08.
 
-- **GAP-03 — No student exit workflow.** Withdrawal statuses exist; the
-  workflow does not. Missing: withdrawal initiation with reason and
-  last-working-date, clearance checklist (fees / library / transport /
-  assets), **Transfer Certificate generation** with the statutory fields
-  (admission + withdrawal dates, grade, conduct, attendance, board reg. no.,
-  serial numbering), and the downstream de-listing — rosters, timetable,
-  transport, and section communications must stop from the effective date
-  while history stays queryable. Blocks XFER-01..08, COMM-08, TRN-09,
-  LIB-05, GRAD-02.
+- **GAP-03 — No student exit workflow.** ✅ **Closed 2026-09-09 (Phase 9).**
+  Three pieces:
+
+  `withdrawal` + `clearance_item` (V031) are the leavers' desk: a reason, a
+  last working date, and a checklist that gates the exit. Each area answers for
+  itself through `enrolment/api/ClearanceProbe`, implemented in `fees`,
+  `library` and `transport` — so enrolment depends on none of them and a fifth
+  area is a new class rather than an edit to the service. `assets` has no
+  system of record behind it and so opens `pending` and waits for a person,
+  which is the honest answer rather than a clear nobody checked. Completion is
+  refused while anything blocks; `withdrawal.override` is a *separate*
+  permission from `withdrawal.manage`, held by the heads and the accountant and
+  not by the registrar, because forgiving arrears on the way out is a decision
+  about money.
+
+  `certificate` (a new module) issues the TC, the school-leaving certificate,
+  the transcript and the bonafide certificate. The payload is frozen and hashed
+  at issue and the row is append-only by trigger, so the serial a family holds
+  still resolves to what it said; a correction is a revocation and a reissue.
+  The column is `json` rather than `jsonb` deliberately — jsonb normalises key
+  order, and the hash is over bytes. One live certificate of a kind per
+  enrolment is what prevents the duplicate TC.
+
+  `enrolment/api/EnrolmentActivity` is the single active-on-date predicate the
+  gap asked for. `status` is now the *reason* an enrolment closed and the dates
+  are the authority on whether it is open, which is what lets a withdrawal
+  filed on the 1st for a last working day of the 30th keep the child on the
+  register until the 30th and take them off on the 1st — rosters, the route
+  roster, the announcement audience and the directory's "which class", all from
+  the date, with nothing scheduled to run. `EnrolmentRepository.transfer` was
+  closing the outgoing enrolment on the same day the incoming one opened, so a
+  child stood on two registers for a day; V031 corrects the rows and the code
+  stops making them.
+
+  Certified by XFER-01/02/03/07/08, COMM-08, TRN-09, LIB-05, GRAD-02, plus
+  three cases in `RbacEnforcementTest`. XFER-04 stays disabled on GAP-04 —
+  post-exit parent access needs an alumni identity, which is that gap's.
 
 - **GAP-05 — No student-level subject election.** ✅ **Closed 2026-08-12
   (Phase 2).** `elective_group` + `student_subject` (V019) with
@@ -1290,12 +1318,13 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
 - **GAP-22 — Library has no fines or holds.** ⚠️ **Fee half closed 2026-08-12
   (Phase 4):** `library_charge_policy` drives an overdue fine and a
   lost/damaged replacement charge, both posted to the student's fee account
-  through `FeeCharges` and visible in the outstanding-dues report. Still open:
-  per-grade issue limits (LIB-02), holds/reservations, and year-end clearance
-  (LIB-05, Phase 7). Original finding: No overdue fine calculation, no
+  through `FeeCharges` and visible in the outstanding-dues report. **Clearance
+  closed 2026-09-09 (Phase 9):** `LibraryClearanceProbe` blocks a leaver with a
+  copy still out, and the fine it accrues on return reaches the fees line of
+  the same checklist rather than being counted twice (LIB-05). Still open:
+  per-grade issue limits (LIB-02) and holds/reservations. Original finding: No overdue fine calculation, no
   posting of fines / lost-book charges to the fee ledger, no reservations, no
-  per-grade issue limits. Blocks LIB-02/03/04, and the library half of the
-  exit clearance in GAP-03.
+  per-grade issue limits. Blocks LIB-02/03/04.
 
 - **GAP-23 — No bulk import, no DPDP data lifecycle.** No CSV import for
   students / staff / marks (schools onboard with spreadsheets, so this is an

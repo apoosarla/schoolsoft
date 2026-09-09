@@ -3,6 +3,7 @@ package com.schoolsoft.certification;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.schoolsoft.certification.support.AbstractCertificationTest;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Disabled;
@@ -121,9 +122,69 @@ class LibraryCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("GAP-03 + GAP-22 — no year-end clearance workflow to block a student with an unreturned "
-        + "copy (Phase 7).")
     void cert_LIB_05_yearEndClearanceBlocksAnUnreturnedCopy() {
+        String token = principalToken(cbse());
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+
+        UUID studentId = UUID.fromString(post("/v1/people/students", body(
+            "schoolId", cbse().id(), "admissionNo", "LIB05-" + suffix,
+            "firstName", "LIB05", "lastName", "Borrower-" + suffix,
+            "dob", "2015-01-01", "gender", "female"), token).getBody().get("id").asText());
+        UUID enrolmentId = UUID.fromString(post("/v1/enrolment", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", currentFocusSection(cbse()),
+            "academicYearId", cbse().currentAy().id(), "startsOn", "2026-04-01",
+            "overCapacityReason", "Certification scenario LIB-05"), token).getBody().get("id").asText());
+
+        String librarian = librarianToken(cbse());
+        UUID titleId = UUID.fromString(post("/v1/library/titles?schoolId=" + cbse().id(), Map.of(
+            "title", "The Long Loan", "author", "Certification", "isbn", "ISBN-LIB05-" + suffix), librarian)
+            .getBody().get("id").asText());
+        UUID copyId = UUID.fromString(post("/v1/library/titles/" + titleId + "/copies",
+            Map.of("barcode", "BC-LIB05-" + suffix), librarian).getBody().get("id").asText());
+        UUID issueId = UUID.fromString(post("/v1/library/issues", Map.of(
+            "schoolId", cbse().id(), "copyId", copyId, "memberType", "student",
+            // Not yet due: this scenario is about the copy being out, not about
+            // the fine, and a late return would post a charge that blocks the
+            // fees line the next probe looks at.
+            "memberId", studentId, "dueOn",
+            java.time.LocalDate.now().plusMonths(1).toString()), librarian).getBody().get("id").asText());
+
+        // The child leaves at the end of the year with the book still out.
+        var filed = post("/v1/enrolment/withdrawals", body(
+            "enrolmentId", enrolmentId, "reasonCode", "graduation",
+            "reason", "End of the year", "lastWorkingDate", "2026-08-31"), token);
+        UUID withdrawalId = UUID.fromString(filed.getBody().get("id").asText());
+
+        // The library line blocks — and says what is outstanding, not merely that
+        // something is.
+        var library = itemFor(filed.getBody(), "library");
+        assertThat(library.get("state").asText()).isEqualTo("blocked");
+        assertThat(library.get("detail").asText()).isEqualTo("1 copy not returned");
+
+        for (String area : List.of("fees", "transport", "assets")) {
+            post("/v1/enrolment/withdrawals/" + withdrawalId + "/clearance/" + area,
+                body("reason", "Checked"), token);
+        }
+        assertThat(post("/v1/enrolment/withdrawals/" + withdrawalId + "/complete",
+            body("reason", "Leaving"), token).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+        // Returning the copy clears it, and the school does not have to tick a
+        // box the library disagrees with — the probe re-asks.
+        post("/v1/library/issues/" + issueId + "/return", null, librarian);
+        var refreshed = post("/v1/enrolment/withdrawals/" + withdrawalId + "/clearance/refresh", null, token);
+        assertThat(itemFor(refreshed.getBody(), "library").get("state").asText()).isEqualTo("cleared");
+        assertThat(refreshed.getBody().get("state").asText()).isEqualTo("cleared");
+
+        assertThat(post("/v1/enrolment/withdrawals/" + withdrawalId + "/complete",
+            body("reason", "Clearance complete"), token).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode itemFor(
+            com.fasterxml.jackson.databind.JsonNode withdrawal, String area) {
+        for (var item : withdrawal.get("items")) {
+            if (area.equals(item.get("area").asText())) return item;
+        }
+        throw new AssertionError("No '" + area + "' line on the checklist");
     }
 
     // ---------------------------------------------------------------- helpers

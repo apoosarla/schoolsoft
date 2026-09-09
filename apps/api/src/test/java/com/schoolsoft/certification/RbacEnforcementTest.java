@@ -330,4 +330,59 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         assertThat(get("/v1/people/students?schoolId=" + cbse().id(), null).getStatusCode())
             .isEqualTo(HttpStatus.UNAUTHORIZED);
     }
+
+    // ===================== the leavers' desk =====================
+
+    /**
+     * Processing an exit and forgiving its arrears are deliberately different
+     * permissions. The registrar does the first all day and must not be able to
+     * do the second — a clerk who can waive the balance on the way out is a
+     * school with no arrears policy.
+     */
+    @Test
+    @DisplayName("the registrar processes an exit but cannot waive its dues")
+    void registrarCannotWaiveDues() {
+        perms("registrar").contains("withdrawal.manage").doesNotContain("withdrawal.override");
+        perms("accountant").contains("withdrawal.override").doesNotContain("withdrawal.manage");
+    }
+
+    /**
+     * A certificate is a statutory document with the school's name on it. The
+     * counter answers "has it come through yet" and cannot issue one, and the
+     * librarian — who resolves somebody else's checklist line — cannot either.
+     */
+    @Test
+    @DisplayName("only the office issues a certificate")
+    void certificateIssueIsNarrow() {
+        perms("front_office").contains("certificate.view").doesNotContain("certificate.issue");
+        perms("librarian").doesNotContain("certificate.issue", "certificate.revoke");
+        perms("registrar").contains("certificate.issue").doesNotContain("certificate.revoke");
+        perms("principal").contains("certificate.issue", "certificate.revoke");
+    }
+
+    /**
+     * A guardian holds {@code certificate.view.own} and nothing wider: the exit
+     * that produced the certificate, and every other family's, stay closed.
+     */
+    @Test
+    @DisplayName("a guardian reads their own child's certificates and no withdrawal")
+    void guardianReadsOwnCertificatesOnly() {
+        UUID studentId = firstStudentIn(currentFocusSection(cbse()));
+        String guardian = guardianTokenFor(cbse(), studentId);
+
+        assertThat(get("/v1/certificates/students/" + studentId, guardian).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/certificates?schoolId=" + cbse().id(), guardian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/enrolment/withdrawals/students/" + studentId, guardian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/certificates", body(
+            "studentId", studentId, "kind", "bonafide"), guardian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    private org.assertj.core.api.ListAssert<String> perms(String roleCode) {
+        return org.assertj.core.api.Assertions.assertThat(
+            queryList("SELECT perm_code FROM role_perm WHERE role_code = ?", String.class, roleCode));
+    }
 }

@@ -196,7 +196,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | COMM-05 | Guardian sets channel preferences and quiet hours; non-urgent notifications respect them, emergency ones override. `GAP-21` | P2 |
 | COMM-06 | Emergency broadcast (school closure) reaches all guardians across channels within the SLA, with delivery stats. | P1 |
 | COMM-07 | WhatsApp template message sent with the correct approved template and variables. (Adapter stubbed — see backlog.) | P2 |
-| COMM-08 | A parent of a withdrawn student stops receiving section communications from the withdrawal date. `GAP-03` | P1 |
+| COMM-08 | A parent of a withdrawn student stops receiving section communications from the withdrawal date. | P1 |
 | COMM-09 | PTM slots published, parent books a slot, teacher sees their booked schedule, double-booking prevented. `GAP-20` | P2 |
 | COMM-10 | Message content is scoped per tenant — no cross-school thread visibility under any role. | P1 |
 
@@ -212,7 +212,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | TRN-06 | Stop or route change mid-year takes effect from a date, adjusts the roster, and adjusts transport fees. `GAP-30`, `GAP-09` | P2 |
 | TRN-07 | Driver app works through a connectivity dead zone: check-ins queue and sync without duplicates. | P2 |
 | TRN-08 | Vehicle breakdown / driver substitution mid-route — trip reassigned, parents informed. | P3 |
-| TRN-09 | Withdrawn student is removed from the route roster automatically. `GAP-03` | P2 |
+| TRN-09 | Withdrawn student is removed from the route roster automatically. | P2 |
 
 ## 13. Library (CERT-LIB)
 
@@ -222,7 +222,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | LIB-02 | Per-grade issue limits enforced; issuing beyond the limit is blocked. `GAP-22` | P3 |
 | LIB-03 | Overdue copy accrues a fine that posts to the student's fee ledger. `GAP-22` | P2 |
 | LIB-04 | Lost/damaged copy charged and removed from circulation. `GAP-22` | P3 |
-| LIB-05 | Year-end clearance blocks a student with an unreturned copy. `GAP-03`, `GAP-22` | P2 |
+| LIB-05 | Year-end clearance blocks a student with an unreturned copy. | P2 |
 
 ## 14. Staff Operations (CERT-STF)
 
@@ -270,21 +270,21 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 
 | ID | Scenario | Priority |
 |----|----------|----------|
-| XFER-01 | Withdrawal initiated with reason and last-working-date; clearance checklist runs (fees, library, transport, assets). `GAP-03` | P1 |
-| XFER-02 | Transfer Certificate generated with the statutory fields (admission/withdrawal dates, grade, conduct, attendance, board reg. no.), numbered and non-repudiable. `GAP-03` | P1 |
-| XFER-03 | Post-withdrawal: enrolment closes as `withdrawn`/`transferred`, the student drops off rosters, attendance, timetable, transport, and communications from the effective date — but history remains queryable. `GAP-03` | P1 |
-| XFER-04 | Parent app access after withdrawal: read-only access to records and receipts for a defined period, then revoked. `GAP-03`, `GAP-04` | P1 |
+| XFER-01 | Withdrawal initiated with reason and last-working-date; clearance checklist runs (fees, library, transport, assets). | P1 |
+| XFER-02 | Transfer Certificate generated with the statutory fields (admission/withdrawal dates, grade, conduct, attendance, board reg. no.), numbered and non-repudiable. | P1 |
+| XFER-03 | Post-withdrawal: enrolment closes as `withdrawn`/`transferred`, the student drops off rosters, attendance, timetable, transport, and communications from the effective date — but history remains queryable. | P1 |
+| XFER-04 | Parent app access after withdrawal: read-only access to records and receipts for a defined period, then revoked. `GAP-04` | P1 |
 | XFER-05 | Student transfers between two schools *within the same chain*: records move or are linked, no re-keying of the profile, fee ledger is settled at the source school. `GAP-15` | P1 |
 | XFER-06 | Student transfers in from an external school mid-year: prior-school marks captured as historical context without polluting current-term computations. `GAP-16` | P2 |
-| XFER-07 | Duplicate TC request or a TC issued for an already-withdrawn student is prevented. `GAP-03` | P2 |
-| XFER-08 | Withdrawal with dues outstanding is blocked or requires an authorised override with reason. `GAP-03` | P1 |
+| XFER-07 | Duplicate TC request or a TC issued for an already-withdrawn student is prevented. | P2 |
+| XFER-08 | Withdrawal with dues outstanding is blocked or requires an authorised override with reason. | P1 |
 
 ## 18. Graduation & Alumni (CERT-GRAD)
 
 | ID | Scenario | Priority |
 |----|----------|----------|
 | GRAD-01 | Grade 12 cohort graduates at year-end: enrolments close as `graduated`, students exit all rosters, and no next-AY enrolment is created. `GAP-02` | P1 |
-| GRAD-02 | School-leaving certificate / final transcript generated for the graduating cohort. `GAP-03` | P1 |
+| GRAD-02 | School-leaving certificate / final transcript generated for the graduating cohort. | P1 |
 | GRAD-03 | Board results imported and merged onto the final transcript. (Board integration stubbed.) | P2 |
 | GRAD-04 | Alumni access: login downgrades to an alumni scope — transcript and receipt retrieval only, no fees, attendance, or messaging. `GAP-04` | P2 |
 | GRAD-05 | An alumnus requests a document three years later; records are retrievable within the retention policy and the request is audit-logged. `GAP-04`, `GAP-14` | P2 |
@@ -345,7 +345,7 @@ These block one or more P1 scenarios. Mirrored into `BACKLOG.md`.
 |-----|---------|----------|
 | GAP-01 | **No school calendar / holiday master.** No table, no API. Working-day denominators, timetable suppression, closure handling, and due-date shifting all have nothing to compute against. | No `holiday`/`calendar` table in any chain migration; only `admission_event` and `announcement`. |
 | GAP-02 | **No year rollover / bulk promotion.** `enrolment.status` allows `promoted`/`graduated` but nothing sets them; no next-AY section cloning, no arrears carry-forward, no readiness check, no idempotent re-run. | No promotion/rollover code outside a comment in `enrolment/package-info.java`. |
-| GAP-03 | **No exit workflow.** No Transfer Certificate generation, no clearance checklist (fees/library/transport), no withdrawal reason capture, no downstream de-listing from rosters/transport/comms. | Statuses exist; no artifacts, endpoints, or documents. |
+| GAP-03 | ~~**No exit workflow.**~~ **Closed 2026-09-09 (Phase 9).** `withdrawal` carries the reason and the last working date and gates on a `clearance_item` checklist that each area answers for itself; `certificate` issues a serially numbered TC, leaving certificate or transcript, frozen and hashed at issue; and `EnrolmentActivity` makes "is this child here?" a question about a date, so the de-listing from rosters, transport and communications happens on the last working day with nothing scheduled to run. | Was: statuses exist; no artifacts, endpoints, or documents. |
 | GAP-04 | **No alumni identity.** Post-graduation access is undefined — no scope downgrade, no alumni record, no document-request path. | No alumni table or role. |
 | GAP-05 | **No student-level subject election.** `section_subject_teacher` binds subjects to sections only. IGCSE/A-level option blocks and Class 11 streams cannot be modelled; marks, timetables, report cards, and board exports all assume a section-wide subject set. | Schema + `CurriculumController`/`AssessmentController` surface. |
 | GAP-06 | **Exam operations missing.** No exam timetable entity, no per-student paper-clash check, no room/invigilator allocation, no hall tickets, no `absent`/medical-leave mark semantics (blank vs zero), no re-evaluation or moderation, no audited unlock of locked marks. | `assessment.scheduled_on` is the only scheduling field. |

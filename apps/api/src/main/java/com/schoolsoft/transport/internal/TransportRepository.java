@@ -1,6 +1,7 @@
 package com.schoolsoft.transport.internal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.transport.api.DriverDto;
 import com.schoolsoft.transport.api.GeofenceStatusDto;
@@ -197,7 +198,13 @@ public class TransportRepository {
             "       (g.code || '-' || sec.code) AS section_label " +
             "FROM student_transport st " +
             "JOIN student s ON s.id = st.student_id " +
-            "LEFT JOIN enrolment e ON e.student_id = s.id AND e.status = 'active' " +
+            // The enrolment join is what makes a withdrawn child leave the bus:
+            // it is the active-on-date predicate, so the morning after their
+            // last working day they are off this roster with no job to run
+            // (TRN-09). An INNER join, because a rider with no enrolment on the
+            // date is not this school's to carry.
+            "JOIN enrolment e ON e.student_id = s.id AND "
+                + EnrolmentActivity.activeOnDateLiteral("e", date) + " " +
             "LEFT JOIN section sec ON sec.id = e.section_id " +
             "LEFT JOIN grade   g   ON g.id = sec.grade_id " +
             "WHERE st.route_id = ? AND st.starts_on <= ? AND COALESCE(st.ends_on, 'infinity'::date) >= ? " +
@@ -226,6 +233,20 @@ public class TransportRepository {
             Date.valueOf(effectiveFrom.minusDays(1)), studentId, Date.valueOf(effectiveFrom),
             Date.valueOf(effectiveFrom));
         return assignStudent(schoolId, studentId, newRouteId, newStopId, effectiveFrom);
+    }
+
+    /**
+     * The route a student rides on a date, if any — the leaver's checklist asks
+     * this before it releases the seat.
+     */
+    public java.util.Optional<String> activeAssignmentOn(UUID studentId, LocalDate onDate) {
+        var rows = jdbc.query(
+            "SELECT r.code || ' — ' || r.name FROM student_transport st " +
+            "JOIN transport_route r ON r.id = st.route_id " +
+            "WHERE st.student_id = ? AND st.starts_on <= ? " +
+            "  AND COALESCE(st.ends_on, 'infinity'::date) >= ? LIMIT 1",
+            (rs, i) -> rs.getString(1), studentId, Date.valueOf(onDate), Date.valueOf(onDate));
+        return rows.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(rows.get(0));
     }
 
     /** Ends a student's transport from a date — they stop being billed for it. */

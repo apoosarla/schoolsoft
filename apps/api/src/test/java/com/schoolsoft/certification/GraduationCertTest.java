@@ -48,9 +48,56 @@ class GraduationCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-03 — no certificate entity, so no school-leaving certificate or final transcript "
-        + "(Phase 7).")
     void cert_GRAD_02_leavingCertificateAndTranscriptAreGenerated() {
+        var sandbox = rolloverSandbox("grad02");
+        String token = sandboxToken(sandbox);
+        UUID leaver = sandbox.firstStudent("R3", "A");
+        try {
+            // The cohort's cards are published before the year closes, which is
+            // what a transcript is assembled from: quoting the card the family
+            // already holds rather than re-averaging live marks, so a
+            // re-evaluation landing later cannot make the two disagree.
+            UUID cardId = queryOne("SELECT id FROM report_card WHERE student_id = ?", UUID.class, leaver);
+            assertThat(post("/v1/assessment/report-cards/" + cardId + "/publish", null, token)
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            // The terminal grade graduates at rollover — no withdrawal, no
+            // leavers' desk. The certificate has to be issuable off that.
+            UUID runId = roll(sandbox, token);
+            post("/v1/rollover/runs/" + runId + "/commit", body(), token);
+            assertThat(queryOne("SELECT status FROM enrolment WHERE student_id = ?", String.class, leaver))
+                .isEqualTo("graduated");
+
+            var issued = post("/v1/certificates", body(
+                "studentId", leaver, "kind", "leaving",
+                "conduct", "Exemplary", "remarks", "Head girl, 2026"), token);
+            assertThat(issued.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            var payload = issued.getBody().get("payload");
+            assertThat(payload.get("studentName").asText()).isNotBlank();
+            assertThat(payload.get("dateOfAdmission").asText()).isNotBlank();
+            assertThat(payload.get("dateOfLeaving").asText()).isNotBlank();
+            assertThat(payload.get("reasonForLeaving").asText()).contains("graduated");
+            assertThat(payload.get("conduct").asText()).isEqualTo("Exemplary");
+
+            // The transcript: every published term, with its subjects. A term
+            // with no published card is absent rather than silently averaged in.
+            var terms = payload.get("terms");
+            assertThat(terms.isArray()).isTrue();
+            assertThat(terms).hasSize(1);
+            assertThat(terms.get(0).get("promotionDecision").asText()).isEqualTo("graduate");
+
+            // Serially numbered on its own series, so a leaving certificate and a
+            // TC do not share a counter.
+            assertThat(issued.getBody().get("serialNo").asText()).matches("SLC/\\d{4}/\\d{4}");
+
+            UUID certId = UUID.fromString(issued.getBody().get("id").asText());
+            assertThat(get("/v1/certificates/" + certId + "/verify", token).getBody()
+                .get("intact").asBoolean()).isTrue();
+        } finally {
+            inChainDo(jdbc -> jdbc.update("DELETE FROM certificate WHERE school_id = ?", sandbox.schoolId()));
+            dropSandbox(sandbox);
+        }
     }
 
     @Test @Tag("P2")

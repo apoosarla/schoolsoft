@@ -110,31 +110,38 @@ public class CommsRepository {
      * Who an announcement is addressed to, as students — the notification
      * module turns those into the guardians that actually receive it.
      *
-     * <p>Only an active enrolment is in scope: a circular to "the school" is a
-     * circular to the children currently at it.</p>
+     * <p>Only an enrolment that is live <em>today</em> is in scope: a circular
+     * to "the school" is a circular to the children currently at it. That is the
+     * active-on-date predicate rather than {@code status = 'active'}, which is
+     * what stops a withdrawn child's parent from still receiving their old
+     * section's circulars the week after the child left (COMM-08) — and equally
+     * what keeps a child whose withdrawal is filed but whose last working day is
+     * three weeks off on the list until then.</p>
      */
     public List<UUID> audienceStudentIds(AnnouncementDto announcement) {
         List<UUID> scopeIds = announcement.scopeIds() == null ? List.of() : announcement.scopeIds();
+        String live = com.schoolsoft.enrolment.api.EnrolmentActivity
+            .activeOnDateLiteral("e", java.time.LocalDate.now());
         return switch (announcement.scopeType()) {
             case "school" -> jdbc.query(
-                "SELECT DISTINCT e.student_id FROM enrolment e WHERE e.school_id = ? AND e.status = 'active'",
+                "SELECT DISTINCT e.student_id FROM enrolment e WHERE e.school_id = ? AND " + live,
                 (rs, i) -> UUID.fromString(rs.getString("student_id")),
                 announcement.schoolId());
             case "grade" -> scopeIds.isEmpty() ? List.of() : jdbc.query(
                 "SELECT DISTINCT e.student_id FROM enrolment e JOIN section s ON s.id = e.section_id " +
-                "WHERE e.school_id = ? AND e.status = 'active' AND s.grade_id IN (" + placeholders(scopeIds) + ")",
+                "WHERE e.school_id = ? AND " + live + " AND s.grade_id IN (" + placeholders(scopeIds) + ")",
                 (rs, i) -> UUID.fromString(rs.getString("student_id")),
                 prepend(announcement.schoolId(), scopeIds));
             case "section" -> scopeIds.isEmpty() ? List.of() : jdbc.query(
                 "SELECT DISTINCT e.student_id FROM enrolment e " +
-                "WHERE e.school_id = ? AND e.status = 'active' AND e.section_id IN (" + placeholders(scopeIds) + ")",
+                "WHERE e.school_id = ? AND " + live + " AND e.section_id IN (" + placeholders(scopeIds) + ")",
                 (rs, i) -> UUID.fromString(rs.getString("student_id")),
                 prepend(announcement.schoolId(), scopeIds));
             // 'custom' names the children directly. Still filtered through
             // enrolment so a hand-typed id from another school reaches nobody.
             case "custom" -> scopeIds.isEmpty() ? List.of() : jdbc.query(
                 "SELECT DISTINCT e.student_id FROM enrolment e " +
-                "WHERE e.school_id = ? AND e.status = 'active' AND e.student_id IN (" + placeholders(scopeIds) + ")",
+                "WHERE e.school_id = ? AND " + live + " AND e.student_id IN (" + placeholders(scopeIds) + ")",
                 (rs, i) -> UUID.fromString(rs.getString("student_id")),
                 prepend(announcement.schoolId(), scopeIds));
             default -> List.of();

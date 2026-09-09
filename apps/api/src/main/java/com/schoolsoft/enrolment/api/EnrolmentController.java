@@ -41,13 +41,24 @@ public class EnrolmentController {
         return repo.listByStudent(studentId);
     }
 
+    /**
+     * {@code onDate} makes the roster a question about a day: today by default,
+     * and last term when asked, which is how a withdrawn child stays in the
+     * class list they were actually in (XFER-03).
+     */
     @PreAuthorize("@perm.can('enrolment.view')")
     @GetMapping("/sections/{sectionId}")
-    public List<EnrolmentDto> roster(@PathVariable UUID sectionId, @RequestParam(defaultValue = "true") boolean activeOnly) {
+    public List<EnrolmentDto> roster(
+        @PathVariable UUID sectionId,
+        @RequestParam(defaultValue = "true") boolean activeOnly,
+        @RequestParam(required = false)
+        @org.springframework.format.annotation.DateTimeFormat(
+            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate onDate
+    ) {
         // A class list is the section's, and a teacher gets the ones they
         // teach (STF-05).
         teacherScope.requireSection(sectionId);
-        return repo.listBySection(sectionId, activeOnly);
+        return repo.listBySection(sectionId, activeOnly, onDate);
     }
 
     /**

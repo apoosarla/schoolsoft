@@ -136,9 +136,15 @@ class CommsCertTest extends AbstractCertificationTest {
         // Every guardian of a currently enrolled child, reachable on one of the
         // channels the announcement names. Computed from the data rather than
         // hard-coded: the point is that nobody in scope is left out.
+        // "Currently enrolled" is the active-on-date predicate, the same one the
+        // fan-out uses — a child whose exit is filed for the end of the month is
+        // still at the school today, and still gets told the school is closed
+        // tomorrow (COMM-08 is the other half of this).
         long reachable = count(
             "SELECT count(DISTINCT gs.guardian_id) FROM guardian_student gs "
-            + "JOIN enrolment e ON e.student_id = gs.student_id AND e.status = 'active' "
+            + "JOIN enrolment e ON e.student_id = gs.student_id "
+            + "  AND e.starts_on <= CURRENT_DATE "
+            + "  AND (e.ends_on IS NULL OR e.ends_on >= CURRENT_DATE) "
             + "JOIN guardian g ON g.id = gs.guardian_id "
             + "WHERE e.school_id = ? AND gs.is_communications_recipient "
             + "  AND g.opt_in_email AND g.email IS NOT NULL", cbse().id());
@@ -189,9 +195,79 @@ class CommsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("GAP-03 — no withdrawal workflow and no single enrolment-active-on-date predicate, so a "
-        + "withdrawn student's parent keeps receiving section communications (Phase 7).")
     void cert_COMM_08_withdrawnStudentsParentStopsReceivingSectionComms() {
+        String token = principalToken(cbse());
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+
+        // A child and a parent of this scenario's own, addressed directly, so the
+        // assertion is about one family rather than about a school-wide count
+        // another scenario is also moving.
+        // Its own admission number: the fixture smoke test counts the seeded
+        // cohort by the `ADM%` prefix the number series issues by default.
+        UUID studentId = UUID.fromString(post("/v1/people/students", body(
+            "schoolId", cbse().id(), "admissionNo", "COMM08-" + suffix,
+            "firstName", "COMM08", "lastName", "Leaver-" + suffix,
+            "dob", "2015-02-02", "gender", "male"), token).getBody().get("id").asText());
+        UUID enrolmentId = UUID.fromString(post("/v1/enrolment", body(
+            "schoolId", cbse().id(), "studentId", studentId, "sectionId", currentFocusSection(cbse()),
+            "academicYearId", cbse().currentAy().id(), "startsOn", "2026-04-01",
+            "overCapacityReason", "Certification scenario COMM-08"), token).getBody().get("id").asText());
+        inChainDo(jdbc -> {
+            UUID guardianId = UUID.randomUUID();
+            jdbc.update("INSERT INTO guardian (id, school_id, first_name, last_name, email) " +
+                "VALUES (?, ?, 'COMM08', 'Parent', ?)",
+                guardianId, cbse().id(), "comm08-" + suffix + "@cert.test");
+            jdbc.update("INSERT INTO guardian_student (guardian_id, student_id, relation, is_primary) " +
+                "VALUES (?, ?, 'mother', TRUE)", guardianId, studentId);
+        });
+
+        // While they are here, a circular reaches them.
+        assertThat(recipientsOf(circularTo(studentId, "Sports day", token))).isEqualTo(1);
+
+        // The exit is filed today for a last working day a fortnight out, and
+        // until that day nothing changes: a family does not stop being told about
+        // sports day because the paperwork has started.
+        java.time.LocalDate lastDay = java.time.LocalDate.now().plusDays(14);
+        UUID withdrawalId = UUID.fromString(post("/v1/enrolment/withdrawals", body(
+            "enrolmentId", enrolmentId, "reasonCode", "relocation",
+            "reason", "Moving to Chennai", "lastWorkingDate", lastDay.toString()), token)
+            .getBody().get("id").asText());
+        for (String area : List.of("fees", "library", "transport", "assets")) {
+            post("/v1/enrolment/withdrawals/" + withdrawalId + "/clearance/" + area,
+                body("reason", "Checked"), token);
+        }
+        post("/v1/enrolment/withdrawals/" + withdrawalId + "/complete", body("reason", "Cleared"), token);
+        assertThat(recipientsOf(circularTo(studentId, "Uniform change", token))).isEqualTo(1);
+
+        // Once the last working day has passed, they are off the list — and the
+        // cutover is the date, so it needs nothing to have been run.
+        inChainDo(jdbc -> jdbc.update(
+            "UPDATE enrolment SET ends_on = CURRENT_DATE - 1 WHERE id = ?", enrolmentId));
+        assertThat(recipientsOf(circularTo(studentId, "Term 2 dates", token))).isZero();
+
+        // Their history is untouched: the circulars they were sent while enrolled
+        // still name them.
+        assertThat(count("SELECT count(*) FROM notification_dispatch d " +
+            "JOIN guardian_student gs ON gs.guardian_id = d.recipient_id " +
+            "WHERE gs.student_id = ? AND d.related_type = 'announcement'", studentId)).isEqualTo(2);
+    }
+
+    /** Publishes a circular addressed to one child, and returns its id. */
+    private UUID circularTo(UUID studentId, String title, String token) {
+        var created = post("/v1/comms/announcements", body(
+            "schoolId", cbse().id(), "scopeType", "custom", "scopeIds", List.of(studentId),
+            "title", title, "body", title + " — details attached.",
+            "channels", List.of("email"), "createdByUserId", cbse().principalUserId()), token);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID id = UUID.fromString(created.getBody().get("id").asText());
+        assertThat(post("/v1/comms/announcements/" + id + "/publish", null, token).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        return id;
+    }
+
+    private long recipientsOf(UUID announcementId) {
+        return count("SELECT count(*) FROM notification_dispatch WHERE related_type = 'announcement' " +
+            "AND related_id = ?", announcementId);
     }
 
     @Test @Tag("P2")

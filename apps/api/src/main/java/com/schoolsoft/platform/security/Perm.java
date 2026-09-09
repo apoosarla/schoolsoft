@@ -57,6 +57,18 @@ public enum Perm {
     ENROLMENT_MANAGE("enrolment.manage", "Enrol, transfer, exit and renumber students"),
     ELECTION_MANAGE("election.manage", "Elect and drop elective subjects"),
 
+    // ===== exit, clearance and certificates =====
+    WITHDRAWAL_VIEW("withdrawal.view", "Read withdrawals and their clearance checklists"),
+    WITHDRAWAL_MANAGE("withdrawal.manage", "Initiate, resolve and complete a withdrawal"),
+    // Deliberately separate from withdrawal.manage: letting a family leave
+    // owing money is a decision about money, and the clerk who processes the
+    // exit should not also be the one who forgives its arrears (XFER-08).
+    WITHDRAWAL_OVERRIDE("withdrawal.override", "Waive a blocking clearance item with a reason"),
+    CERTIFICATE_VIEW("certificate.view", "Read any certificate"),
+    CERTIFICATE_VIEW_OWN("certificate.view.own", "Read your own certificates, or your children's"),
+    CERTIFICATE_ISSUE("certificate.issue", "Issue a transfer, leaving or bonafide certificate"),
+    CERTIFICATE_REVOKE("certificate.revoke", "Revoke a certificate that was issued in error"),
+
     // ===== admissions =====
     ADMISSION_VIEW("admission.view", "Read applications and their event history"),
     ADMISSION_MANAGE("admission.manage", "Create applications and record test scores"),

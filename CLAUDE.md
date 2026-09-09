@@ -86,10 +86,10 @@ Each bounded context is `com.schoolsoft.<module>`, split in two:
 | `<module>.internal` | Repositories (`JdbcTemplate`, SQL as string constants) and services. Nobody outside the module may touch these. |
 
 Modules: `admissions`, `assessment`, `attendance`, `audit`, `boardintegration`,
-`comms`, `curriculum`, `dashboard`, `device`, `enrolment`, `eventbus`,
-`featureflags`, `fees`, `file`, `iam`, `jobs`, `library`, `lms`, `notification`,
-`people`, `publicsite`, `rollover`, `schoolcalendar`, `search`, `tenancy`,
-`theming`, `timetable`, `transport`.
+`certificate`, `comms`, `curriculum`, `dashboard`, `device`, `enrolment`,
+`eventbus`, `featureflags`, `fees`, `file`, `iam`, `jobs`, `library`, `lms`,
+`notification`, `people`, `publicsite`, `rollover`, `schoolcalendar`, `search`,
+`tenancy`, `theming`, `timetable`, `transport`.
 
 `package-info.java` in each declares the Modulith module and, more usefully,
 says in prose what the module is for and what is deliberately out of its scope.
@@ -258,6 +258,23 @@ Worth knowing before trusting a green build:
   between got published anyway. Re-running a transition that already happened
   is *not* an error — a retry must not fail because the first attempt worked.
   `ReportCardTransitionTest` is the worked example.
+- **"Is this child at the school?" is a question about a date.**
+  `enrolment/api/EnrolmentActivity` holds the only copy of the predicate —
+  `starts_on <= d AND (ends_on IS NULL OR ends_on >= d)`. `enrolment.status` is
+  the *reason* an enrolment closed (`withdrawn`, `transferred`, `graduated`,
+  `promoted`, `detained`), not whether it is open, and `ends_on` is the last day
+  it counts. A withdrawal filed on the 1st for a last working day of the 30th
+  has to keep the child on the register until the 30th and drop them on the 1st;
+  `status = 'active'` cannot say that, which is why eighteen copies of it became
+  one predicate. A new read that filters students embeds `activeOn(alias)`; one
+  that asks about a single child calls `isActiveOn`.
+- **A certificate is frozen at issue, and the freeze is byte-exact.**
+  `certificate.payload` is `json`, not `jsonb`, because jsonb normalises key
+  order and `payload_hash` is over bytes — verification re-hashes the stored
+  text, so the two must round-trip identically. A trigger refuses every UPDATE
+  but revocation and supersession: a wrong certificate is revoked and reissued,
+  never edited, so the serial a family already holds still resolves to what it
+  said.
 - **Cross-school isolation inside a chain is RLS, not handler code.** V009
   puts a `school_id = current_school_id()` policy on every table that carries
   the column, which is why an id-enumeration read of another school's row
