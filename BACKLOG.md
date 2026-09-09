@@ -49,6 +49,21 @@ entries under **Done** below.
   `/v1/people/students/{id}` per rider, `V029` revokes the grant, and
   `RouteScope` narrows the roster to the routes the caller is rostered to drive
   today. See GAP-31 below.
+- **RLS covers a table only if it carries `school_id`.** V009 (and the blocks
+  V021/V022/V025 copied from it) enable row-level security on every table that
+  has the column, so cross-school isolation inside a chain is the database's
+  job and not the handler's. A table without the column has no policy, and is
+  safe only while every read of it joins an RLS-covered parent.
+  `gps_ping` was the one that did not — `GET /v1/transport/vehicles/{id}/gps-pings`
+  read by vehicle id alone, so any staff or parent token (every guardian holds
+  `transport.track`) could follow any bus in the chain, another school's
+  included. Fixed 2026-09-09 by joining `vehicle`; pinned in `cert_SEC_04`,
+  which fails without the join. **The rest of that list is unaudited**:
+  `route_assignment`, `timetable_slot`, `section_subject_teacher`,
+  `staff_role`, `guardian_student`, `term`, `message`, `library_copy`,
+  `assessment_component`, `fee_invoice_line`, `quiz_question` and a dozen more
+  carry no `school_id`. Each is presumed reachable only through a parent that
+  is covered — presumed, not checked, one query at a time.
 - **Exam schedule reads do not filter unpublished.** `exam.view.own` lets a
   family read `/v1/exams/schedules` and the repository does not restrict to
   published. Pre-existing; the gate did not introduce it.

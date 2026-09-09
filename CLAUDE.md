@@ -258,6 +258,14 @@ Worth knowing before trusting a green build:
   between got published anyway. Re-running a transition that already happened
   is *not* an error — a retry must not fail because the first attempt worked.
   `ReportCardTransitionTest` is the worked example.
+- **Cross-school isolation inside a chain is RLS, not handler code.** V009
+  puts a `school_id = current_school_id()` policy on every table that carries
+  the column, which is why an id-enumeration read of another school's row
+  answers empty or 404 without any handler saying so. A table *without*
+  `school_id` has no policy: every read of one must join a covered parent to
+  borrow it. `gps_ping` read by `vehicle_id` alone was the bug that proves it —
+  see `TransportRepository.recentPings`. A new table with a `school_id` needs
+  its own RLS block in its migration (V021/V022/V025 are the examples).
 - `audit_log` is a hash chain (V027): a trigger stamps every row with the hash
   of the row before it, `UPDATE` is refused outright, and
   `GET /v1/audit/chain` walks the chain and names the first break. Never

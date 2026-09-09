@@ -239,17 +239,37 @@ public class TransportRepository {
     // -------------------------- GPS + Trips --------------------------
 
     /** Vendor-agnostic ingestion point — any GPS provider (Teltonika, Concox, iCue, etc.) posts here. */
+    /**
+     * A ping is written through {@code vehicle} rather than straight into
+     * {@code gps_ping}: the ping table carries no {@code school_id}, so V009's
+     * row-level security has no policy on it, and an insert naming a vehicle id
+     * alone would accept a ping against another school's bus. Selecting the
+     * vehicle first puts the write behind the policy that does exist. No rows
+     * means no such vehicle in this caller's school, which is a 404 and not a
+     * silently dropped ping.
+     */
     public void recordGpsPing(UUID vehicleId, Instant occurredAt, double lat, double lng, Double speedKmh, Double heading) {
-        jdbc.update(
-            "INSERT INTO gps_ping (vehicle_id, occurred_at, lat, lng, speed_kmh, heading) VALUES (?, ?, ?, ?, ?, ?)",
-            vehicleId, Timestamp.from(occurredAt), lat, lng, speedKmh, heading
+        int written = jdbc.update(
+            "INSERT INTO gps_ping (vehicle_id, occurred_at, lat, lng, speed_kmh, heading) " +
+            "SELECT v.id, ?, ?, ?, ?, ? FROM vehicle v WHERE v.id = ?",
+            Timestamp.from(occurredAt), lat, lng, speedKmh, heading, vehicleId
         );
+        if (written == 0) throw new NotFoundException("Vehicle not found: " + vehicleId);
     }
 
+    /**
+     * The trail, joined through {@code vehicle} for the same reason the write
+     * is: {@code gps_ping} has no {@code school_id} and therefore no RLS
+     * policy, and every guardian holds {@code transport.track}. Without the
+     * join a parent could follow any bus in the chain by id, including another
+     * school's. The join borrows {@code vehicle}'s policy, so a vehicle outside
+     * the caller's school has no trail rather than a readable one.
+     */
     public List<GpsPingDto> recentPings(UUID vehicleId, int limit) {
         return jdbc.query(
-            "SELECT vehicle_id, occurred_at, lat, lng, speed_kmh, heading FROM gps_ping WHERE vehicle_id = ? " +
-            "ORDER BY occurred_at DESC LIMIT ?",
+            "SELECT p.vehicle_id, p.occurred_at, p.lat, p.lng, p.speed_kmh, p.heading " +
+            "FROM gps_ping p JOIN vehicle v ON v.id = p.vehicle_id WHERE p.vehicle_id = ? " +
+            "ORDER BY p.occurred_at DESC LIMIT ?",
             (rs, i) -> new GpsPingDto(
                 UUID.fromString(rs.getString("vehicle_id")), rs.getTimestamp("occurred_at").toInstant(),
                 rs.getDouble("lat"), rs.getDouble("lng"), com.schoolsoft.platform.db.Jdbc.nullableDouble(rs, "speed_kmh"),
@@ -330,17 +350,20 @@ public class TransportRepository {
      * dependency this schema doesn't otherwise need.
      */
     public GeofenceStatusDto checkGeofence(UUID vehicleId, UUID stopId) {
+        // One read of the latest ping, joined through `vehicle` so the answer
+        // is bounded by the caller's school (gps_ping carries no school_id and
+        // so no RLS policy of its own).
         var pingRows = jdbc.query(
-            "SELECT lat, lng, occurred_at FROM gps_ping WHERE vehicle_id = ? ORDER BY occurred_at DESC LIMIT 1",
-            (rs, i) -> new double[]{rs.getDouble("lat"), rs.getDouble("lng")},
+            "SELECT p.lat, p.lng, p.occurred_at FROM gps_ping p " +
+            "JOIN vehicle v ON v.id = p.vehicle_id " +
+            "WHERE p.vehicle_id = ? ORDER BY p.occurred_at DESC LIMIT 1",
+            (rs, i) -> new Object[]{rs.getDouble("lat"), rs.getDouble("lng"),
+                                    rs.getTimestamp("occurred_at").toInstant()},
             vehicleId
         );
         if (pingRows.isEmpty()) throw new NotFoundException("No GPS pings recorded for vehicle: " + vehicleId);
-        double[] ping = pingRows.get(0);
-        Instant asOf = jdbc.queryForObject(
-            "SELECT occurred_at FROM gps_ping WHERE vehicle_id = ? ORDER BY occurred_at DESC LIMIT 1",
-            (rs, i) -> rs.getTimestamp("occurred_at").toInstant(), vehicleId
-        );
+        double[] ping = {(double) pingRows.get(0)[0], (double) pingRows.get(0)[1]};
+        Instant asOf = (Instant) pingRows.get(0)[2];
 
         var stopRows = jdbc.query(
             "SELECT lat, lng, geofence_radius_m FROM transport_stop WHERE id = ?",
