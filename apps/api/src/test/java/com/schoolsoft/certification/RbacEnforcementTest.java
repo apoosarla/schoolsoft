@@ -70,6 +70,35 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             .isEqualTo(HttpStatus.FORBIDDEN);
     }
 
+    /**
+     * The calendar is the counter-example to "a family only reads its own":
+     * {@code calendar.view} is school-wide in {@code GUARDIAN_BASELINE} on
+     * purpose, because the same day resolution is served to anybody at
+     * {@code /v1/public/schools/&#123;chain&#125;/&#123;school&#125;/calendar}
+     * with no token. Reading it is not a leak; authoring it is the gate that
+     * matters.
+     */
+    @Test
+    @DisplayName("a guardian reads the calendar and cannot author it")
+    void guardianReadsTheCalendarAndCannotAuthorIt() {
+        UUID studentId = firstStudentIn(currentFocusSection(cbse()));
+        String guardian = guardianTokenFor(cbse(), studentId);
+        String range = "?schoolId=" + cbse().id() + "&from=2026-09-07&to=2026-09-07";
+
+        assertThat(get("/v1/calendar/days" + range, guardian).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        assertThat(post("/v1/calendar/entries", body(
+            "schoolId", cbse().id(), "onDate", "2026-09-07", "kind", "holiday",
+            "title", "Declared by a parent"), guardian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/calendar/closures", body(
+            "schoolId", cbse().id(), "onDate", "2026-09-07",
+            "title", "Declared by a parent"), guardian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(count("SELECT count(*) FROM school_calendar WHERE school_id = ? "
+            + "AND title = 'Declared by a parent'", cbse().id())).isZero();
+    }
+
     // ===================== a permission is not a relationship =====================
 
     /**
