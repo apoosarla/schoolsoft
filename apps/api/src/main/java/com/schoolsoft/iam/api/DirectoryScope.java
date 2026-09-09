@@ -1,7 +1,10 @@
 package com.schoolsoft.iam.api;
 
+import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.platform.tenancy.TenantContext;
+import java.sql.Date;
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -34,6 +37,14 @@ import org.springframework.stereotype.Service;
  *
  * <p>Staff callers are unrestricted here. The staffroom directory is not the
  * leak — a colleague's extension number is what the screen is for.</p>
+ *
+ * <p>Both halves of "the teachers of my children's sections" are questions
+ * about today, not about a status column: the register is
+ * {@link com.schoolsoft.enrolment.api.EnrolmentActivity}'s date predicate, and
+ * a timetabled period counts only while it is in force. That is the same
+ * window {@link TeacherScope} uses to decide whose sections a teacher may
+ * read, and the two have to agree — a parent handed the address of a teacher
+ * who cannot open their child's record has been handed a dead one.</p>
  */
 @Service
 public class DirectoryScope {
@@ -86,20 +97,45 @@ public class DirectoryScope {
         List<UUID> mine = selfScope.ownStudentIds();
         if (mine.isEmpty()) return new Visible(false, office);
 
+        // Both halves are questions about today, and both used to be spelled as
+        // something else. The sections are the ones the children are on the
+        // register for today — `status = 'active'` flips the day a withdrawal
+        // is *filed*, so a family served notice on the 1st for a last day of
+        // the 30th lost the school's contact list for the month they most
+        // needed it. And a timetabled period counts only while it is in force,
+        // so next term's teacher is not contactable yet and last term's has
+        // dropped off — which is the same window `TeacherScope` uses to decide
+        // whose sections that teacher may read. The two have to agree: a
+        // parent who can message a teacher who cannot open their child's
+        // record has been given a dead address.
+        LocalDate today = LocalDate.now();
+        String enrolledToday = EnrolmentActivity.activeOnDateLiteral("e", today);
         String placeholders = String.join(",", Collections.nCopies(mine.size(), "?"));
         List<UUID> teachers = jdbc.query(
             "SELECT DISTINCT sst.teacher_staff_id FROM section_subject_teacher sst " +
-            "WHERE sst.section_id IN (SELECT section_id FROM enrolment WHERE status = 'active' AND student_id IN ("
-                + placeholders + ")) " +
+            "WHERE sst.section_id IN (SELECT e.section_id FROM enrolment e " +
+            "  WHERE " + enrolledToday + " AND e.student_id IN (" + placeholders + ")) " +
             "UNION " +
             "SELECT DISTINCT t.teacher_staff_id FROM timetable_slot t " +
-            "WHERE t.teacher_staff_id IS NOT NULL AND t.section_id IN " +
-            "  (SELECT section_id FROM enrolment WHERE status = 'active' AND student_id IN (" + placeholders + "))",
+            "WHERE t.teacher_staff_id IS NOT NULL " +
+            "  AND t.effective_from <= ? AND COALESCE(t.effective_to, 'infinity'::date) >= ? " +
+            "  AND t.section_id IN (SELECT e.section_id FROM enrolment e " +
+            "    WHERE " + enrolledToday + " AND e.student_id IN (" + placeholders + "))",
             (rs, i) -> UUID.fromString(rs.getString(1)),
-            java.util.stream.Stream.concat(mine.stream(), mine.stream()).toArray());
+            args(mine, Date.valueOf(today), Date.valueOf(today), mine));
 
         var all = new java.util.LinkedHashSet<UUID>(office);
         all.addAll(teachers);
         return new Visible(false, List.copyOf(all));
+    }
+
+    /** Flattens the mixed list-and-scalar bind arguments, in order. */
+    private static Object[] args(Object... parts) {
+        var flat = new java.util.ArrayList<Object>();
+        for (Object part : parts) {
+            if (part instanceof List<?> list) flat.addAll(list);
+            else flat.add(part);
+        }
+        return flat.toArray();
     }
 }

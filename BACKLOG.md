@@ -1420,6 +1420,29 @@ several are security-relevant.
 
 ### Correctness
 
+- **The family directory answered two date questions with a status and a
+  missing window.** ✅ **Closed 2026-09-09.** `DirectoryScope` decides which
+  staff a parent may contact — the teachers of their children's sections, plus
+  the office. Both halves of "their children's sections" were wrong. The
+  enrolment side read `status = 'active'`, which flips the day a withdrawal is
+  *filed*: a family served notice on the 1st for a last working day of the 30th
+  lost the school's entire contact list for the month they most needed it, and
+  `EnrolmentActivity` exists precisely so nothing spells the question that way.
+  The timetable side read `timetable_slot` with no window at all, so next
+  term's teacher was already contactable and last term's still was — while
+  `TeacherScope` uses today's window to decide whose sections that teacher may
+  read. The two disagreeing means a parent handed the address of somebody who
+  cannot open their child's record. Both are now the same date, today.
+  `cert_SEC_10` covers each half, and each was confirmed to fail on its own
+  before the fix.
+
+  **Not fixed here:** roughly twenty other reads still spell the enrolment
+  question `status = 'active'` — fees, rollover, dashboards, report cards,
+  `RollNumbers`, `EnrolmentRepository` itself. Each has the same withdrawal
+  window bug in whatever it answers, and converting them is its own sweep.
+  There is no structural rule failing the build on a new one, which is what
+  would stop the count going back up.
+
 - **A timetable revision rewrote history instead of superseding it.** ✅
   **Closed 2026-09-09.** `timetable_slot` has carried
   `effective_from`/`effective_to` since V004, and the date-keyed reads

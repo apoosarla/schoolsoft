@@ -3,6 +3,7 @@ package com.schoolsoft.certification;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.schoolsoft.certification.support.AbstractCertificationTest;
+import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Disabled;
@@ -277,6 +278,87 @@ class SecurityCertTest extends AbstractCertificationTest {
         var staffView = get("/v1/people/directory?schoolId=" + school.id(), principalToken(school)).getBody();
         assertThat(staffView.size()).isGreaterThan(directory.getBody().size());
 
+        // Which staff a family reaches is a question about today, on both
+        // halves. A teacher timetabled into the child's section is contactable
+        // while that period is in force and not before or after it — the same
+        // window that decides whose sections that teacher may read, so the
+        // parent is never handed the address of somebody who cannot open their
+        // child's record.
+        // A teacher whose only route to this family is a timetabled period is
+        // reachable while that period is in force, and not before or after it.
+        // Every teacher in the fixture already reaches the family some other
+        // way — a standing subject assignment, or `guardian.view` — so this
+        // one is the scenario's own, made rather than borrowed.
+        String principal = principalToken(school);
+        UUID visitingTeacher = UUID.randomUUID();
+        UUID visitingAccount = UUID.randomUUID();
+        inChainDo(jdbc -> {
+            jdbc.update(
+                "INSERT INTO staff (id, school_id, employee_no, first_name, last_name, email, "
+                + "employment_type, joined_on) VALUES (?, ?, 'EMP-SEC10', 'Visiting', 'Teacher', "
+                + "'sec10.visiting@oakridge.test', 'visiting', current_date)",
+                visitingTeacher, school.id());
+            // The directory is over `user_account`: a staff row with no login
+            // is not in anybody's contact list, whatever they teach.
+            jdbc.update(
+                "INSERT INTO user_account (id, school_id, subject_type, subject_id, email) "
+                + "VALUES (?, ?, 'staff', ?, 'sec10.visiting@oakridge.test')",
+                visitingAccount, school.id(), visitingTeacher);
+        });
+        try {
+            // No period yet, so no address.
+            assertThat(directoryStaffIds(school, parent)).doesNotContain(visitingTeacher);
+
+            var running = post("/v1/timetable/slots", body(
+                "sectionId", section, "subjectId", subjectOf(school, school.subjectCodes().get(0)),
+                "teacherStaffId", visitingTeacher, "dayOfWeek", 1, "periodNo", 10,
+                "startsAt", "17:00:00", "endsAt", "17:45:00", "room", "SEC10-NOW",
+                "effectiveFrom", school.currentAy().startsOn().toString()), principal);
+            assertThat(running.getStatusCode()).isEqualTo(HttpStatus.OK);
+            UUID runningSlot = UUID.fromString(running.getBody().get("id").asText());
+            assertThat(directoryStaffIds(school, parent)).contains(visitingTeacher);
+
+            // Retired yesterday: the period is history, and so is the address.
+            assertThat(post("/v1/timetable/slots/" + runningSlot + "/retire",
+                body("lastDay", LocalDate.now().minusDays(1).toString()), principal)
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(directoryStaffIds(school, parent)).doesNotContain(visitingTeacher);
+
+            // And a period that starts next week is not an address yet.
+            var later = post("/v1/timetable/slots", body(
+                "sectionId", section, "subjectId", subjectOf(school, school.subjectCodes().get(0)),
+                "teacherStaffId", visitingTeacher, "dayOfWeek", 1, "periodNo", 10,
+                "startsAt", "17:00:00", "endsAt", "17:45:00", "room", "SEC10-LATER",
+                "effectiveFrom", LocalDate.now().plusWeeks(1).toString()), principal);
+            assertThat(later.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(directoryStaffIds(school, parent)).doesNotContain(visitingTeacher);
+        } finally {
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM timetable_slot WHERE teacher_staff_id = ?", visitingTeacher);
+                jdbc.update("DELETE FROM user_account WHERE id = ?", visitingAccount);
+                jdbc.update("DELETE FROM staff WHERE id = ?", visitingTeacher);
+            });
+        }
+
+        // The other half: a withdrawal filed today for a last day at the end of
+        // the month leaves the child on the register until then, so the family
+        // keeps the school's contact list for the month they most need it.
+        // `status` says why the enrolment closes, never whether it is open.
+        var before = directoryStaffIds(school, parent);
+        assertThat(before).isNotEmpty();
+        inChainDo(jdbc -> jdbc.update(
+            "UPDATE enrolment SET status = 'withdrawn', ends_on = ? WHERE student_id = ? AND ends_on IS NULL",
+            java.sql.Date.valueOf(LocalDate.now().plusDays(21)), mine));
+        try {
+            // Read as a status, this is where the teachers vanish.
+            assertThat(directoryStaffIds(school, parent)).isEqualTo(before);
+        } finally {
+            inChainDo(jdbc -> jdbc.update(
+                "UPDATE enrolment SET status = 'active', ends_on = NULL WHERE student_id = ? "
+                + "AND status = 'withdrawn'", mine));
+        }
+        assertThat(directoryStaffIds(school, parent)).isEqualTo(before);
+
         // A guardian unlinked from a child loses them, without any other change.
         UUID guardianId = queryOne(
             "SELECT gs.guardian_id FROM guardian_student gs WHERE gs.student_id = ? ORDER BY gs.is_primary DESC "
@@ -300,6 +382,15 @@ class SecurityCertTest extends AbstractCertificationTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    private java.util.Set<UUID> directoryStaffIds(
+        com.schoolsoft.certification.support.CertificationFixture.SchoolSeed school, String token
+    ) {
+        java.util.Set<UUID> ids = new java.util.LinkedHashSet<>();
+        get("/v1/people/directory?schoolId=" + school.id(), token).getBody()
+            .forEach(entry -> ids.add(UUID.fromString(entry.get("subjectId").asText())));
+        return ids;
+    }
 
     private static final String OTHER_CHAIN = "certother";
 
