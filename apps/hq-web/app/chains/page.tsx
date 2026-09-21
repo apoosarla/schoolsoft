@@ -9,6 +9,7 @@ import {
   ChainStatsDto,
   clearToken,
   getChainStats,
+  getSessionKind,
   isLoggedIn,
   listChains,
   provisionChain,
@@ -53,6 +54,12 @@ export default function ChainsPage() {
   useEffect(() => {
     if (!isLoggedIn()) {
       router.replace("/login");
+      return;
+    }
+    // Every chain is the operator's view. A chain admin has one, and it is
+    // not reached from here.
+    if (getSessionKind() === "chain") {
+      router.replace("/my-chain");
       return;
     }
     setHasToken(true);

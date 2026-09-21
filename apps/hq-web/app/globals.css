@@ -205,6 +205,16 @@ button:hover { background: var(--accent-strong); }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
+/* The unchosen half of a pair: the sign-in door not being used, the step not
+   being taken. Quiet enough that the chosen one reads as the answer. */
+button.secondary {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+button.secondary:hover { background: var(--surface-hover); color: var(--text); }
+
 .badge {
   display: inline-flex;
   align-items: center;
