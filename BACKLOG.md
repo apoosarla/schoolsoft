@@ -1731,11 +1731,72 @@ still missing around it:
   only schools that have opted into a public site, and answer uniformly
   otherwise.
 
-- **Only `school-web` is redesigned.** `platform-web`, `parent-app`,
-  `teacher-app` and `driver-app` still carry the original chain-slug form and
-  the single-field OTP input. The six-box code step in
-  `school-web/app/login/page.tsx` is the piece worth extracting into
-  `@schoolsoft/api-client`'s sibling UI package when one exists.
+### The five surfaces still on the old form
+
+Only `school-web` is redesigned. The rest still ask for a chain slug and take
+the code in a single text field. Each has its own reason to differ, so they are
+listed separately rather than as one sweep — the designs are on the canvas the
+redesign came from.
+
+- **`platform-web` — two doors, not a toggle.** Today one page switches between
+  the chain-HQ and platform-admin flows with a pair of buttons, which reads as
+  one login with a setting. They are different account lists answering
+  different endpoints (`/v1/auth/otp/*` against a chain's `user_account`, vs
+  `/v1/auth/platform-admin/otp/*` against `platform.platform_user`), and they
+  should look it: the operator door is its own page, deliberately not
+  school-branded, stating that the session is audited and that platform
+  accounts are a separate list. The HQ door resolves its chain from the host
+  like `school-web` does, falling back to a `<chain>.schoolsoft.app` address
+  field rather than a bare slug. Each links to the other; neither is a tab.
+
+- **`parent-app` — mobile number first, and no host to resolve.** A Capacitor
+  build has no hostname, so the tenant has to arrive some other way: the invite
+  link or the access code above, or a QR on the admission letter. Until those
+  exist this app cannot lose its slug field, which makes it the one blocked on
+  backend work rather than on design. The form itself is phone-first (country
+  code + mobile, email secondary) with a "stay signed in" that re-verifies
+  every 90 days.
+
+- **`teacher-app` — the shared-device switch.** Staffroom tablets are the
+  common case and the reason persistence cannot simply default on: the app
+  needs an explicit "this is a shared device" that ends the session when the
+  app closes and remembers nothing. Off, a teacher stays signed in for 30 days,
+  because attendance is taken at the start of every period and nobody should
+  type a code to do it. The school is remembered on the device after first
+  sign-in.
+
+- **`driver-app` — sunlight and gloves.** Mobile number only (drivers have
+  phones, not school email), 56px+ targets, monospaced numerals, high contrast.
+  One number maps to one vehicle, so the screen after sign-in has to be
+  checkable against the bus actually being driven.
+
+- **Extract the code step.** The six-box input in
+  `school-web/app/login/page.tsx` — `one-time-code` autofill, paste spread
+  across all six, verify on the sixth digit — is the piece all five surfaces
+  want. There is no shared UI package yet; `@schoolsoft/api-client` is the
+  obvious sibling to put one beside. Doing this before porting the other four
+  avoids five copies that drift.
+
+### Sign-in states nothing renders yet
+
+The redesign names six ways sign-in goes wrong. `school-web` handles two of
+them (a wrong code, and an identifier the office has no record of). The rest
+have no rendering, and most have no API shape to render:
+
+- **School not open yet.** `refuseUntilTheSchoolIsOpen` already 403s a staff
+  member whose school is still in `draft`, but the body is a generic message.
+  It should carry the opening date so the page can say the school opens on it
+  and the account works from then — a readiness fact the office knows and the
+  person being refused does not.
+- **Too many codes.** No rate limit exists, so there is no state to draw.
+  Depends on the resolver and OTP limits above.
+- **Offline / API unreachable.** The page currently surfaces the raw fetch
+  error. It should keep what was typed and say plainly that nothing was sent,
+  so nothing was used up.
+- **Wrong door.** A guardian landing on the staff sign-in should be pointed at
+  the Parent app — in a message shown to *everyone* who lands there, never one
+  that confirms which app a given number belongs to. That confirmation is a
+  cross-tenant oracle and was cut from the design for that reason.
 
 
 _Fixed while building the harness: an expired or malformed bearer token
