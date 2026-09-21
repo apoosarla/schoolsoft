@@ -50,7 +50,7 @@ public class SchoolOnboardingService {
             String skipReason = skips.get(step.key());
             steps.add(new OnboardingStepDto(
                 step.key(), step.label(), step.why(), step.blocking(),
-                count > 0, count, skipReason != null, skipReason));
+                count > 0, count, step.unit(count), skipReason != null, skipReason));
         }
 
         return new SchoolReadinessDto(
@@ -121,7 +121,10 @@ public class SchoolOnboardingService {
             throw new ConflictException(
                 "This school is not ready to open — " + open.size()
                 + (open.size() == 1 ? " step is" : " steps are") + " still open: "
-                + String.join("; ", open.stream().map(s -> s.label() + " (" + s.why() + ")").toList()));
+                // Names the steps and not their reasons: the checklist carries
+                // the "why" beside each one, and repeating all of it here
+                // buries the list the caller has to act on.
+                + String.join(", ", open.stream().map(OnboardingStepDto::label).toList()) + ".");
         }
 
         int moved = jdbc.update(

@@ -2676,6 +2676,7 @@ export const SCREEN_DEFS = [
   { key: "transport", label: "Transport", path: "/transport" },
   { key: "admin", label: "Roles & Users", path: "/roles" },
   { key: "settings", label: "Settings", path: "/settings" },
+  { key: "setup", label: "Setup", path: "/setup" },
 ] as const;
 
 export type RoleDto = {
@@ -2751,4 +2752,114 @@ export function unassignStaffRole(
     method: "POST",
     body: JSON.stringify({ staffId, schoolId, roleCode, reason }),
   });
+}
+
+// ---------------------------------------------------------------- school setup
+
+/**
+ * One step of a school's setup. `done` and `count` are derived server-side
+ * from the rows the step is about, so a step that was finished and then undone
+ * — the last section deleted — goes back to open by itself.
+ */
+export type OnboardingStepDto = {
+  key: string;
+  label: string;
+  /** Why it matters, in the API's own words. The screen shows this rather than inventing its own. */
+  why: string;
+  blocking: boolean;
+  done: boolean;
+  count: number;
+  /** What `count` counts, already agreeing with it: "1 campus", "7 subjects". */
+  unit: string;
+  skipped: boolean;
+  skipReason: string | null;
+};
+
+export type SchoolReadinessDto = {
+  schoolId: string;
+  lifecycle: "draft" | "live" | "suspended";
+  wentLiveAt?: string | null;
+  canGoLive: boolean;
+  steps: OnboardingStepDto[];
+};
+
+export function getSchoolReadiness(schoolId: string): Promise<SchoolReadinessDto> {
+  return apiFetch<SchoolReadinessDto>(`/v1/tenancy/schools/${schoolId}/readiness`);
+}
+
+/** Only a non-blocking step can be skipped, and the reason is mandatory. */
+export function skipSetupStep(
+  schoolId: string,
+  stepKey: string,
+  reason: string
+): Promise<SchoolReadinessDto> {
+  return apiFetch<SchoolReadinessDto>(`/v1/tenancy/schools/${schoolId}/steps/${stepKey}/skip`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function unskipSetupStep(schoolId: string, stepKey: string): Promise<SchoolReadinessDto> {
+  return apiFetch<SchoolReadinessDto>(`/v1/tenancy/schools/${schoolId}/steps/${stepKey}/unskip`, {
+    method: "POST",
+  });
+}
+
+/**
+ * Opens the school. Refused with a 409 naming the open steps while any
+ * blocking one is left; opening one that is already open is not an error, so
+ * a retry after a dropped response is safe.
+ */
+export function goLive(schoolId: string): Promise<SchoolReadinessDto> {
+  return apiFetch<SchoolReadinessDto>(`/v1/tenancy/schools/${schoolId}/go-live`, { method: "POST" });
+}
+
+export type CampusDto = { id: string; schoolId: string; name: string; isPrimary: boolean };
+
+export function listCampuses(schoolId: string): Promise<CampusDto[]> {
+  return apiFetch<CampusDto[]>(`/v1/tenancy/schools/${schoolId}/campuses`);
+}
+
+export function createCampus(
+  schoolId: string,
+  req: { name: string; isPrimary: boolean }
+): Promise<CampusDto> {
+  return apiFetch<CampusDto>(`/v1/tenancy/schools/${schoolId}/campuses`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function createGrade(
+  schoolId: string,
+  req: { code: string; name: string; sortOrder: number }
+): Promise<GradeDto> {
+  return apiFetch<GradeDto>(`/v1/tenancy/schools/${schoolId}/grades`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** `campusId` may be left out: the school's primary campus is where a section lands. */
+export function createSection(
+  schoolId: string,
+  req: {
+    gradeId: string;
+    academicYearId: string;
+    code: string;
+    name: string;
+    strategyCode: string;
+    capacity?: number | null;
+    campusId?: string | null;
+  }
+): Promise<SectionDto> {
+  return apiFetch<SectionDto>(`/v1/tenancy/schools/${schoolId}/sections`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** The strategy codes with a board implementation behind them; anything else falls back to plain percentages. */
+export function listStrategyCodes(): Promise<string[]> {
+  return apiFetch<string[]>("/v1/assessment/strategies");
 }

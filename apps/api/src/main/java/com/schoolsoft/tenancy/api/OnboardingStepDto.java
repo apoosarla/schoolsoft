@@ -16,6 +16,8 @@ public record OnboardingStepDto(
     boolean blocking,
     boolean done,
     long count,
+    /** What `count` counts, already agreeing with it: "1 campus", "7 subjects". */
+    String unit,
     boolean skipped,
     String skipReason
 ) {}

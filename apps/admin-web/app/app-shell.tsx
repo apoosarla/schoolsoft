@@ -118,6 +118,14 @@ const ICON: Record<string, JSX.Element> = {
       <path d="M6.5 9.2L8.2 10.9L11.5 7.3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  setup: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path d="M3 4.6L4.4 6L7 3.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 9.6L4.4 11L7 8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="4.6" cy="14.4" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M9.4 4.7H15.4M9.4 9.7H15.4M9.4 14.4H15.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  ),
   settings: (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.4" />

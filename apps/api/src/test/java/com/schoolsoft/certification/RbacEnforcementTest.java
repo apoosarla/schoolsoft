@@ -540,6 +540,26 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             cbse().id())).isZero();
     }
 
+    /**
+     * {@code school.onboard} is two acts, and a head of school holds it for
+     * the second one only. Creating a school from inside a school is refused
+     * with the reason, rather than by the INSERT hitting V009's policy and
+     * answering 500 about a constraint the caller cannot see.
+     */
+    @Test
+    @DisplayName("a principal cannot create a school from inside their own")
+    void principalCannotCreateASchool() {
+        var refused = post("/v1/tenancy/schools", body(
+            "slug", "rbac-probe-school",
+            "name", "Rbac Probe School",
+            "boardCode", "CBSE",
+            "stateCode", "KA"), principalToken(cbse()));
+
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refused.getBody().get("message").asText()).contains("HQ console");
+        assertThat(count("SELECT count(*) FROM school WHERE slug = 'rbac-probe-school'")).isZero();
+    }
+
     /** The positive half: the gate is a gate, not a wall. */
     @Test
     @DisplayName("a principal skips an optional setup step and puts it back")

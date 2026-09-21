@@ -2,6 +2,8 @@ package com.schoolsoft.tenancy.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.AuditService;
+import com.schoolsoft.platform.tenancy.TenantContext;
+import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.tenancy.internal.SchoolRepository;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -42,15 +44,33 @@ public class SchoolController {
     ) {}
 
     /**
-     * Opening a school was platform-admin work, which made a chain wait on a
-     * ticket to Schoolsoft to open its own. {@code school.onboard} is held by
-     * the three heads and by a chain admin — whose grant is the one write in
-     * an otherwise read-only baseline, argued for in {@code PermissionChecker}.
-     * A platform admin still passes: they hold every permission there is.
+     * Creating a school was platform-admin work, which made a chain wait on a
+     * ticket to Schoolsoft to open its own. {@code school.onboard} opens it to
+     * the chain's own HQ admin — the one write in an otherwise read-only
+     * baseline, argued for in {@code PermissionChecker}. A platform admin
+     * still passes: they hold every permission there is.
+     *
+     * <h2>Why a principal is refused here and not elsewhere</h2>
+     * A head of school holds {@code school.onboard} too, because it is also
+     * what opens their own school once its setup is done. It cannot create
+     * one: V009's policy on {@code school} carries
+     * {@code WITH CHECK (… OR id = current_school_id())}, so a session scoped
+     * to a school can only write that school's row. Without this guard the
+     * database refuses the INSERT and the caller gets a 500 about nothing they
+     * can act on; with it they get the sentence that explains where the act
+     * actually belongs. The rule is the RLS policy's, not this method's — this
+     * only says it out loud.
      */
     @PreAuthorize("@perm.can('school.onboard')")
     @PostMapping("/schools")
     public SchoolDto create(@RequestBody CreateSchoolRequest req) {
+        var snap = TenantContext.get();
+        if (snap != null && snap.schoolId() != null && !snap.trusted()) {
+            throw new ForbiddenException(
+                "A school is created by the chain, not from inside another school. "
+                + "This session is scoped to one school, and row-level security lets it write "
+                + "only that school's row — open the new school from the chain's HQ console.");
+        }
         return repo.create(req.slug(), req.name(), req.boardCode(), req.gstin(), req.stateCode());
     }
 

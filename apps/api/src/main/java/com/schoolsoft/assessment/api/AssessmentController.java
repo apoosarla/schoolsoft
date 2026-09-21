@@ -8,6 +8,7 @@ import com.schoolsoft.iam.api.SelfScope;
 import com.schoolsoft.iam.api.TeacherScope;
 import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.assessment.internal.ReportCardService;
+import com.schoolsoft.assessment.internal.strategy.StrategyRegistry;
 import com.schoolsoft.audit.api.Audited;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -28,16 +29,35 @@ public class AssessmentController {
     private final AssessmentPolicyRepository policies;
     private final SelfScope selfScope;
     private final TeacherScope teacherScope;
+    private final StrategyRegistry strategies;
 
     public AssessmentController(AssessmentRepository repo, MarkService marks, ReportCardService reportCards,
                                 AssessmentPolicyRepository policies, SelfScope selfScope,
-                                TeacherScope teacherScope) {
+                                TeacherScope teacherScope, StrategyRegistry strategies) {
         this.repo = repo;
         this.marks = marks;
         this.reportCards = reportCards;
         this.policies = policies;
         this.selfScope = selfScope;
         this.teacherScope = teacherScope;
+        this.strategies = strategies;
+    }
+
+    /**
+     * The strategy codes a section can be opened on. Gated on
+     * {@code structure.view} rather than an assessment permission because the
+     * caller is whoever is building the school's sections, and choosing how a
+     * section is graded is part of creating it.
+     *
+     * <p>It exists so a screen does not carry its own copy of the list. A
+     * code that is not here still resolves — to the generic percentage
+     * fallback — which is a decision nobody made, so nothing should offer
+     * one.</p>
+     */
+    @PreAuthorize("@perm.can('structure.view')")
+    @GetMapping("/strategies")
+    public List<String> strategies() {
+        return strategies.codes();
     }
 
     @PreAuthorize("@perm.can('assessment.view')")

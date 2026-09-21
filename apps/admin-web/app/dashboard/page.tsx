@@ -2,7 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ApiError, clearSession, getSchoolOverview, getSession, Session, SchoolOverviewDto } from "@/lib/api";
+import Link from "next/link";
+import {
+  ApiError,
+  clearSession,
+  getSchoolOverview,
+  getSchoolReadiness,
+  getSession,
+  hasScreen,
+  Session,
+  SchoolOverviewDto,
+  SchoolReadinessDto,
+} from "@/lib/api";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -10,6 +21,7 @@ export default function DashboardPage() {
   const [overview, setOverview] = useState<SchoolOverviewDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [readiness, setReadiness] = useState<SchoolReadinessDto | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -22,6 +34,12 @@ export default function DashboardPage() {
       .then(setOverview)
       .catch((err) => setError(err instanceof ApiError ? `${err.code}: ${err.message}` : "Failed to load"))
       .finally(() => setLoading(false));
+    // A dashboard of zeroes reads as broken. While the school is still being
+    // set up it is not broken, it is unopened, and this is where that gets
+    // said. A caller who cannot read the checklist simply does not see it.
+    getSchoolReadiness(s.schoolId)
+      .then(setReadiness)
+      .catch(() => setReadiness(null));
   }, [router]);
 
   function signOut() {
@@ -47,6 +65,19 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+
+      {readiness && readiness.lifecycle === "draft" && (
+        <div className="warn-banner">
+          <div className="form-row" style={{ justifyContent: "space-between", alignItems: "center", margin: 0, gap: 12 }}>
+            <span>
+              {readiness.canGoLive
+                ? "Everything this school needs is in place — it has just not been opened yet. Nobody outside the office can sign in until it is."
+                : `This school is still being set up — ${readiness.steps.filter((s) => s.blocking && !s.done).length} of ${readiness.steps.filter((s) => s.blocking).length} steps left. Nobody outside the office can sign in yet.`}
+            </span>
+            {hasScreen(session, "setup") && <Link href="/setup">Finish setup &rarr;</Link>}
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="panel">

@@ -24,6 +24,15 @@ public class StrategyRegistry {
         this.fallback = fallback;
     }
 
+    /**
+     * Every code with an implementation behind it, registration order. What a
+     * screen offers when somebody has to choose how a section is taught —
+     * anything else lands on the fallback, which is a decision nobody made.
+     */
+    public List<String> codes() {
+        return List.copyOf(byCode.keySet());
+    }
+
     public CurriculumStrategy forCode(String strategyCode) {
         if (strategyCode == null) return fallback;
         CurriculumStrategy exact = byCode.get(strategyCode);
