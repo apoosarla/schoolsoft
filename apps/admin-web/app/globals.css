@@ -572,3 +572,134 @@ tbody tr[role="button"] { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* ============ Admissions pipeline ============ */
+
+/* The funnel reads left to right as lanes, each holding the exact states that
+   lane covers. It scrolls sideways rather than wrapping, because a wrapped
+   funnel stops looking like a sequence. */
+.funnel-lanes {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.funnel-lane {
+  flex: 1 1 0;
+  min-width: 132px;
+}
+
+.funnel-lane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 6px;
+  border-bottom: 2px solid var(--border-strong);
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.funnel-lane-total {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  letter-spacing: 0;
+}
+
+.funnel-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* A tile is a button: the number is the control, and picking one is what
+   fetches that stage's rows. */
+.funnel-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.funnel-tile:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.funnel-tile.selected {
+  background: var(--accent-wash-strong);
+  border-color: transparent;
+  border-left-color: var(--accent-strong);
+}
+
+/* Nothing follows enrolled/rejected/lapsed, so they are a record rather than
+   work waiting to be done. */
+.funnel-tile.closing {
+  border-left-color: var(--border-strong);
+}
+
+.funnel-tile.empty {
+  color: var(--text-faint);
+  border-left-color: var(--border);
+}
+
+.funnel-tile.empty .funnel-count {
+  color: var(--text-faint);
+}
+
+.funnel-count {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.funnel-state {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+
+.funnel-tile.selected .funnel-state,
+.funnel-tile.selected .funnel-count {
+  color: var(--accent-strong);
+}
+
+/* One button per legal move: with the machine answering per stage, the row
+   offers exactly the moves that exist and nothing else. */
+.move-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.move-actions .tab {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.expiry-past {
+  color: var(--critical);
+  font-weight: 600;
+}
+
+.expiry-soon {
+  color: var(--warning);
+  font-weight: 600;
+}

@@ -2,6 +2,7 @@ package com.schoolsoft.admissions.internal;
 
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.admissions.api.AdmissionEventDto;
+import com.schoolsoft.admissions.api.AdmissionFunnelSummaryDto;
 import com.schoolsoft.admissions.api.AdmissionPolicyDto;
 import com.schoolsoft.enrolment.api.RollNumbers;
 import com.schoolsoft.platform.web.ConflictException;
@@ -55,15 +56,83 @@ public class AdmissionsRepository {
         rs.getTimestamp("created_at").toInstant()
     );
 
+    /**
+     * The funnel's states in funnel order. Mirrors the CHECK on
+     * {@code admission_application.state} (V007) by hand — the database knows
+     * the set but not the order, and the order is what makes a board read like
+     * a pipeline rather than an alphabetical list.
+     */
+    public static final List<String> STATES = List.of(
+        "lead", "application_started", "document_pending", "fee_pending", "review",
+        "test_scheduled", "test_done", "offered", "accepted", "waitlist",
+        "enrolled", "rejected", "lapsed");
+
     private static final String COLS =
         "id, school_id, academic_year_id, grade_id, application_no, applicant_first_name, applicant_last_name, " +
         "applicant_dob, applicant_gender, guardian_name, guardian_phone, guardian_email, source, state, " +
         "test_score, interview_notes, offer_expires_on, converted_student_id, created_at";
 
     public List<AdmissionApplicationDto> list(UUID schoolId, String state) {
-        String sql = "SELECT " + COLS + " FROM admission_application WHERE school_id = ?" +
-            (state == null ? "" : " AND state = ?") + " ORDER BY created_at DESC";
-        return state == null ? jdbc.query(sql, MAPPER, schoolId) : jdbc.query(sql, MAPPER, schoolId, state);
+        return list(schoolId, state, null, 0);
+    }
+
+    /**
+     * One page of one stage. {@code limit} null means every row, which is what
+     * the older callers pass and what an export needs; the pipeline screen
+     * always names a page, because a closed year holds several thousand
+     * applications and nobody reads them all at once.
+     */
+    public List<AdmissionApplicationDto> list(UUID schoolId, String state, Integer limit, int offset) {
+        var args = new java.util.ArrayList<Object>();
+        args.add(schoolId);
+        StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM admission_application WHERE school_id = ?");
+        if (state != null) {
+            sql.append(" AND state = ?");
+            args.add(state);
+        }
+        // created_at alone is not a total order -- two applications lodged in
+        // the same millisecond would swap places between pages and one of them
+        // would never be read. id breaks the tie.
+        sql.append(" ORDER BY created_at DESC, id DESC");
+        if (limit != null) {
+            sql.append(" LIMIT ? OFFSET ?");
+            args.add(limit);
+            args.add(Math.max(0, offset));
+        }
+        return jdbc.query(sql.toString(), MAPPER, args.toArray());
+    }
+
+    /**
+     * The funnel as counts. Every state appears, including the empty ones, so
+     * the board keeps its shape as a season fills up.
+     */
+    public AdmissionFunnelSummaryDto summary(UUID schoolId, List<String> allStates) {
+        var counted = new java.util.LinkedHashMap<String, Long>();
+        allStates.forEach(state -> counted.put(state, 0L));
+
+        jdbc.query(
+            "SELECT state, count(*) AS n FROM admission_application WHERE school_id = ? GROUP BY state",
+            rs -> {
+                counted.merge(rs.getString("state"), rs.getLong("n"), Long::sum);
+            },
+            schoolId);
+
+        long total = counted.values().stream().mapToLong(Long::longValue).sum();
+
+        Long soon = jdbc.queryForObject(
+            "SELECT count(*) FROM admission_application WHERE school_id = ? AND state = 'offered' "
+            + "AND offer_expires_on IS NOT NULL AND offer_expires_on BETWEEN CURRENT_DATE AND CURRENT_DATE + 7",
+            Long.class, schoolId);
+        Long expired = jdbc.queryForObject(
+            "SELECT count(*) FROM admission_application WHERE school_id = ? AND state = 'offered' "
+            + "AND offer_expires_on IS NOT NULL AND offer_expires_on < CURRENT_DATE",
+            Long.class, schoolId);
+
+        var byState = counted.entrySet().stream()
+            .map(e -> new AdmissionFunnelSummaryDto.StateCount(e.getKey(), e.getValue()))
+            .toList();
+        return new AdmissionFunnelSummaryDto(schoolId, total, byState,
+            soon == null ? 0 : soon, expired == null ? 0 : expired);
     }
 
     public Optional<AdmissionApplicationDto> find(UUID id) {

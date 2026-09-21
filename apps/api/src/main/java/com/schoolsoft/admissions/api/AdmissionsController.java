@@ -25,10 +25,41 @@ public class AdmissionsController {
         this.applications = applications;
     }
 
+    /**
+     * One page of one stage. {@code limit} is optional so an export can still
+     * ask for everything; the pipeline screen always names one, because the
+     * page opens on counts and fetches rows only for the stage somebody picked.
+     */
     @PreAuthorize("@perm.can('admission.view')")
     @GetMapping("/applications")
-    public List<AdmissionApplicationDto> list(@RequestParam UUID schoolId, @RequestParam(required = false) String state) {
-        return repo.list(schoolId, state);
+    public List<AdmissionApplicationDto> list(
+        @RequestParam UUID schoolId,
+        @RequestParam(required = false) String state,
+        @RequestParam(required = false) Integer limit,
+        @RequestParam(defaultValue = "0") int offset
+    ) {
+        return repo.list(schoolId, state, limit, offset);
+    }
+
+    /**
+     * The funnel as counts — what the pipeline screen opens with, instead of
+     * every application in the school.
+     */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/summary")
+    public AdmissionFunnelSummaryDto summary(@RequestParam UUID schoolId) {
+        return repo.summary(schoolId, AdmissionsRepository.STATES);
+    }
+
+    /**
+     * The moves a stage may make at this school, without naming an application.
+     * Every row in a stage shares them, so the screen asks once rather than
+     * once per row.
+     */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/moves")
+    public List<String> movesForState(@RequestParam UUID schoolId, @RequestParam String fromState) {
+        return repo.movesFrom(fromState, applications.policy(schoolId).entranceTestRequired());
     }
 
     @PreAuthorize("@perm.can('admission.view')")

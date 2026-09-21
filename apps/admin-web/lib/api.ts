@@ -311,10 +311,37 @@ export type AdmissionApplicationDto = {
   createdAt: string;
 };
 
-export function listAdmissionApplications(schoolId: string, state?: string): Promise<AdmissionApplicationDto[]> {
+export function listAdmissionApplications(
+  schoolId: string,
+  state?: string,
+  page?: { limit: number; offset: number }
+): Promise<AdmissionApplicationDto[]> {
   const params = new URLSearchParams({ schoolId });
   if (state) params.set("state", state);
+  if (page) {
+    params.set("limit", String(page.limit));
+    params.set("offset", String(page.offset));
+  }
   return apiFetch<AdmissionApplicationDto[]>(`/v1/admissions/applications?${params.toString()}`);
+}
+
+export type AdmissionFunnelSummaryDto = {
+  schoolId: string;
+  total: number;
+  byState: { state: string; count: number }[];
+  offersExpiringSoon: number;
+  offersExpired: number;
+};
+
+/** The funnel as counts. The pipeline screen opens with this, not with rows. */
+export function getAdmissionSummary(schoolId: string): Promise<AdmissionFunnelSummaryDto> {
+  return apiFetch<AdmissionFunnelSummaryDto>(`/v1/admissions/summary?schoolId=${schoolId}`);
+}
+
+/** The moves a stage may make at this school — asked once per stage, not per row. */
+export function admissionMovesForState(schoolId: string, fromState: string): Promise<string[]> {
+  const params = new URLSearchParams({ schoolId, fromState });
+  return apiFetch<string[]>(`/v1/admissions/moves?${params.toString()}`);
 }
 
 export type CreateAdmissionApplicationRequest = {
