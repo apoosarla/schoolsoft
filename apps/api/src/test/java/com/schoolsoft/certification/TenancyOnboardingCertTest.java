@@ -248,6 +248,50 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
     }
 
 
+    /**
+     * The operator's door into a chain they do not belong to. A
+     * platform-admin token carries the platform schema, so every one of these
+     * reads steps into the chain as a trusted job — which is also why they are
+     * platform-admin only.
+     */
+    @Test @Tag("P2")
+    void cert_TEN_14_platformConsoleListsAndOpensSchoolsInsideAChain() {
+        String token = platformAdminToken();
+        String base = "/v1/platform-admin/chains/" + seed.chainId();
+
+        var before = get(base + "/schools", token);
+        assertThat(before.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(before.getBody()).hasSize(2);
+
+        var created = post(base + "/schools", Map.of(
+            "slug", "cert-probe-platform", "name", "Probe School (platform)",
+            "boardCode", "CBSE", "stateCode", "KA"), token);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID schoolId = UUID.fromString(created.getBody().get("id").asText());
+        try {
+            assertThat(created.getBody().get("lifecycle").asText()).isEqualTo("draft");
+
+            // It landed in this chain's schema, not the platform one.
+            assertThat(count("SELECT count(*) FROM school WHERE id = ?", schoolId)).isEqualTo(1);
+
+            var listed = get(base + "/schools", token).getBody();
+            assertThat(listed).hasSize(3);
+            var probe = java.util.stream.StreamSupport.stream(listed.spliterator(), false)
+                .filter(s -> s.get("id").asText().equals(schoolId.toString()))
+                .findFirst().orElseThrow();
+            assertThat(probe.get("lifecycle").asText()).isEqualTo("draft");
+            assertThat(probe.get("activeEnrolments").asLong()).isZero();
+
+            // And its checklist reads from outside the chain.
+            var readiness = get(base + "/schools/" + schoolId + "/readiness", token);
+            assertThat(readiness.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(readiness.getBody().get("canGoLive").asBoolean()).isFalse();
+            assertThat(readiness.getBody().get("steps")).hasSize(10);
+        } finally {
+            deleteProbeSchool(schoolId);
+        }
+    }
+
     // ------------------------------------------------- opening a school
 
     @Test @Tag("P1")

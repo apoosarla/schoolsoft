@@ -2,6 +2,8 @@ package com.schoolsoft.tenancy.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.platform.tenancy.TenantContext;
+import com.schoolsoft.tenancy.internal.SchoolOnboardingService;
+import com.schoolsoft.tenancy.internal.SchoolRepository;
 import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.platform.web.NotFoundException;
 import jakarta.validation.constraints.NotBlank;
@@ -34,11 +36,17 @@ public class ChainAdminController {
     private final ChainProvisioningService provisioningService;
     private final JdbcTemplate platformJdbc;
     private final DataSource dataSource;
+    private final SchoolRepository schools;
+    private final SchoolOnboardingService onboarding;
 
-    public ChainAdminController(ChainProvisioningService provisioningService, JdbcTemplate platformJdbc, DataSource dataSource) {
+    public ChainAdminController(ChainProvisioningService provisioningService, JdbcTemplate platformJdbc,
+                                DataSource dataSource, SchoolRepository schools,
+                                SchoolOnboardingService onboarding) {
         this.provisioningService = provisioningService;
         this.platformJdbc = platformJdbc;
         this.dataSource = dataSource;
+        this.schools = schools;
+        this.onboarding = onboarding;
     }
 
     private void requirePlatformAdmin() {
@@ -102,14 +110,7 @@ public class ChainAdminController {
     @GetMapping("/{id}/stats")
     public ChainStatsDto stats(@PathVariable UUID id) {
         requirePlatformAdmin();
-        String schemaName = platformJdbc.query(
-            "SELECT schema_name FROM platform.chain WHERE id = ?",
-            (rs, i) -> rs.getString("schema_name"), id
-        ).stream().findFirst().orElseThrow(() -> new NotFoundException("Chain not found: " + id));
-
-        TenantContext.set(TenantContext.trustedJob(schemaName, id));
-        try {
-            var chainJdbc = new JdbcTemplate(dataSource);
+        return inChain(id, chainJdbc -> {
             long schoolCount = chainJdbc.queryForObject("SELECT count(*) FROM school", Long.class);
             // Children on a register today across the chain — the date
             // predicate, not the status, so a filed withdrawal does not drop
@@ -122,6 +123,79 @@ public class ChainAdminController {
             long staffCount = chainJdbc.queryForObject("SELECT count(*) FROM staff WHERE is_active", Long.class);
             double feeCollectedTotal = chainJdbc.queryForObject("SELECT COALESCE(sum(paid), 0) FROM fee_invoice", Double.class);
             return new ChainStatsDto(id, schoolCount, activeEnrolments, staffCount, feeCollectedTotal);
+        });
+    }
+
+    // ----------------------------------------------------- a chain's schools
+
+    /**
+     * The schools inside one chain, for the console that opens them. The
+     * headcount is the date predicate rather than the status, for the reason
+     * {@link com.schoolsoft.enrolment.api.EnrolmentActivity} exists.
+     */
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @GetMapping("/{id}/schools")
+    public List<ChainSchoolDto> schools(@PathVariable UUID id) {
+        requirePlatformAdmin();
+        java.sql.Date today = java.sql.Date.valueOf(java.time.LocalDate.now());
+        return inChain(id, chainJdbc -> chainJdbc.query(
+            "SELECT s.id, s.slug, s.name, s.board_code, s.lifecycle, s.went_live_at, "
+                + "  (SELECT count(*) FROM enrolment e WHERE e.school_id = s.id AND "
+                + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e") + ") AS active_enrolments "
+                + "FROM school s ORDER BY s.name",
+            (rs, i) -> new ChainSchoolDto(
+                UUID.fromString(rs.getString("id")),
+                rs.getString("slug"),
+                rs.getString("name"),
+                rs.getString("board_code"),
+                rs.getString("lifecycle"),
+                rs.getTimestamp("went_live_at") == null ? null : rs.getTimestamp("went_live_at").toInstant(),
+                rs.getLong("active_enrolments")),
+            today, today));
+    }
+
+    /**
+     * Opens a school in a chain the operator does not belong to. The same act
+     * a chain's own HQ admin performs against {@code /v1/tenancy/schools};
+     * this is the door for the operator doing it on their behalf, because a
+     * platform-admin token carries the platform schema and cannot reach a
+     * chain's tables without stepping into one.
+     */
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @PostMapping("/{id}/schools")
+    public SchoolDto createSchool(@PathVariable UUID id, @RequestBody SchoolController.CreateSchoolRequest req) {
+        requirePlatformAdmin();
+        return inChain(id, chainJdbc -> schools.create(
+            req.slug(), req.name(), req.boardCode(), req.gstin(), req.stateCode()));
+    }
+
+    /** One school's setup checklist, asked from outside its chain. */
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @GetMapping("/{id}/schools/{schoolId}/readiness")
+    public SchoolReadinessDto schoolReadiness(@PathVariable UUID id, @PathVariable UUID schoolId) {
+        requirePlatformAdmin();
+        return inChain(id, chainJdbc -> onboarding.readiness(schoolId));
+    }
+
+    /**
+     * Runs {@code body} inside one chain's schema as a trusted job — the same
+     * step {@code UserLookupService} and {@code ChainSchemaMigrator} take, and
+     * the only way a platform-admin token reaches a chain's tables: its own
+     * claims name the platform schema.
+     *
+     * <p>Trusted means RLS is bypassed, so everything here is cross-school by
+     * construction. That is the point of this controller and the reason every
+     * method on it is platform-admin only.</p>
+     */
+    private <T> T inChain(UUID chainId, java.util.function.Function<JdbcTemplate, T> body) {
+        String schemaName = platformJdbc.query(
+            "SELECT schema_name FROM platform.chain WHERE id = ?",
+            (rs, i) -> rs.getString("schema_name"), chainId
+        ).stream().findFirst().orElseThrow(() -> new NotFoundException("Chain not found: " + chainId));
+
+        TenantContext.set(TenantContext.trustedJob(schemaName, chainId));
+        try {
+            return body.apply(new JdbcTemplate(dataSource));
         } finally {
             TenantContext.clear();
         }

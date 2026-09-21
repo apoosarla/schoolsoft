@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -207,9 +208,12 @@ export default function ChainsPage() {
                       <td>{c.schemaVersion}</td>
                       <td>{new Date(c.createdAt).toLocaleDateString()}</td>
                       <td>
-                        <button type="button" onClick={() => toggleStats(c.id)}>
-                          {expandedChainId === c.id ? "Hide stats" : "Stats"}
-                        </button>
+                        <div className="form-row" style={{ gap: 6, margin: 0 }}>
+                          <button type="button" onClick={() => toggleStats(c.id)}>
+                            {expandedChainId === c.id ? "Hide stats" : "Stats"}
+                          </button>
+                          <Link href={`/chains/${c.id}/schools`}>Schools &rarr;</Link>
+                        </div>
                       </td>
                     </tr>
                     {expandedChainId === c.id && (

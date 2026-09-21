@@ -130,3 +130,65 @@ export type ChainStatsDto = {
 export function getChainStats(chainId: string): Promise<ChainStatsDto> {
   return apiFetch<ChainStatsDto>(`/v1/platform-admin/chains/${chainId}/stats`);
 }
+
+// ------------------------------------------------- the schools inside a chain
+
+/**
+ * A school as the platform console sees it. The checklist is not here: it is
+ * ten counting queries per school, so the console asks for one school's
+ * readiness when somebody opens that row.
+ */
+export type ChainSchoolDto = {
+  id: string;
+  slug: string;
+  name: string;
+  boardCode: string;
+  /** draft = never opened · live = open · suspended = closed by the operator. */
+  lifecycle: "draft" | "live" | "suspended";
+  wentLiveAt?: string | null;
+  activeEnrolments: number;
+};
+
+export type OnboardingStepDto = {
+  key: string;
+  label: string;
+  why: string;
+  blocking: boolean;
+  done: boolean;
+  count: number;
+  unit: string;
+  skipped: boolean;
+  skipReason: string | null;
+};
+
+export type SchoolReadinessDto = {
+  schoolId: string;
+  lifecycle: "draft" | "live" | "suspended";
+  wentLiveAt?: string | null;
+  canGoLive: boolean;
+  steps: OnboardingStepDto[];
+};
+
+export type CreateSchoolRequest = {
+  slug: string;
+  name: string;
+  boardCode: string;
+  gstin?: string;
+  stateCode?: string;
+};
+
+export function listChainSchools(chainId: string): Promise<ChainSchoolDto[]> {
+  return apiFetch<ChainSchoolDto[]>(`/v1/platform-admin/chains/${chainId}/schools`);
+}
+
+/** Opens a school on the chain's behalf. It starts in draft, like any other. */
+export function createChainSchool(chainId: string, req: CreateSchoolRequest): Promise<ChainSchoolDto> {
+  return apiFetch<ChainSchoolDto>(`/v1/platform-admin/chains/${chainId}/schools`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export function getChainSchoolReadiness(chainId: string, schoolId: string): Promise<SchoolReadinessDto> {
+  return apiFetch<SchoolReadinessDto>(`/v1/platform-admin/chains/${chainId}/schools/${schoolId}/readiness`);
+}

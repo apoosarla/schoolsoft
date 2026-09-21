@@ -37,6 +37,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | TEN-11 | Going live twice is not an error — the retry answers with the same live school and does not move the moment it opened. | P1 |
 | TEN-12 | An optional setup step is skipped with a reason and the skip is audited; a blocking step cannot be skipped, whatever reason is offered. | P2 |
 | TEN-13 | `HQ` opens a school in their own chain with no platform admin involved, and still cannot change anything inside it. | P1 |
+| TEN-14 | `PL` lists a chain's schools from the platform console and opens one in it on the chain's behalf; the school lands in that chain's schema in `draft`, and its setup checklist is readable from outside the chain. | P2 |
 
 ## 2. Academic Year & Structure Setup (CERT-ACAD)
 

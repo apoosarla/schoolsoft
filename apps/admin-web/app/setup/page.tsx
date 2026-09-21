@@ -104,6 +104,10 @@ export default function SetupPage() {
   }
 
   const blocking = readiness.steps.filter((s) => s.blocking);
+  // Two steps have a real order behind them, enforced by the database rather
+  // than by this screen: a section needs a year to hang off, and a staff row
+  // needs a campus to land on.
+  const campusDone = readiness.steps.some((s) => s.key === "campus" && s.done);
   const optional = readiness.steps.filter((s) => !s.blocking);
   const done = blocking.filter((s) => s.done).length;
   const currentYear = years.find((y) => y.isCurrent) ?? null;
@@ -259,7 +263,15 @@ export default function SetupPage() {
       case "subjects":
         return <GoTo href="/academics" label="Academics" />;
       case "admin_account":
-        return <GoTo href="/roles" label="Roles &amp; Users" />;
+        // V018's trigger puts a new staff member on the school's primary
+        // campus and refuses when there is none, so this step genuinely
+        // cannot be done first. Say so here rather than let somebody find
+        // out as a failed save on the Roles screen.
+        return campusDone ? (
+          <GoTo href="/roles" label="Roles &amp; Users" />
+        ) : (
+          <Needs what="a campus" />
+        );
       case "fee_structure":
         return <GoTo href="/fees" label="Fees" />;
       case "theme":
@@ -304,6 +316,11 @@ function DoneCount({ step }: { step: OnboardingStepDto }) {
       {step.count} {step.unit}
     </span>
   );
+}
+
+/** A step that cannot be done yet, and what it is waiting for. */
+function Needs({ what }: { what: string }) {
+  return <span className="hint" style={{ whiteSpace: "nowrap" }}>Needs {what} first.</span>;
 }
 
 /** The screen that already builds these rows. No second form for the same table. */
@@ -362,8 +379,8 @@ function SectionForm({
 
   // A section needs a grade and a year to hang off, so the form says which one
   // is missing rather than failing on submit.
-  if (!year) return <span className="hint">Needs a current academic year first.</span>;
-  if (grades.length === 0) return <span className="hint">Needs a grade first.</span>;
+  if (!year) return <Needs what="a current academic year" />;
+  if (grades.length === 0) return <Needs what="a grade" />;
 
   const grade = grades.find((g) => g.id === gradeId) ?? grades[0];
   const strategy = strategyCode || strategies[0] || "";
