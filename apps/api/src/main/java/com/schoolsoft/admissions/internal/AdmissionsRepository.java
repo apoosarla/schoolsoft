@@ -2,7 +2,9 @@ package com.schoolsoft.admissions.internal;
 
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.admissions.api.AdmissionEventDto;
+import com.schoolsoft.admissions.api.AdmissionPolicyDto;
 import com.schoolsoft.enrolment.api.RollNumbers;
+import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.NumberSeries;
 import com.schoolsoft.tenancy.api.SectionCapacity;
@@ -83,32 +85,164 @@ public class AdmissionsRepository {
         String guardianName, String guardianPhone, String guardianEmail, String source
     ) {
         UUID id = UUID.randomUUID();
+        // Issued by the school's series, not by the caller (V019's rule). The
+        // public site used to mint "WEB-" + a random UUID fragment and the
+        // office typed them by hand, so numbers had no shape, no sequence and
+        // could collide on the unique constraint. A caller may still pass one:
+        // a back-office import carries numbers families already hold.
+        String number = applicationNo == null || applicationNo.isBlank()
+            ? numbers.next(schoolId, NumberSeries.Kind.application, null, "APP{YY}{SEQ:4}", null)
+            : applicationNo;
         jdbc.update(
             "INSERT INTO admission_application (id, school_id, academic_year_id, grade_id, application_no, " +
             "  applicant_first_name, applicant_last_name, applicant_dob, applicant_gender, " +
             "  guardian_name, guardian_phone, guardian_email, source) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            id, schoolId, academicYearId, gradeId, applicationNo, firstName, lastName,
+            id, schoolId, academicYearId, gradeId, number, firstName, lastName,
             dob == null ? null : Date.valueOf(dob), gender, guardianName, guardianPhone, guardianEmail, source
         );
-        recordEvent(id, "state_change", "lead", "lead", null);
+        // Not a state change: nothing moved, the file began. Typing it as
+        // `lead -> lead` put a move in the trail that the machine itself
+        // forbids (admission_transition CHECKs from_state <> to_state), and
+        // every time-in-stage read over that trail had to special-case it.
+        recordEvent(id, "enquiry_received", null, "lead", null);
         return find(id).orElseThrow();
     }
 
-    public AdmissionApplicationDto transition(UUID id, String toState, UUID actorUserId) {
-        var current = find(id).orElseThrow(() -> new NotFoundException("Application not found: " + id));
-        jdbc.update("UPDATE admission_application SET state = ?, updated_at = now() WHERE id = ?", toState, id);
-        recordEvent(id, "state_change", current.state(), toState, actorUserId);
-        return find(id).orElseThrow();
+    // ------------------------------------------------------------- the policy
+
+    /**
+     * The funnel this school runs. Every school gets a row at migration time
+     * and the row is never deleted, so a missing one means a school created
+     * outside the normal path; it falls back to the same defaults the column
+     * definitions carry rather than refusing the read.
+     */
+    public AdmissionPolicyDto policy(UUID schoolId) {
+        var rows = jdbc.query(
+            "SELECT school_id, entrance_test_required, offer_validity_days FROM admission_policy "
+            + "WHERE school_id = ?",
+            (rs, i) -> new AdmissionPolicyDto(
+                UUID.fromString(rs.getString("school_id")),
+                rs.getBoolean("entrance_test_required"),
+                rs.getInt("offer_validity_days")),
+            schoolId);
+        return rows.isEmpty() ? new AdmissionPolicyDto(schoolId, true, 14) : rows.get(0);
     }
 
-    public AdmissionApplicationDto recordTestScore(UUID id, double score, String notes) {
+    public AdmissionPolicyDto savePolicy(UUID schoolId, boolean entranceTestRequired, int offerValidityDays) {
         jdbc.update(
-            "UPDATE admission_application SET test_score = ?, interview_notes = ?, updated_at = now() WHERE id = ?",
-            score, notes, id
-        );
-        recordEvent(id, "test_done", null, null, null);
-        return find(id).orElseThrow(() -> new NotFoundException("Application not found: " + id));
+            "INSERT INTO admission_policy (school_id, entrance_test_required, offer_validity_days, updated_at) "
+            + "VALUES (?, ?, ?, now()) "
+            + "ON CONFLICT (school_id) DO UPDATE SET entrance_test_required = EXCLUDED.entrance_test_required, "
+            + "  offer_validity_days = EXCLUDED.offer_validity_days, updated_at = now()",
+            schoolId, entranceTestRequired, offerValidityDays);
+        return policy(schoolId);
+    }
+
+    // ------------------------------------------------------- the state machine
+
+    /** One row of the machine: the move exists, and these are its conditions. */
+    public record Move(String requiresPerm, Boolean requiresEntranceTest) {
+
+        /**
+         * A move with {@code requiresEntranceTest} NULL belongs to both funnels.
+         * TRUE or FALSE means it belongs to one, and the school has to be
+         * running that one.
+         */
+        public boolean fitsFunnel(boolean schoolTests) {
+            return requiresEntranceTest == null || requiresEntranceTest == schoolTests;
+        }
+    }
+
+    /**
+     * The move from {@code fromState} to {@code toState}, or empty when the
+     * machine has no such move at all. {@code AdmissionsService} is what acts on
+     * it — the answer is a fact about the funnel, the decision to refuse is a
+     * use case.
+     */
+    public Optional<Move> move(String fromState, String toState) {
+        var rows = jdbc.query(
+            "SELECT requires_perm, requires_entrance_test FROM admission_transition "
+            + "WHERE from_state = ? AND to_state = ?",
+            (rs, i) -> new Move(
+                rs.getString("requires_perm"),
+                rs.getObject("requires_entrance_test") == null ? null : rs.getBoolean("requires_entrance_test")),
+            fromState, toState);
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+    }
+
+    /**
+     * Every state this one may move to <em>at this school</em>, in the order a
+     * reviewer would read them. A school with no entrance test never sees
+     * {@code test_scheduled} offered to it.
+     */
+    public List<String> movesFrom(String fromState, boolean schoolTests) {
+        return jdbc.query(
+            "SELECT to_state FROM admission_transition "
+            + "WHERE from_state = ? AND (requires_entrance_test IS NULL OR requires_entrance_test = ?) "
+            + "ORDER BY note, to_state",
+            (rs, i) -> rs.getString("to_state"), fromState, schoolTests);
+    }
+
+    /**
+     * Moves the application out of {@code fromState}, and only out of that
+     * state: reading the state and then writing unconditionally leaves a window
+     * in which somebody else's move is overwritten. Zero rows means the
+     * application is no longer where the caller thought it was, and the caller
+     * decides whether that is a conflict or a retry that already succeeded.
+     *
+     * @return true when this call is the one that moved it
+     */
+    public boolean transitionFrom(UUID id, String fromState, String toState, UUID actorUserId,
+                                  LocalDate offerExpiresOn) {
+        // The expiry rides along in the same statement as the state it belongs
+        // to: an offer that exists without a date on it is one nothing can ever
+        // expire. COALESCE leaves the date alone on every other move, so a move
+        // out of `offered` keeps the history of what the family was told.
+        int moved = jdbc.update(
+            "UPDATE admission_application SET state = ?, "
+            + "  offer_expires_on = COALESCE(?, offer_expires_on), updated_at = now() "
+            + "WHERE id = ? AND state = ?",
+            toState, offerExpiresOn == null ? null : Date.valueOf(offerExpiresOn), id, fromState);
+        if (moved == 0) return false;
+        recordEvent(id, "state_change", fromState, toState, actorUserId);
+        return true;
+    }
+
+    /**
+     * Records the entrance-test result, which is also what moves the
+     * application to {@code test_done} — the score and the state were allowed
+     * to disagree before this, because the score was written unconditionally
+     * and the state was left for somebody to move by hand.
+     *
+     * <p>Amending a score on an application already at {@code test_done} is a
+     * correction and stays there. The correction is recorded as its own event
+     * rather than a second state change, because nothing moved.</p>
+     *
+     * @return true when this call moved the application out of {@code test_scheduled}
+     */
+    public boolean recordTestScore(UUID id, double score, String notes, UUID actorUserId) {
+        int scored = jdbc.update(
+            "UPDATE admission_application SET test_score = ?, interview_notes = ?, "
+            + "  state = 'test_done', updated_at = now() "
+            + "WHERE id = ? AND state = 'test_scheduled'",
+            score, notes, id);
+        if (scored == 1) {
+            recordEvent(id, "state_change", "test_scheduled", "test_done", actorUserId);
+            return true;
+        }
+        int amended = jdbc.update(
+            "UPDATE admission_application SET test_score = ?, interview_notes = ?, updated_at = now() "
+            + "WHERE id = ? AND state = 'test_done'",
+            score, notes, id);
+        if (amended == 1) {
+            recordEvent(id, "test_score_amended", null, null, actorUserId);
+            return false;
+        }
+        var current = find(id).orElseThrow(() -> new NotFoundException("Application not found: " + id));
+        throw new ConflictException(
+            "Cannot record a test score against an application that is '" + current.state()
+            + "' \u2014 a score is recorded while it is 'test_scheduled'.");
     }
 
     public List<AdmissionEventDto> listEvents(UUID applicationId) {
@@ -145,19 +279,28 @@ public class AdmissionsRepository {
      * (owned by the people/enrolment modules) mirrors the existing pattern of
      * cross-cutting reads elsewhere in this codebase (e.g. PeopleRepository
      * joining section/grade) rather than introducing a Java dependency.
-     */
-    public UUID convertToStudent(UUID applicationId, UUID sectionId, String rollNo) {
-        return convertToStudent(applicationId, sectionId, rollNo, null);
-    }
-
-    /**
-     * An offer against a full section is the same over-capacity decision as a
-     * direct enrolment, so it goes through the same check (GAP-10), and the
+     *
+     * <p>An offer against a full section is the same over-capacity decision as
+     * a direct enrolment, so it goes through the same check (GAP-10), and the
      * admission and roll numbers come from the school's series (GAP-26) rather
-     * than reusing the application number.
+     * than reusing the application number.</p>
      */
     public UUID convertToStudent(UUID applicationId, UUID sectionId, String rollNo, String overCapacityReason) {
         var app = find(applicationId).orElseThrow(() -> new NotFoundException("Application not found: " + applicationId));
+        // Conversion is a transition like any other (`accepted -> enrolled`),
+        // so it answers to the same machine. Checked before the student is
+        // created rather than only at the final UPDATE: a refusal here must not
+        // leave a student row behind, and the guard reads as the precondition
+        // it is. Re-running a conversion that already happened returns the
+        // student it made, because a retry is not an error.
+        if ("enrolled".equals(app.state()) && app.convertedStudentId() != null) {
+            return app.convertedStudentId();
+        }
+        if (!"accepted".equals(app.state())) {
+            throw new ConflictException(
+                "Cannot enrol an application that is '" + app.state() + "' — a seat is confirmed from "
+                + "'accepted'. Move the application through the funnel first.");
+        }
         String override = capacity.reserveSeat(sectionId, overCapacityReason);
         UUID studentId = UUID.randomUUID();
         String admissionNo = numbers.next(app.schoolId(), NumberSeries.Kind.admission, null, "ADM{YY}{SEQ:4}", null);
@@ -178,11 +321,19 @@ public class AdmissionsRepository {
         // (ADM-10, ADM-11).
         linkGuardian(app.schoolId(), studentId, app.guardianName(), app.guardianPhone(), app.guardianEmail());
 
-        jdbc.update(
-            "UPDATE admission_application SET state = 'enrolled', converted_student_id = ?, updated_at = now() WHERE id = ?",
+        int enrolled = jdbc.update(
+            "UPDATE admission_application SET state = 'enrolled', converted_student_id = ?, updated_at = now() " +
+            "WHERE id = ? AND state = 'accepted'",
             studentId, applicationId
         );
-        recordEvent(applicationId, "state_change", app.state(), "enrolled", null);
+        if (enrolled == 0) {
+            // Somebody moved the application between the guard above and here.
+            // AdmissionsService.enrol owns the transaction, so throwing takes
+            // the student and the enrolment with it.
+            throw new ConflictException(
+                "Cannot enrol " + applicationId + " — it left 'accepted' while the seat was being confirmed.");
+        }
+        recordEvent(applicationId, "state_change", "accepted", "enrolled", null);
         return studentId;
     }
 

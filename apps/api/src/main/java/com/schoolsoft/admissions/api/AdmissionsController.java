@@ -37,8 +37,14 @@ public class AdmissionsController {
         return repo.find(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
     }
 
+    /**
+     * {@code applicationNo} is optional and normally left out: the school's
+     * number series issues it, like every other number in the product. Passing
+     * one explicitly is the exception the convention allows — a back-office
+     * import carrying numbers a family already holds.
+     */
     public record CreateApplicationRequest(
-        @NotNull UUID schoolId, @NotNull UUID academicYearId, @NotNull UUID gradeId, @NotBlank String applicationNo,
+        @NotNull UUID schoolId, @NotNull UUID academicYearId, @NotNull UUID gradeId, String applicationNo,
         @NotBlank String applicantFirstName, String applicantLastName, LocalDate applicantDob, String applicantGender,
         @NotBlank String guardianName, @NotBlank String guardianPhone, String guardianEmail, String source
     ) {}
@@ -53,14 +59,19 @@ public class AdmissionsController {
         );
     }
 
-    public record TransitionRequest(@NotBlank String toState) {}
+    /**
+     * {@code offerExpiresOn} is only read on a move to {@code offered}, and only
+     * to override the school's own offer window — which is how the office
+     * extends a deadline for one family.
+     */
+    public record TransitionRequest(@NotBlank String toState, LocalDate offerExpiresOn) {}
 
     @PreAuthorize("@perm.can('admission.decide')")
     @PostMapping("/applications/{id}/transition")
     public AdmissionApplicationDto transition(@PathVariable UUID id, @RequestBody TransitionRequest req) {
         var snap = TenantContext.get();
         UUID actor = snap == null ? null : snap.userAccountId();
-        return applications.transition(id, req.toState(), actor);
+        return applications.transition(id, req.toState(), actor, req.offerExpiresOn());
     }
 
     public record TestScoreRequest(double score, String notes) {}
@@ -68,7 +79,48 @@ public class AdmissionsController {
     @PreAuthorize("@perm.can('admission.manage')")
     @PostMapping("/applications/{id}/test-score")
     public AdmissionApplicationDto testScore(@PathVariable UUID id, @RequestBody TestScoreRequest req) {
-        return repo.recordTestScore(id, req.score(), req.notes());
+        var snap = TenantContext.get();
+        return applications.recordTestScore(id, req.score(), req.notes(),
+            snap == null ? null : snap.userAccountId());
+    }
+
+    // --------------------------------------------------------------- policy
+
+    public record PolicyRequest(@NotNull UUID schoolId, boolean entranceTestRequired, int offerValidityDays) {}
+
+    /**
+     * Which funnel this school runs. Read with the funnel itself, because the
+     * board needs it to know which lanes exist.
+     */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/policy")
+    public AdmissionPolicyDto policy(@RequestParam UUID schoolId) {
+        return applications.policy(schoolId);
+    }
+
+    /**
+     * Configuring the funnel is a setup action, not a step in working it, so it
+     * answers to its own permission: a counsellor who moves applications all day
+     * does not get to decide whether the school holds an entrance test.
+     */
+    @PreAuthorize("@perm.can('admission.policy.manage')")
+    @PutMapping("/policy")
+    public AdmissionPolicyDto savePolicy(@RequestBody PolicyRequest req) {
+        return applications.savePolicy(req.schoolId(), req.entranceTestRequired(), req.offerValidityDays());
+    }
+
+    /**
+     * The moves this application may make from where it stands. The board reads
+     * it so a lane it cannot drop into is disabled rather than refused after
+     * the drop — the server stays authoritative either way.
+     */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/applications/{id}/moves")
+    public List<String> moves(@PathVariable UUID id) {
+        var application = repo.find(id).orElseThrow(
+            () -> new com.schoolsoft.platform.web.NotFoundException("Application not found: " + id));
+        return repo.movesFrom(application.state(),
+            applications.policy(application.schoolId()).entranceTestRequired());
     }
 
     @PreAuthorize("@perm.can('admission.view')")
@@ -82,7 +134,7 @@ public class AdmissionsController {
     @PreAuthorize("@perm.can('admission.enrol')")
     @PostMapping("/applications/{id}/enrol")
     public Map<String, UUID> enrol(@PathVariable UUID id, @RequestBody ConvertRequest req) {
-        UUID studentId = repo.convertToStudent(id, req.sectionId(), req.rollNo(), req.overCapacityReason());
+        UUID studentId = applications.enrol(id, req.sectionId(), req.rollNo(), req.overCapacityReason());
         return Map.of("studentId", studentId);
     }
 }

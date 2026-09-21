@@ -114,9 +114,45 @@ class AdmissionsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("No server-side admissions state machine: AdmissionsRepository.transition writes any target "
-        + "state, so `lead → enrolled` is accepted. New gap found in Phase 0.")
     void cert_ADM_05_invalidTransitionIsRejectedByTheServer() {
+        String token = registrarToken(cbse());
+        var application = createApplication("walkin", "SM-" + UUID.randomUUID().toString().substring(0, 8));
+        UUID id = UUID.fromString(application.getBody().get("id").asText());
+
+        // The leap the UI used to be the only thing preventing.
+        var leap = post("/v1/admissions/applications/" + id + "/transition",
+            Map.of("toState", "enrolled"), token);
+        assertThat(leap.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(queryOne("SELECT state FROM admission_application WHERE id = ?", String.class, id))
+            .isEqualTo("lead");
+
+        // The refusal says what is possible from here rather than only that this isn't.
+        var offered = get("/v1/admissions/applications/" + id + "/moves", token).getBody();
+        List<String> allowed = new ArrayList<>();
+        offered.forEach(node -> allowed.add(node.asText()));
+        assertThat(allowed).containsExactlyInAnyOrder("application_started", "rejected", "lapsed");
+
+        // A state that is not a state at all is refused the same way.
+        assertThat(post("/v1/admissions/applications/" + id + "/transition",
+            Map.of("toState", "graduated"), token).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+        // A legal move lands, and repeating it is a no-op rather than a failure
+        // — a retried request must not fail because the first attempt worked.
+        assertThat(post("/v1/admissions/applications/" + id + "/transition",
+            Map.of("toState", "application_started"), token).getStatusCode()).isEqualTo(HttpStatus.OK);
+        var again = post("/v1/admissions/applications/" + id + "/transition",
+            Map.of("toState", "application_started"), token);
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(count("SELECT count(*) FROM admission_event WHERE application_id = ? AND to_state = ?",
+            id, "application_started")).isEqualTo(1);
+
+        // And /enrol is not a way around the machine: a seat is confirmed from
+        // 'accepted', never from wherever the application happens to stand.
+        var early = post("/v1/admissions/applications/" + id + "/enrol",
+            Map.of("sectionId", sectionOf(cbse(), cbse().currentAy().code(), "1", "A")), token);
+        assertThat(early.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(count("SELECT count(*) FROM admission_application WHERE id = ? AND converted_student_id IS NOT NULL",
+            id)).isZero();
     }
 
     @Test @Tag("P2")

@@ -1237,11 +1237,27 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   same chain has no path that preserves the profile and history while
   settling the source school's ledger. Blocks XFER-05.
 
-- **GAP-11 — Admissions funnel automation missing.** `offer_expires_on` and
-  the `lapsed` state exist and are read by `AdmissionsRepository`, but
-  nothing acts on them: offers never expire, seats never return to the pool,
-  the waitlist is never promoted on a decline, and duplicate leads from the
-  same guardian phone are not deduped. Blocks ADM-07/08/09.
+- **The funnel a school runs is configuration.** ✅ **Closed 2026-09-21.**
+  `admission_transition` allowed both routes out of `review` and nothing said
+  which one *this* school uses, so the office could schedule an entrance test
+  at a school that holds none and could skip it at a school that requires one.
+  `admission_policy` now answers per school, and each transition row says which
+  funnel it belongs to (`requires_entrance_test`: NULL means either).
+  `PUT /v1/admissions/policy` behind its own `admission.policy.manage`, with a
+  control on the admissions screen. Existing schools were migrated with the
+  test on, so nobody's funnel moved on the day it landed.
+
+- **GAP-11 — Admissions funnel automation missing.** ⚠️ **Prerequisite closed
+  2026-09-21:** `offer_expires_on` was read everywhere and written nowhere —
+  the column, the DTO and the public tracking page's "Offer valid until …" all
+  existed while the value stayed NULL for every application ever created, so
+  there was nothing for an expiry job to act on. A move to `offered` now sets
+  it from `admission_policy.offer_validity_days` (default 14), or from a date
+  the caller names, which is how an extension is granted. Still open, and now
+  actually buildable: nothing yet *acts* on the date — offers do not expire,
+  seats never return to the pool, the waitlist is never promoted on a decline,
+  and duplicate leads from the same guardian phone are not deduped. Blocks
+  ADM-07/08/09.
 
 - **GAP-30 — Transport operational gaps.** ⚠️ **Fee half closed 2026-08-12
   (Phase 4):** routes carry a `monthly_fee`, assignments are effective-dated
@@ -1258,9 +1274,11 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
 ### Missing record types (each blocks a real school workflow)
 
 - **GAP-16 — No student document store.** `admission_application.documents`
-  is loose JSONB with no per-document verification state or reviewer, and an
-  *enrolled* student has no document set at all — no incoming TC, birth
-  certificate, or immunisation record. Blocks ADM-12, ENR-07, XFER-06.
+  was loose JSONB that no code ever read or wrote; V034 dropped the column
+  rather than leave a second, empty source of truth beside the store that will
+  replace it. An *enrolled* student still has no document set at all — no
+  incoming TC, birth certificate, or immunisation record — and neither does an
+  applicant. Blocks ADM-12, ENR-07, XFER-06.
 
 - **GAP-17 — No health / emergency data.** Allergies, medical conditions,
   blood group, and prioritised emergency contacts aren't modelled, so they
@@ -1596,12 +1614,19 @@ several are security-relevant.
   (TT-05). There is also no day view and no after-hours suppression for the
   parent/student view (TT-07).
 
-- **GAP-41 — No admissions state machine on the server.**
-  `AdmissionsRepository.transition` writes any target state, so `lead →
-  enrolled` is accepted (ADM-05). Conversion to a student creates no guardian
-  and links none, leaving the family without a login (ADM-10), and an applicant
-  cannot be invoiced at `fee_pending` because `fee_invoice.student_id` is NOT
-  NULL (ADM-13).
+- **GAP-41 — No admissions state machine on the server.** ⚠️ **Machine half
+  closed 2026-09-20:** `V033` seeds the legal moves from design doc §13 into
+  `admission_transition`, and `AdmissionsService.transition` refuses a move the
+  funnel does not have, checks the permission that *move* requires on top of the
+  endpoint's `admission.decide`, and writes `... WHERE id = ? AND state = ?` so
+  a read-then-write no longer overwrites somebody else's move. Re-running a move
+  that already landed is a no-op, not a 409. `/enrol` was the other way around
+  the machine: it now confirms a seat from `accepted` only, inside the
+  transaction the conversion path never had, so a refusal leaves no orphan
+  student. ADM-05 enabled and passing. Still open: conversion's guardian link is
+  written but ADM-10 wants it proven transactionally end to end, and an
+  applicant still cannot be invoiced at `fee_pending` because
+  `fee_invoice.student_id` is NOT NULL (ADM-13).
 
 ### Missing surfaces (endpoints the scenarios expect and nothing provides)
 

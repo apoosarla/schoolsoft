@@ -29,7 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class NumberSeries {
 
-    public enum Kind { admission, roll, invoice, receipt, certificate }
+    public enum Kind { admission, roll, invoice, receipt, certificate, application }
 
     private final JdbcTemplate jdbc;
 

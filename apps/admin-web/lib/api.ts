@@ -293,7 +293,8 @@ export type AdmissionApplicationDto = {
   schoolId: string;
   academicYearId: string;
   gradeId: string;
-  applicationNo: string;
+  /** Left out, the school's number series issues one. */
+  applicationNo?: string;
   applicantFirstName: string;
   applicantLastName: string | null;
   applicantDob: string | null;
@@ -320,7 +321,8 @@ export type CreateAdmissionApplicationRequest = {
   schoolId: string;
   academicYearId: string;
   gradeId: string;
-  applicationNo: string;
+  /** Left out, the school's number series issues one. */
+  applicationNo?: string;
   applicantFirstName: string;
   applicantLastName?: string;
   applicantDob?: string;
@@ -345,6 +347,28 @@ export function transitionAdmissionApplication(id: string, toState: string): Pro
     method: "POST",
     body: JSON.stringify({ toState }),
   });
+}
+
+export type AdmissionPolicyDto = {
+  schoolId: string;
+  entranceTestRequired: boolean;
+  offerValidityDays: number;
+};
+
+export function getAdmissionPolicy(schoolId: string): Promise<AdmissionPolicyDto> {
+  return apiFetch<AdmissionPolicyDto>(`/v1/admissions/policy?schoolId=${schoolId}`);
+}
+
+export function saveAdmissionPolicy(req: AdmissionPolicyDto): Promise<AdmissionPolicyDto> {
+  return apiFetch<AdmissionPolicyDto>("/v1/admissions/policy", {
+    method: "PUT",
+    body: JSON.stringify(req),
+  });
+}
+
+/** The moves this application may make from where it stands, at this school. */
+export function admissionMoves(id: string): Promise<string[]> {
+  return apiFetch<string[]>(`/v1/admissions/applications/${id}/moves`);
 }
 
 export function enrolAdmissionApplication(

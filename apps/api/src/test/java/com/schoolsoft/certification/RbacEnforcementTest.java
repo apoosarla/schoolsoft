@@ -3,6 +3,8 @@ package com.schoolsoft.certification;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.schoolsoft.certification.support.AbstractCertificationTest;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -387,6 +389,131 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         assertThat(post("/v1/certificates", body(
             "studentId", studentId, "kind", "bonafide"), guardian).getStatusCode())
             .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    // ===================== the admissions funnel =====================
+
+    /**
+     * A move through the funnel answers to two gates, not one: the endpoint's
+     * {@code admission.decide}, and the permission the <em>particular move</em>
+     * carries in {@code admission_transition}. {@code accepted -> enrolled} is
+     * the one that differs — it requires {@code admission.enrol}, because
+     * confirming a seat creates a student, a guardian and a login.
+     *
+     * <p>No seeded role separates the two (registrar and principal hold both),
+     * which is the point: the separation exists for a school that writes its own
+     * counsellor role, and {@code role_perm} lets it without a deploy. So this
+     * builds that role rather than borrowing one, and gives it its own staff
+     * member — the fixture is shared, and confining a neighbour's permissions
+     * would follow them into every other scenario.</p>
+     */
+    @Test
+    @DisplayName("a counsellor moves an application but cannot enrol it")
+    void counsellorDecidesButCannotEnrol() {
+        UUID counsellorUser = UUID.randomUUID();
+        UUID staffId = UUID.randomUUID();
+        String roleCode = "counsellor_rbac_probe";
+
+        inChainDo(jdbc -> {
+            // `role` is chain-wide and carries no school_id — a custom role
+            // belongs to the chain, and staff_role scopes it to one school.
+            jdbc.update("INSERT INTO role (id, code, name, screen_keys, is_system) "
+                + "VALUES (?, ?, 'Admissions counsellor (probe)', '{admissions}', FALSE) "
+                + "ON CONFLICT DO NOTHING",
+                UUID.randomUUID(), roleCode);
+            // Everything the funnel needs, and deliberately not admission.enrol.
+            for (String perm : List.of("admission.view", "admission.manage", "admission.decide",
+                    "structure.view", "student.view")) {
+                jdbc.update("INSERT INTO role_perm (role_code, perm_code) VALUES (?, ?) "
+                    + "ON CONFLICT DO NOTHING", roleCode, perm);
+            }
+            jdbc.update("INSERT INTO staff (id, school_id, employee_no, first_name, last_name, "
+                + "  campus_id, is_active) "
+                + "VALUES (?, ?, ?, 'Probe', 'Counsellor', "
+                + "  (SELECT id FROM campus WHERE school_id = ? ORDER BY is_primary DESC LIMIT 1), TRUE)",
+                staffId, cbse().id(), "PROBE-" + staffId.toString().substring(0, 8), cbse().id());
+            jdbc.update("INSERT INTO staff_role (staff_id, role_code, scope_type, scope_id) "
+                + "VALUES (?, ?, 'school', ?) ON CONFLICT DO NOTHING", staffId, roleCode, cbse().id());
+            jdbc.update("INSERT INTO user_account (id, school_id, subject_type, subject_id, email) "
+                + "VALUES (?, ?, 'staff', ?, ?)",
+                counsellorUser, cbse().id(), staffId, "probe.counsellor." + staffId + "@example.test");
+        });
+
+        String counsellor = tokenFor(cbse(), counsellorUser, "staff");
+        UUID id = UUID.fromString(post("/v1/admissions/applications", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(),
+            "gradeId", gradeOf(cbse(), "1"),
+            "applicationNo", "RBAC-" + UUID.randomUUID().toString().substring(0, 8),
+            "applicantFirstName", "Probe", "applicantLastName", "Applicant",
+            "guardianName", "Probe Guardian", "guardianPhone", "919000000042",
+            "source", "walkin"), counsellor).getBody().get("id").asText());
+
+        // Positive: every move the funnel calls admission.decide, they make.
+        for (String state : List.of("application_started", "document_pending", "fee_pending", "review",
+                "test_scheduled", "test_done", "offered", "accepted")) {
+            assertThat(post("/v1/admissions/applications/" + id + "/transition",
+                Map.of("toState", state), counsellor).getStatusCode())
+                .as("counsellor moving to " + state)
+                .isEqualTo(HttpStatus.OK);
+        }
+
+        // Negative: the last step is the one they may not take — through the
+        // transition endpoint, whose own gate they pass...
+        assertThat(post("/v1/admissions/applications/" + id + "/transition",
+            Map.of("toState", "enrolled"), counsellor).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // ...and through /enrol, which they never reach.
+        assertThat(post("/v1/admissions/applications/" + id + "/enrol",
+            Map.of("sectionId", sectionOf(cbse(), cbse().currentAy().code(), "1", "A")), counsellor)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Refused twice, and still sitting where the counsellor left it. The
+        // seat stays unconfirmed rather than half-confirmed.
+        assertThat(queryOne("SELECT state FROM admission_application WHERE id = ?", String.class, id))
+            .isEqualTo("accepted");
+        assertThat(count("SELECT count(*) FROM admission_application WHERE id = ? "
+            + "AND converted_student_id IS NOT NULL", id)).isZero();
+
+        // The registrar holds admission.enrol and would finish this — proven by
+        // cert_ADM_11, which converts. Not repeated here: this test runs
+        // immediately before FixtureSmokeTest, whose seed counts an extra active
+        // enrolment would spoil.
+    }
+
+    /**
+     * Whether the school holds an entrance test is a setup decision, not a step
+     * in working the funnel. The front office creates applications all day and
+     * must not be able to reshape the funnel those applications move through —
+     * turning the test off would silently close every {@code test_scheduled}
+     * move for the whole school, for everyone.
+     */
+    @Test
+    @DisplayName("working the funnel and reconfiguring it are different permissions")
+    void reconfiguringTheFunnelIsItsOwnPermission() {
+        perms("front_office").contains("admission.manage").doesNotContain("admission.policy.manage");
+        perms("registrar").contains("admission.manage", "admission.policy.manage");
+        perms("librarian").doesNotContain("admission.policy.manage", "admission.view");
+
+        // Reading the policy comes with reading the funnel — the board needs it
+        // to know which lanes exist.
+        assertThat(get("/v1/admissions/policy?schoolId=" + cbse().id(), registrarToken(cbse()))
+            .getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // A staff member outside admissions reaches neither half.
+        String librarian = librarianToken(cbse());
+        assertThat(get("/v1/admissions/policy?schoolId=" + cbse().id(), librarian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(put("/v1/admissions/policy", body(
+            "schoolId", cbse().id(), "entranceTestRequired", false, "offerValidityDays", 30),
+            librarian).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Unchanged, so no other scenario's funnel moved under it. Read through
+        // the API rather than the table: a school provisioned after the
+        // migration has no row yet and answers from the column defaults until
+        // somebody saves one.
+        assertThat(get("/v1/admissions/policy?schoolId=" + cbse().id(), registrarToken(cbse()))
+            .getBody().get("entranceTestRequired").asBoolean()).isTrue();
     }
 
     private org.assertj.core.api.ListAssert<String> perms(String roleCode) {

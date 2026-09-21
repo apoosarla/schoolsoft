@@ -74,6 +74,8 @@ public enum Perm {
     ADMISSION_MANAGE("admission.manage", "Create applications and record test scores"),
     ADMISSION_DECIDE("admission.decide", "Move an application through the funnel"),
     ADMISSION_ENROL("admission.enrol", "Convert an accepted application into an enrolment"),
+    ADMISSION_POLICY_MANAGE("admission.policy.manage",
+        "Configure the school's funnel \u2014 entrance test, offer validity"),
 
     // ===== calendar =====
     CALENDAR_VIEW("calendar.view", "Read the school calendar and working days"),

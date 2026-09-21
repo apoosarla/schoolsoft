@@ -133,7 +133,10 @@ public class PublicLookupRepository {
             UUID academicYearId = jdbc.queryForObject(
                 "SELECT id FROM academic_year WHERE school_id = ? AND is_current LIMIT 1", UUID.class, schoolId
             );
-            String applicationNo = "WEB-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+            // Null lets the school's number series issue it. The random
+            // "WEB-" fragment this used to mint was outside the series, so it
+            // had no sequence and the family quoted a number with no shape.
+            String applicationNo = null;
             return admissionsRepo.create(
                 schoolId, academicYearId, req.gradeId(), applicationNo,
                 req.applicantFirstName(), req.applicantLastName(), req.applicantDob(), req.applicantGender(),

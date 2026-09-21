@@ -5,17 +5,20 @@ import { useRouter } from "next/navigation";
 import {
   ADMISSION_STATES,
   AdmissionApplicationDto,
+  AdmissionPolicyDto,
   ApiError,
   AcademicYearDto,
   createAdmissionApplication,
   enrolAdmissionApplication,
   GradeDto,
+  getAdmissionPolicy,
   getSession,
   hasScreen,
   listAcademicYears,
   listAdmissionApplications,
   listGrades,
   listSections,
+  saveAdmissionPolicy,
   SectionDto,
   Session,
   transitionAdmissionApplication,
@@ -53,6 +56,8 @@ export default function AdmissionsPage() {
   const [rowState, setRowState] = useState<Record<string, string>>({});
   const [rowSection, setRowSection] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [policy, setPolicy] = useState<AdmissionPolicyDto | null>(null);
+  const [savingPolicy, setSavingPolicy] = useState(false);
 
   useEffect(() => {
     const s = getSession();
@@ -65,11 +70,17 @@ export default function AdmissionsPage() {
       return;
     }
     setSessionState(s);
-    Promise.all([listAcademicYears(s.schoolId), listGrades(s.schoolId), listSections(s.schoolId)])
-      .then(([y, g, sec]) => {
+    Promise.all([
+      listAcademicYears(s.schoolId),
+      listGrades(s.schoolId),
+      listSections(s.schoolId),
+      getAdmissionPolicy(s.schoolId),
+    ])
+      .then(([y, g, sec, pol]) => {
         setYears(y);
         setGrades(g);
         setSections(sec);
+        setPolicy(pol);
         const current = y.find((yr) => yr.isCurrent) ?? y[0];
         setForm((f) => ({
           ...f,
@@ -109,7 +120,7 @@ export default function AdmissionsPage() {
         schoolId: session.schoolId,
         academicYearId: form.academicYearId,
         gradeId: form.gradeId,
-        applicationNo: form.applicationNo,
+        applicationNo: form.applicationNo || undefined,
         applicantFirstName: form.applicantFirstName,
         applicantLastName: form.applicantLastName || undefined,
         applicantDob: form.applicantDob || undefined,
@@ -162,6 +173,20 @@ export default function AdmissionsPage() {
     }
   }
 
+  async function onSavePolicy(next: AdmissionPolicyDto) {
+    setSavingPolicy(true);
+    setError(null);
+    try {
+      setPolicy(await saveAdmissionPolicy(next));
+      // Which moves exist changes with the funnel, so the rows are stale now.
+      if (session) refresh(session.schoolId, stateFilter);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setSavingPolicy(false);
+    }
+  }
+
   if (!session) return null;
 
   return (
@@ -194,7 +219,7 @@ export default function AdmissionsPage() {
               ))}
             </select>
             <input
-              placeholder="Application no."
+              placeholder="Application no. (auto)"
               value={form.applicationNo}
               onChange={(e) => setForm((f) => ({ ...f, applicationNo: e.target.value }))}
             />
@@ -248,7 +273,6 @@ export default function AdmissionsPage() {
                 creating ||
                 !form.academicYearId ||
                 !form.gradeId ||
-                !form.applicationNo ||
                 !form.applicantFirstName ||
                 !form.guardianName ||
                 !form.guardianPhone
@@ -259,6 +283,46 @@ export default function AdmissionsPage() {
           </div>
         )}
       </div>
+
+      {policy && (
+        <div className="panel">
+          <div className="form-row" style={{ flexWrap: "wrap", alignItems: "center", gap: 14 }}>
+            <label className="form-row" style={{ gap: 6, alignItems: "center", margin: 0 }}>
+              <input
+                id="entrance-test-required"
+                type="checkbox"
+                checked={policy.entranceTestRequired}
+                disabled={savingPolicy}
+                onChange={(e) =>
+                  onSavePolicy({ ...policy, entranceTestRequired: e.target.checked })
+                }
+              />
+              This school holds an entrance test
+            </label>
+            <label className="form-row" style={{ gap: 6, alignItems: "center", margin: 0 }}>
+              Offer valid for
+              <input
+                id="offer-validity-days"
+                type="number"
+                min={1}
+                value={policy.offerValidityDays}
+                disabled={savingPolicy}
+                style={{ width: 70 }}
+                onChange={(e) =>
+                  setPolicy({ ...policy, offerValidityDays: Number(e.target.value) })
+                }
+                onBlur={() => onSavePolicy(policy)}
+              />
+              days
+            </label>
+            <span className="hint">
+              {policy.entranceTestRequired
+                ? "An offer follows the entrance test."
+                : "An offer is made straight from review \u2014 there is no test to schedule."}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="panel">
         <div className="form-row">
