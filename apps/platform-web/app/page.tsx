@@ -3,30 +3,22 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SessionKind, getSessionKind, isLoggedIn } from "@/lib/api";
+import { isLoggedIn } from "@/lib/api";
 
-/**
- * The front door of an app that serves two consoles: it sends each kind of
- * session to its own and shows nothing of the other.
- */
+/** The front door of the platform console. */
 export default function LandingPage() {
   const router = useRouter();
-  const [kind, setKind] = useState<SessionKind | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     if (!isLoggedIn()) {
       router.replace("/login");
       return;
     }
-    const k = getSessionKind();
-    if (k === "chain") {
-      router.replace("/my-chain");
-      return;
-    }
-    setKind(k);
+    setReady(true);
   }, [router]);
 
-  if (kind !== "platform") return null;
+  if (!ready) return null;
 
   return (
     <main className="shell">

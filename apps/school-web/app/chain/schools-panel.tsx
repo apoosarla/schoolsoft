@@ -1,49 +1,34 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { CreateSchoolRequest, SchoolReadinessDto } from "@/lib/api";
+import { CreateSchoolRequest, SchoolDto, SchoolReadinessDto } from "@/lib/api";
 
 const BOARD_CODES = ["CBSE", "CIE", "ICSE", "IB", "STATE"];
 
 /**
- * One school as the operator's console shows it. The headcount is the
- * vendor's view of a customer's chain, which is why the chain's own copy of
- * this panel (school-web, `/chain`) does not carry it.
- */
-export type SchoolRow = {
-  id: string;
-  slug: string;
-  name: string;
-  boardCode: string;
-  lifecycle: "draft" | "live" | "suspended";
-  wentLiveAt?: string | null;
-  activeEnrolments?: number | null;
-};
-
-/**
- * The schools in one chain, and the form that opens another — Schoolsoft's
- * operators doing it on a chain's behalf. The chain does the same thing for
- * itself in school-web, which has its own copy of this panel: the same act,
- * but this one reaches into a chain the caller does not belong to and names
- * its schema while doing so.
+ * The schools in one chain, and the form that opens another.
  *
- * What neither can do from here is finish a school's setup — that is built on
- * screens belonging to the school, by the people who work there, and the
- * checklist here is read-only for that reason.
+ * Schoolsoft's operators have a table of their own in platform-web, over the
+ * same act done on a chain's behalf. This one is deliberately not shared with
+ * it: that copy carries a headcount per school and names the chain's schema
+ * in its copy, both of which are the vendor's view of a customer, and keeping
+ * one component honest about two audiences was already costing two props that
+ * meant "not for you".
+ *
+ * What this cannot do is finish a school's setup — that is built on screens
+ * belonging to the school, by the people who work there, and the checklist
+ * here is read-only for that reason.
  */
 export default function SchoolsPanel({
   schools,
   loading,
   error,
-  where,
   onCreate,
   loadReadiness,
 }: {
-  schools: SchoolRow[] | null;
+  schools: SchoolDto[] | null;
   loading: boolean;
   error: string | null;
-  /** The chain's schema name, shown as code: where the school lands, so nobody wonders. */
-  where: string;
   onCreate: (req: CreateSchoolRequest) => Promise<string>;
   loadReadiness: (schoolId: string) => Promise<SchoolReadinessDto>;
 }) {
@@ -87,7 +72,7 @@ export default function SchoolsPanel({
         stateCode: stateCode.trim() || undefined,
       });
       setLastResult(
-        `"${created}" created in ${where}. It is in draft — nobody outside its office can sign in ` +
+        `"${created}" created in your chain. It is in draft — nobody outside its office can sign in ` +
           "until its setup is finished and somebody there opens it."
       );
       setSlug("");
@@ -100,14 +85,12 @@ export default function SchoolsPanel({
     }
   }
 
-  const showsHeadcount = (schools ?? []).some((s) => s.activeEnrolments != null);
-
   return (
     <>
       <div className="panel">
         <h2>Open a school in this chain</h2>
         <p className="hint">
-          Creates the school inside <code>{where}</code> in <code>draft</code>. Its campuses, year,
+          Creates the school inside your chain in <code>draft</code>. Its campuses, year,
           grades and sections are built by the school itself, on its own Setup screen.
         </p>
         <form onSubmit={onSubmit}>
@@ -163,7 +146,6 @@ export default function SchoolsPanel({
                 <th>Slug</th>
                 <th>Board</th>
                 <th>State</th>
-                {showsHeadcount && <th>On the register</th>}
                 <th></th>
               </tr>
             </thead>
@@ -179,7 +161,6 @@ export default function SchoolsPanel({
                       <td>
                         <Lifecycle school={s} />
                       </td>
-                      {showsHeadcount && <td>{(s.activeEnrolments ?? 0).toLocaleString()}</td>}
                       <td>
                         <button type="button" onClick={() => toggleReadiness(s.id)}>
                           {expanded === s.id ? "Hide setup" : "Setup"}
@@ -188,7 +169,7 @@ export default function SchoolsPanel({
                     </tr>
                     {expanded === s.id && (
                       <tr>
-                        <td colSpan={showsHeadcount ? 6 : 5}>
+                        <td colSpan={5}>
                           {state === "loading" && <span className="hint">Loading the checklist&hellip;</span>}
                           {state === "error" && (
                             <span className="hint">Could not read this school&apos;s checklist.</span>
@@ -208,7 +189,7 @@ export default function SchoolsPanel({
   );
 }
 
-function Lifecycle({ school }: { school: SchoolRow }) {
+function Lifecycle({ school }: { school: SchoolDto }) {
   if (school.lifecycle === "live") {
     return (
       <span

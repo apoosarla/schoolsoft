@@ -32,6 +32,35 @@ public class TenantResolverFilter extends OncePerRequestFilter {
         "/v1/auth/", "/v1/public/", "/actuator/health", "/actuator/info", "/v1/webhooks/"
     );
 
+    /**
+     * The only paths a chain admin may reach.
+     *
+     * <p>A chain admin has no school — {@code sid} is absent from their token
+     * by construction — and V009's policies read
+     * {@code school_id = current_school_id() OR current_school_id() IS NULL}.
+     * A null school is therefore not "no schools" but <em>every</em> school in
+     * the chain, which is exactly what makes their one console possible: they
+     * list the schools in their chain because RLS steps aside, not because a
+     * handler loops.</p>
+     *
+     * <p>That is safe while the only thing such a session can ask for is a
+     * school. It stops being safe the moment the same session can reach a
+     * read built for one school, because that read returns every school's rows
+     * merged together, silently, with no error and no 403 — the chain admin
+     * holds every unrestricted read in {@code PermissionChecker}'s baseline,
+     * so permissions do not stop it. Before this list the shape of the apps
+     * was the only thing preventing it, and the apps have just been merged.</p>
+     *
+     * <p>So the gate is here rather than in a screen: a bookmark, a stale tab
+     * or a curl with a chain admin's token gets a 403 instead of another
+     * school's ledger. Widening this list is a deliberate edit, and anything
+     * added to it has to be a read that names its own school or is genuinely
+     * chain-wide.</p>
+     */
+    private static final List<String> CHAIN_ADMIN_PREFIXES = List.of(
+        "/v1/tenancy/schools", "/v1/iam/me"
+    );
+
     private final JwtService jwt;
 
     public TenantResolverFilter(JwtService jwt) { this.jwt = jwt; }
@@ -69,6 +98,13 @@ public class TenantResolverFilter extends OncePerRequestFilter {
 
             TenantContext.set(new TenantContext.Snapshot(cs, chainId, schoolId, userId, st, false));
 
+            if ("chain_admin".equals(st) && !isChainAdminPath(req.getRequestURI())) {
+                forbidden(res, "chain_admin_scope",
+                    "A chain HQ admin may read the schools in their chain and open one. "
+                    + "Working inside a school is the school's own staff's.");
+                return;
+            }
+
             var authToken = new UsernamePasswordAuthenticationToken(
                 userId, null, List.of(new SimpleGrantedAuthority("ROLE_" + st.toUpperCase()))
             );
@@ -85,6 +121,13 @@ public class TenantResolverFilter extends OncePerRequestFilter {
         }
     }
 
+    private static boolean isChainAdminPath(String path) {
+        for (String prefix : CHAIN_ADMIN_PREFIXES) {
+            if (path.equals(prefix) || path.startsWith(prefix + "/")) return true;
+        }
+        return false;
+    }
+
     /**
      * Writes the 401 body directly rather than calling
      * {@code HttpServletResponse#sendError}: sendError re-dispatches through
@@ -94,6 +137,13 @@ public class TenantResolverFilter extends OncePerRequestFilter {
      */
     private void unauthorized(HttpServletResponse res, String code, String message) throws IOException {
         res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        res.setContentType("application/json");
+        res.getWriter().write("{\"code\":\"" + code + "\",\"message\":\"" + message.replace("\"", "'") + "\"}");
+    }
+
+    /** Same reasoning as {@link #unauthorized}: written directly, not via sendError. */
+    private void forbidden(HttpServletResponse res, String code, String message) throws IOException {
+        res.setStatus(HttpServletResponse.SC_FORBIDDEN);
         res.setContentType("application/json");
         res.getWriter().write("{\"code\":\"" + code + "\",\"message\":\"" + message.replace("\"", "'") + "\"}");
     }

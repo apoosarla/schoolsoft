@@ -103,7 +103,7 @@ from inside four repositories. It is now split:
 |---|---|
 | `platform_admin` | all (Schoolsoft staff) |
 | trusted job | all (`TenantContext.trustedJob`) |
-| `chain_admin` | every unrestricted read, no writes — derived from `Perm.isUnrestrictedRead()`, so a permission added later lands on the right side of the line without anybody remembering to come back |
+| `chain_admin` | every unrestricted read plus `school.onboard`, derived from `Perm.isUnrestrictedRead()` so a permission added later lands on the right side of the line without anybody remembering to come back — and confined by path to `/v1/tenancy/schools` and `/v1/iam/me` (see below) |
 | `staff` | union of `role_perm` across unrevoked `staff_role` grants |
 | `guardian` | fixed `GUARDIAN_BASELINE` in code |
 | `student` | fixed `STUDENT_BASELINE` in code |
@@ -111,6 +111,27 @@ from inside four repositories. It is now split:
 Guardians and students get a built-in set rather than role rows because they
 have no `staff_role`, and making their access editable would let a school hand
 a parent the fee ledger by accident.
+
+### The chain admin is confined by path, not by permission
+
+A `chain_admin` is school-less: their token carries no `sid`. V009's policies
+read `school_id = current_school_id() OR current_school_id() IS NULL`, so a
+session with no school is not scoped to nothing — it is scoped to *every*
+school in the chain. That is deliberate and it is what lets one request list
+the chain's schools.
+
+The consequence is that permissions cannot be the gate for this subject type.
+A chain admin holds every unrestricted read, so a school-scoped endpoint
+called with their token does not answer 403 and does not answer empty: it
+answers 200, with every school's rows merged into one list, silently. The only
+thing that used to prevent it was that such a session existed in a different
+app.
+
+So `TenantResolverFilter.CHAIN_ADMIN_PREFIXES` refuses the path before the
+handler runs — `chain_admin_scope`, a 403 from the filter rather than from a
+`@PreAuthorize`. It is the one place in this model where the gate is a path
+and not a permission, because the thing being defended against is not "may
+they read this?" but "whose rows would this read return?".
 
 ## Consequences
 

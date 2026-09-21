@@ -91,14 +91,36 @@ class SecurityCertTest extends AbstractCertificationTest {
             .isEqualTo(HttpStatus.OK);
     }
 
+    /**
+     * The chain is what a chain admin reads, and the chain is all they reach.
+     *
+     * <p>This scenario used to read a section in each school to show the chain
+     * being read across. That worked for a reason worth stating: a chain
+     * admin's token carries no school, V009's policy stands aside for a
+     * session with no school, and so <em>any</em> school-scoped read answered
+     * with every school's rows. It was the same mechanism as the schools list,
+     * pointed at a child's section.</p>
+     *
+     * <p>That was tolerable while such a session only existed in a console
+     * that asked for nothing else. It is not tolerable now that a chain admin
+     * signs in to the same app as the office, so
+     * {@code TenantResolverFilter.CHAIN_ADMIN_PREFIXES} confines them and this
+     * scenario asserts the confinement instead of the reach. The half that
+     * matters most is unchanged: another chain's token sees nothing here, and
+     * that isolation is the schema rather than any filter.</p>
+     */
     @Test @Tag("P1")
     void cert_SEC_05_chainAdminReadsAcrossTheChainButNotAnotherChain() {
         var schools = get("/v1/tenancy/schools", chainAdminToken()).getBody();
         assertThat(schools).hasSize(2);
-        assertThat(get("/v1/enrolment/sections/" + currentFocusSection(cbse()), chainAdminToken()).getBody())
-            .isNotEmpty();
-        assertThat(get("/v1/enrolment/sections/" + currentFocusSection(cie()), chainAdminToken()).getBody())
-            .isNotEmpty();
+
+        // Reaching into one of those schools is refused before the handler
+        // runs — by the filter, not by a permission, because the permission
+        // is one a chain admin genuinely holds.
+        var reachedIn = get("/v1/enrolment/sections/" + currentFocusSection(cbse()), chainAdminToken());
+        assertThat(reachedIn.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/people/students?schoolId=" + cie().id(), chainAdminToken()).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
 
         // A token minted for a different chain resolves against that chain's schema, which has no
         // access to this chain's rows — the isolation is the schema, not a filter.
@@ -108,8 +130,6 @@ class SecurityCertTest extends AbstractCertificationTest {
         String otherChainToken = jwt.issueAccess(UUID.randomUUID(), otherChainId.toString(),
             "chain_" + OTHER_CHAIN, null, "chain_admin");
         assertThat(get("/v1/tenancy/schools", otherChainToken).getBody()).isEmpty();
-        assertThat(get("/v1/enrolment/sections/" + currentFocusSection(cbse()), otherChainToken).getBody())
-            .isEmpty();
     }
 
     @Test @Tag("P1")

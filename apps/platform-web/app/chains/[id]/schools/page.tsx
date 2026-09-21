@@ -10,7 +10,6 @@ import {
   clearToken,
   createChainSchool,
   getChainSchoolReadiness,
-  getSessionKind,
   isLoggedIn,
   listChainSchools,
   listChains,
@@ -19,9 +18,9 @@ import SchoolsPanel from "../../../schools-panel";
 
 /**
  * The operator's view of one chain's schools. The chain's own admin sees the
- * same act at `/my-chain`, through their own endpoints — this page reaches
- * into a chain the caller does not belong to, which is why every read behind
- * it is platform-admin only.
+ * same act in school-web, at `/chain`, through their own endpoints — this
+ * page reaches into a chain the caller does not belong to, which is why every
+ * read behind it is platform-admin only.
  */
 export default function ChainSchoolsPage() {
   const router = useRouter();
@@ -52,12 +51,6 @@ export default function ChainSchoolsPage() {
   useEffect(() => {
     if (!isLoggedIn()) {
       router.replace("/login");
-      return;
-    }
-    // A chain admin has one chain and reaches it through their own endpoints;
-    // this page's are not theirs to call.
-    if (getSessionKind() === "chain") {
-      router.replace("/my-chain");
       return;
     }
     setReady(true);

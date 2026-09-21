@@ -90,6 +90,27 @@ entries under **Done** below.
 
 ## Done
 
+- ~~A chain's own admin signed in to the vendor's console.~~ `admin-web` and
+  `hq-web` were named for who sat at them from our side of the table, and
+  `hq-web` served two unrelated people behind a two-tab login: Schoolsoft's
+  operators, and a customer's chain HQ. Renamed to `school-web` (:3001) and
+  `platform-web` (:3002), and the chain HQ moved into `school-web` at
+  `/chain` — the same app as the schools it opens, reached through the same
+  OTP door with the chain's slug. `homeFor(session)` routes staff to
+  `/dashboard` and a `chain_admin` to `/chain`; the shell's menu branches on
+  `isChainAdmin` rather than on `screen_keys`, since a chain admin holds no
+  role for a grant to hang on.
+
+  The move needed a gate that did not exist. A `chain_admin` has no `sid`, and
+  V009 reads `... OR current_school_id() IS NULL` — so a school-scoped read
+  made with their token answers 200 with **every school in the chain merged**,
+  not 403 and not empty, because they hold every unrestricted read. While the
+  two apps were separate, the app boundary was the only thing preventing it.
+  `TenantResolverFilter.CHAIN_ADMIN_PREFIXES` is now the thing preventing it:
+  `/v1/tenancy/schools` and `/v1/iam/me`, refused before the handler runs.
+  `RbacEnforcementTest.chainAdminCannotReachASchoolScopedRead` is the guard.
+  2026-09-21.
+
 - ~~The API had no authorization at all.~~ 29 controllers, ~230 endpoints,
   zero `@PreAuthorize`, and no `@EnableMethodSecurity` — `.anyRequest()
   .authenticated()` was the whole model, so any valid token could call any

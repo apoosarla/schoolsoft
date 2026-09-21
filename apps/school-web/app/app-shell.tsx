@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { clearSession, getSession, hasScreen, Session, SCREEN_DEFS } from "@/lib/api";
+import { clearSession, getSession, hasScreen, isChainAdmin, Session, SCREEN_DEFS } from "@/lib/api";
 
 const ICON: Record<string, JSX.Element> = {
   dashboard: (
@@ -126,6 +126,14 @@ const ICON: Record<string, JSX.Element> = {
       <path d="M9.4 4.7H15.4M9.4 9.7H15.4M9.4 14.4H15.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   ),
+  chain: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path d="M2.5 15.5V7.2L7 4.8V15.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M7 15.5V8.4L15.5 4.4V15.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M1.6 15.6H16.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M9.6 8.6V10.4M12.8 7.2V9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  ),
   settings: (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.4" />
@@ -133,6 +141,16 @@ const ICON: Record<string, JSX.Element> = {
     </svg>
   ),
 };
+
+/**
+ * The chain admin's navigation.
+ *
+ * Not screen keys: those are role grants, and a chain admin holds no role by
+ * construction — they are school-less, so there is no `staff_role` row for a
+ * grant to hang on. Their menu comes from what they are, which is also why it
+ * is two items and not a subset of the office's seventeen.
+ */
+const CHAIN_SCREENS = [{ key: "chain", label: "Your chain", path: "/chain" }] as const;
 
 function humanize(code: string): string {
   return code
@@ -154,8 +172,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!session || pathname === "/login") return <>{children}</>;
 
-  const visible = SCREEN_DEFS.filter((s) => hasScreen(session, s.key));
-  const current = SCREEN_DEFS.find((s) => s.path === pathname);
+  const chainAdmin = isChainAdmin(session);
+  const screens = chainAdmin ? CHAIN_SCREENS : SCREEN_DEFS;
+  const visible = chainAdmin ? CHAIN_SCREENS : SCREEN_DEFS.filter((s) => hasScreen(session, s.key));
+  const current = screens.find((s) => s.path === pathname);
   const roleLabel = session.roleCodes.length > 0 ? session.roleCodes.map(humanize).join(" · ") : humanize(session.subjectType);
 
   function signOut() {
@@ -182,7 +202,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </svg>
           <div className="brand-text">
             <div className="brand-name">Schoolsoft</div>
-            <div className="brand-sub">School Admin</div>
+            <div className="brand-sub">{chainAdmin ? "Chain HQ" : "School Admin"}</div>
           </div>
         </div>
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ApiError, startOtp, verifyOtp } from "@/lib/api";
+import { ApiError, homeFor, startOtp, verifyOtp } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,8 +32,11 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await verifyOtp(identifier.trim(), chainSlug.trim(), code.trim());
-      router.replace("/dashboard");
+      // One door, two kinds of person behind it: the office lands in its
+      // school, a chain's HQ admin above their schools. Which one is not
+      // guessed from the email — the token says.
+      const session = await verifyOtp(identifier.trim(), chainSlug.trim(), code.trim());
+      router.replace(homeFor(session));
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -46,7 +49,7 @@ export default function LoginPage() {
       <div className="panel">
         <h2>Sign in</h2>
         <p className="hint">
-          Staff/guardian OTP login (email or phone). Dev builds accept code{" "}
+          Staff, guardian and chain-HQ OTP login (email or phone). Dev builds accept code{" "}
           <code>000000</code> for any identifier — see <code>OtpStore</code>'s
           dev bypass.
         </p>

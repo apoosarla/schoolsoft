@@ -115,6 +115,16 @@ public class PermissionChecker {
      * declaring its setup finished. It does not reach a child's record, a
      * mark, or a rupee — and if a later permission needs to be theirs too,
      * that is another deliberate line here, not a widening of this one.</p>
+     *
+     * <h2>The reads are not the whole gate</h2>
+     * This set says a chain admin <em>may</em> read anything unrestricted. It
+     * does not say through which endpoint, and that distinction is load-bearing:
+     * a chain admin has no school, V009's policies stand aside for a session
+     * with no school, and so a read built for one school answers with every
+     * school in the chain merged together rather than refusing.
+     * {@code TenantResolverFilter.CHAIN_ADMIN_PREFIXES} is what confines them
+     * to the schools list and their own identity; this set is what they may
+     * read once they are there.
      */
     static final Set<Perm> CHAIN_ADMIN_BASELINE = chainAdminBaseline();
 

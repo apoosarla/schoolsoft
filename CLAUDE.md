@@ -24,6 +24,13 @@ From the repo root: `npm run api:dev`, `npm run api:build`, `npm run db:seed`.
 Six Next.js apps in one npm workspace: `school-web`, `platform-web`,
 `public-site`, `parent-app`, `teacher-app`, `driver-app`.
 
+`school-web` (:3001) is the school's own: the office's screens, and — on
+`/chain`, for a `chain_admin` — the chain HQ that opens a school and watches
+its setup. One login, two kinds of person; `homeFor(session)` decides where
+each lands and `isChainAdmin` decides which menu they get, because a chain
+admin holds no role and so has no `screen_keys` to drive one. `platform-web`
+(:3002) is Schoolsoft's own operators and nobody else's.
+
 ```sh
 npm run school:dev     # also platform:dev, teacher:dev, parent:dev, driver:dev, public:dev
 npm run dev:web        # school + platform + public together
@@ -120,6 +127,17 @@ from it. Async hand-offs must propagate it explicitly.
 Subject types: `staff`, `guardian`, `student`, `chain_admin` (the customer's HQ),
 `platform_admin` (Schoolsoft staff). `trusted` bypasses tenant filtering for
 jobs and migrations.
+
+**A `chain_admin` has no `sid`, and a null school is not "no schools".** V009's
+policies read `school_id = current_school_id() OR current_school_id() IS NULL`,
+so a session with no school sees *every* school in the chain. That is what
+makes the chain HQ console possible — one request lists the chain — and it is
+why `TenantResolverFilter.CHAIN_ADMIN_PREFIXES` confines that subject type to
+`/v1/tenancy/schools` and `/v1/iam/me`. Permissions do not stop it: the chain
+admin holds every unrestricted read, so a school-scoped endpoint would answer
+200 with two schools' rows merged rather than refuse. Widening that list is a
+deliberate edit; anything on it must name its own school or be genuinely
+chain-wide.
 
 ### Migrations
 

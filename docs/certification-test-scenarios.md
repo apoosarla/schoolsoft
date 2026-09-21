@@ -250,7 +250,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | SEC-02 | Access token expiry mid-session → transparent refresh or clean redirect to login, on every app. (Known open item.) | P1 |
 | SEC-03 | Screen-access model (`/me/screens`) gates every frontend route; a hand-crafted API call to a screen the role lacks is rejected server-side, not just hidden in the UI. | P1 |
 | SEC-04 | Row-level security holds: a token for School A cannot read School B's students, marks, invoices, or messages, including via ID enumeration. | P1 |
-| SEC-05 | Chain HQ role can read across the chain's schools but cannot read another chain. | P1 |
+| SEC-05 | Chain HQ role reads the schools in its own chain, is refused a read built for one of them, and cannot reach another chain at all. | P1 |
 | SEC-06 | Platform admin actions are separately authenticated and fully audit-logged. | P1 |
 | SEC-07 | File upload/download tickets are tenant-scoped, expiring, and non-guessable. | P1 |
 | SEC-08 | High-risk mutations (mark unlock, fee waiver, enrolment status change, role grant) are audit-logged with actor, before/after, and reason. `GAP-27` | P1 |

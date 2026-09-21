@@ -240,13 +240,14 @@ class RbacEnforcementTest extends AbstractCertificationTest {
      * is the test that the derivation lands on the right side of the line.
      */
     @Test
-    @DisplayName("a chain admin reads across the chain and writes nothing")
+    @DisplayName("a chain admin reads the schools in their chain and writes nothing")
     void chainAdminReadsAndDoesNotWrite() {
         String hq = chainAdminToken();
 
         assertThat(get("/v1/tenancy/schools", hq).getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(get("/v1/people/students?schoolId=" + cbse().id(), hq).getStatusCode())
+        assertThat(get("/v1/tenancy/schools/" + cbse().id() + "/readiness", hq).getStatusCode())
             .isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/iam/me", hq).getStatusCode()).isEqualTo(HttpStatus.OK);
 
         assertThat(post("/v1/people/students", body(
             "schoolId", cbse().id(), "firstName", "Should", "lastName", "NotExist"), hq).getStatusCode())
@@ -256,6 +257,46 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             "roleCode", "it_admin", "scopeType", "school", "scopeId", cbse().id(),
             "reason", "rbac enforcement test"), hq).getStatusCode())
             .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * The one that is not about permissions.
+     *
+     * <p>A chain admin's token carries no school, and V009's policy reads
+     * {@code school_id = current_school_id() OR current_school_id() IS NULL} —
+     * so a school-scoped read made with this token is not refused and not
+     * empty. It returns <em>every school in the chain</em>, merged, because
+     * RLS stands aside for a session that has no school and the chain admin
+     * holds every unrestricted read in the baseline. Nothing in the
+     * authorization model says no.</p>
+     *
+     * <p>{@code TenantResolverFilter.CHAIN_ADMIN_PREFIXES} is what says no,
+     * and it says it before the handler runs, which is why the refusal here
+     * is the filter's {@code chain_admin_scope} rather than a 403 from a
+     * {@code @PreAuthorize}. The two schools in the fixture are what make the
+     * test meaningful: without the gate the read below answers 200 with both
+     * schools' children in one list.</p>
+     */
+    @Test
+    @DisplayName("a chain admin cannot reach a read built for one school")
+    void chainAdminCannotReachASchoolScopedRead() {
+        String hq = chainAdminToken();
+
+        for (String schoolScoped : List.of(
+                "/v1/people/students?schoolId=" + cbse().id(),
+                "/v1/people/staff?schoolId=" + cbse().id(),
+                "/v1/dashboards/schools/" + cbse().id() + "/overview",
+                "/v1/audit?schoolId=" + cbse().id())) {
+            var refused = get(schoolScoped, hq);
+            assertThat(refused.getStatusCode())
+                .describedAs("chain admin reaching %s", schoolScoped)
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        }
+
+        // The staff whose school it is still reads it. The gate is the subject
+        // type's, not the endpoint's.
+        assertThat(get("/v1/people/students?schoolId=" + cbse().id(), principalToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
     }
 
     // ===================== the driver's bus, and only the driver's bus =====================

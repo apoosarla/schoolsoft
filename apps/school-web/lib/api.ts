@@ -136,8 +136,36 @@ export function getMe(): Promise<MeDto> {
 
 export function hasScreen(session: Session | null, screenKey: string): boolean {
   if (!session) return false;
+  if (isChainAdmin(session)) return false;
   if (screenKey === "dashboard") return true;
   return (session.screens ?? []).includes(screenKey);
+}
+
+/**
+ * A chain's HQ admin, signed in through the same door as the office.
+ *
+ * They hold no role, so `screens` is empty and `hasScreen` would otherwise
+ * fall through to the implicit "dashboard" and land them on a school
+ * dashboard belonging to a school they do not have — their token carries no
+ * `schoolId` at all. Their navigation comes from what they are rather than
+ * from a grant, which is the whole reason this predicate exists instead of a
+ * screen key.
+ */
+export function isChainAdmin(session: Session | null): boolean {
+  return session?.subjectType === "chain_admin";
+}
+
+/**
+ * Where a session belongs when it arrives with no particular destination.
+ *
+ * One app, two kinds of person: the office works in a school, and a chain
+ * admin works above several. The API refuses the other's paths outright
+ * (`TenantResolverFilter.CHAIN_ADMIN_PREFIXES`), so this only decides which
+ * screen someone sees first — it is not what keeps them apart.
+ */
+export function homeFor(session: Session | null): string {
+  if (!session) return "/login";
+  return isChainAdmin(session) ? "/chain" : "/dashboard";
 }
 
 export type SchoolOverviewDto = {
@@ -2751,6 +2779,53 @@ export function unassignStaffRole(
   return apiFetch<void>("/v1/iam/staff-roles/unassign", {
     method: "POST",
     body: JSON.stringify({ staffId, schoolId, roleCode, reason }),
+  });
+}
+
+// ------------------------------------------------------------- the chain's HQ
+
+/**
+ * A school as the chain's own HQ admin sees it, through `/v1/tenancy/schools`.
+ *
+ * No headcount: cross-school numbers are the operator's read
+ * (`/v1/platform-admin/chains/{id}/stats`, in platform-web) and the KPI work
+ * the design doc puts in Phase 2.
+ */
+export type SchoolDto = {
+  id: string;
+  slug: string;
+  name: string;
+  boardCode: string;
+  gstin: string | null;
+  stateCode: string | null;
+  isActive: boolean;
+  lifecycle: "draft" | "live" | "suspended";
+  wentLiveAt?: string | null;
+};
+
+export type CreateSchoolRequest = {
+  slug: string;
+  name: string;
+  boardCode: string;
+  gstin?: string;
+  stateCode?: string;
+};
+
+/**
+ * Every school in the caller's chain. There is no chain id in the call
+ * because there is no other chain the caller could ask about: the token names
+ * theirs, and V009's policies stand aside for a session that has no school —
+ * which is how one request answers for all of them.
+ */
+export function listMySchools(): Promise<SchoolDto[]> {
+  return apiFetch<SchoolDto[]>("/v1/tenancy/schools");
+}
+
+/** The chain admin's one write. The school starts in draft, like any other. */
+export function createMySchool(req: CreateSchoolRequest): Promise<SchoolDto> {
+  return apiFetch<SchoolDto>("/v1/tenancy/schools", {
+    method: "POST",
+    body: JSON.stringify(req),
   });
 }
 

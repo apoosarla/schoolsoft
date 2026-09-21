@@ -2,13 +2,13 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getSession } from "@/lib/api";
+import { getSession, homeFor } from "@/lib/api";
 
 export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace(getSession() ? "/dashboard" : "/login");
+    router.replace(homeFor(getSession()));
   }, [router]);
 
   return (
