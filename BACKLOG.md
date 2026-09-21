@@ -1344,10 +1344,16 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   posting of fines / lost-book charges to the fee ledger, no reservations, no
   per-grade issue limits. Blocks LIB-02/03/04.
 
-- **GAP-23 — No bulk import, no DPDP data lifecycle.** No CSV import for
-  students / staff / marks (schools onboard with spreadsheets, so this is an
-  onboarding blocker). `consent_record` exists but there is no export,
-  erasure, or retention job behind it. Blocks ENR-09, SEC-09.
+- **GAP-23 — No bulk import, no DPDP data lifecycle. Students closed
+  2026-09-21:** V038 adds preview-then-commit CSV import for students, their
+  families and their enrolments (`/v1/people/imports/students/preview`, then
+  `/{id}/commit`), per-row errors, guardians matched on phone or email so
+  siblings share a parent, and the whole batch refused until the file is
+  clean — the documented choice ENR-09 asks for. ENR-09 now runs.
+  **Still open:** no import for staff (there is no staff-write surface at all
+  yet — no `staff.manage`, no create endpoint — so it is its own piece of
+  work) and none for marks. `consent_record` exists but there is no export,
+  erasure, or retention job behind it. Still blocks SEC-09.
 
 _(No GAP-28: session expiry / token refresh is already an Open item above and
 is referenced by scenario SEC-02 rather than duplicated here.)_

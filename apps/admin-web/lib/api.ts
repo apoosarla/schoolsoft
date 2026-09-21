@@ -2863,3 +2863,62 @@ export function createSection(
 export function listStrategyCodes(): Promise<string[]> {
   return apiFetch<string[]>("/v1/assessment/strategies");
 }
+
+// ------------------------------------------------------------ bulk import
+
+/** One line of a student spreadsheet as the server read it; `errors` is why it will not be written. */
+export type ImportRowDto = {
+  line: number;
+  admissionNo: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  dob: string | null;
+  gradeCode: string | null;
+  sectionCode: string | null;
+  guardianName: string | null;
+  guardianPhone: string | null;
+  guardianEmail: string | null;
+  errors: string[];
+};
+
+/**
+ * A parsed file waiting to be committed or corrected. `canCommit` is false
+ * while any row has an error: the whole batch goes in or none of it does.
+ */
+export type ImportBatchDto = {
+  id: string;
+  schoolId: string;
+  filename: string | null;
+  status: "previewed" | "committed" | "superseded";
+  rowCount: number;
+  errorCount: number;
+  canCommit: boolean;
+  rows: ImportRowDto[];
+  createdAt: string;
+  committedAt: string | null;
+};
+
+export type ImportResultDto = {
+  batchId: string;
+  studentsCreated: number;
+  guardiansCreated: number;
+  guardiansReused: number;
+  enrolled: number;
+};
+
+/** Parses and checks the file. Writes nothing — the answer is what would be written. */
+export function previewStudentImport(
+  schoolId: string,
+  filename: string,
+  csv: string
+): Promise<ImportBatchDto> {
+  return apiFetch<ImportBatchDto>("/v1/people/imports/students/preview", {
+    method: "POST",
+    body: JSON.stringify({ schoolId, filename, csv }),
+  });
+}
+
+/** Imports the batch that was previewed — not the file, so what was approved is what lands. */
+export function commitStudentImport(batchId: string): Promise<ImportResultDto> {
+  return apiFetch<ImportResultDto>(`/v1/people/imports/${batchId}/commit`, { method: "POST" });
+}

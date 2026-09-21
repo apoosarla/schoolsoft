@@ -48,6 +48,7 @@ public enum Perm {
     STUDENT_VIEW("student.view", "Read any student record"),
     STUDENT_VIEW_OWN("student.view.own", "Read your own record, or your children's"),
     STUDENT_MANAGE("student.manage", "Create and edit student records"),
+    STUDENT_IMPORT("student.import", "Bulk-import students, their families and their enrolments"),
     GUARDIAN_VIEW("guardian.view", "Read guardian records and their student links"),
     STAFF_VIEW("staff.view", "Read staff records"),
     DIRECTORY_VIEW("directory.view", "Read the school directory"),

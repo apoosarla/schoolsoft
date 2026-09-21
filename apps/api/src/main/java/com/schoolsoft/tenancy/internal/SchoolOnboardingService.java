@@ -1,6 +1,6 @@
 package com.schoolsoft.tenancy.internal;
 
-import com.schoolsoft.platform.tenancy.TenantContext;
+import com.schoolsoft.iam.api.Authz;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.OnboardingStepDto;
@@ -27,9 +27,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class SchoolOnboardingService {
 
     private final JdbcTemplate jdbc;
+    private final Authz authz;
 
-    public SchoolOnboardingService(JdbcTemplate jdbc) {
+    public SchoolOnboardingService(JdbcTemplate jdbc, Authz authz) {
         this.jdbc = jdbc;
+        this.authz = authz;
     }
 
     // ----------------------------------------------------------- readiness
@@ -86,7 +88,7 @@ public class SchoolOnboardingService {
             "VALUES (?, ?, ?, ?) " +
             "ON CONFLICT (school_id, step_key) DO UPDATE SET reason = EXCLUDED.reason, " +
             "  skipped_by_staff_id = EXCLUDED.skipped_by_staff_id, skipped_at = now()",
-            schoolId, step.key(), reason, actingStaffId());
+            schoolId, step.key(), reason, authz.currentStaffId());
         return readiness(schoolId);
     }
 
@@ -163,16 +165,4 @@ public class SchoolOnboardingService {
         return out;
     }
 
-    /**
-     * The staff member behind the token, or null for a chain admin — who is
-     * school-less by construction and so has no staff row to name.
-     */
-    private UUID actingStaffId() {
-        var snap = TenantContext.get();
-        if (snap == null || snap.userAccountId() == null) return null;
-        var rows = jdbc.query(
-            "SELECT subject_id FROM user_account WHERE id = ? AND subject_type = 'staff'",
-            (rs, i) -> rs.getString("subject_id"), snap.userAccountId());
-        return rows.isEmpty() || rows.get(0) == null ? null : UUID.fromString(rows.get(0));
-    }
 }

@@ -88,7 +88,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | ENR-06 | Student profile carries medical conditions, allergies, blood group, and emergency contacts; these surface to the class teacher and on the trip/driver view. `GAP-17` | P1 |
 | ENR-07 | Student photo and ID card generation for a whole section. `GAP-16` | P3 |
 | ENR-08 | Withdrawn student is re-admitted the following year — prior history is preserved and visible, no duplicate student record is created. `GAP-02` | P2 |
-| ENR-09 | Bulk import of 500 students from CSV: validation errors reported per row, valid rows committed or the whole batch rejected (documented choice), no partial guardian orphans. `GAP-23` | P1 |
+| ENR-09 | Bulk import of 500 students from CSV: validation errors reported per row, the whole batch rejected until the file is clean (the documented choice), no partial guardian orphans. | P1 |
 | ENR-10 | Student search across name, admission no, guardian phone returns results scoped strictly to the caller's school. | P2 |
 
 ## 5. Calendar, Holidays & Events (CERT-CAL)

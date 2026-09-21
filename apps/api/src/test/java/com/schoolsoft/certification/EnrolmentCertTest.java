@@ -229,9 +229,94 @@ class EnrolmentCertTest extends AbstractCertificationTest {
         }
     }
 
+    /**
+     * The spreadsheet a school actually arrives with. Five hundred children,
+     * two to a family, and a handful of rows wrong in the ways rows are wrong:
+     * a section that does not exist, a date nobody can parse, an admission
+     * number already taken, a parent with a name and no way to be reached.
+     *
+     * <p>Run against a school of its own. Five hundred children on Oakridge's
+     * register would move every count the other fifty scenarios read.</p>
+     */
     @Test @Tag("P1")
-    @Disabled("GAP-23 — no CSV bulk import for students/staff/marks and no per-row validation (Phase 8).")
     void cert_ENR_09_bulkImportOf500StudentsValidatesPerRow() {
+        var school = importSandbox();
+        try {
+            String token = school.token();
+
+            // The file as it first arrives: right for 500 children, wrong in
+            // four places.
+            var broken = post("/v1/people/imports/students/preview", Map.of(
+                "schoolId", school.schoolId(), "filename", "register.csv",
+                "csv", registerCsv(school, true)), token);
+            assertThat(broken.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(broken.getBody().get("rowCount").asInt()).isEqualTo(504);
+            assertThat(broken.getBody().get("errorCount").asInt()).isEqualTo(4);
+            assertThat(broken.getBody().get("canCommit").asBoolean()).isFalse();
+
+            // Each bad row says what is wrong with it, and names its line.
+            Map<Integer, String> problems = new java.util.HashMap<>();
+            broken.getBody().get("rows").forEach(row -> {
+                if (row.get("errors").size() > 0) {
+                    problems.put(row.get("line").asInt(), row.get("errors").get(0).asText());
+                }
+            });
+            assertThat(problems).hasSize(4);
+            assertThat(String.join(" | ", problems.values()))
+                .contains("no section 'Z'")
+                .contains("is not a date")
+                .contains("already belongs to a student here")
+                .contains("phone or an email");
+
+            // Nothing was written by a preview, however bad or good.
+            assertThat(count("SELECT count(*) FROM student WHERE school_id = ?", school.schoolId())).isZero();
+
+            UUID brokenBatch = UUID.fromString(broken.getBody().get("id").asText());
+            var refused = post("/v1/people/imports/" + brokenBatch + "/commit", null, token);
+            assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(refused.getBody().get("message").asText()).contains("4 rows to fix");
+            assertThat(count("SELECT count(*) FROM student WHERE school_id = ?", school.schoolId())).isZero();
+
+            // The office fixes the file and previews again.
+            var fixed = post("/v1/people/imports/students/preview", Map.of(
+                "schoolId", school.schoolId(), "filename", "register.csv",
+                "csv", registerCsv(school, false)), token);
+            assertThat(fixed.getBody().get("rowCount").asInt()).isEqualTo(500);
+            assertThat(fixed.getBody().get("errorCount").asInt()).isZero();
+            assertThat(fixed.getBody().get("canCommit").asBoolean()).isTrue();
+
+            UUID batchId = UUID.fromString(fixed.getBody().get("id").asText());
+            var committed = post("/v1/people/imports/" + batchId + "/commit", null, token);
+            assertThat(committed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(committed.getBody().get("studentsCreated").asInt()).isEqualTo(500);
+            assertThat(committed.getBody().get("enrolled").asInt()).isEqualTo(500);
+            // Two children to a family: 250 parents, and the second child of
+            // each is matched to the parent the first one created.
+            assertThat(committed.getBody().get("guardiansCreated").asInt()).isEqualTo(250);
+            assertThat(committed.getBody().get("guardiansReused").asInt()).isEqualTo(250);
+
+            // No partial guardian orphans: every child is on the register and
+            // has a family, and every family has a login.
+            assertThat(count("SELECT count(*) FROM student WHERE school_id = ?", school.schoolId()))
+                .isEqualTo(500);
+            assertThat(count("SELECT count(*) FROM enrolment e JOIN student s ON s.id = e.student_id "
+                + "WHERE s.school_id = ?", school.schoolId())).isEqualTo(500);
+            assertThat(count("SELECT count(*) FROM student s WHERE s.school_id = ? AND NOT EXISTS ("
+                + "SELECT 1 FROM guardian_student gs WHERE gs.student_id = s.id)", school.schoolId()))
+                .isZero();
+            assertThat(count("SELECT count(*) FROM guardian WHERE school_id = ?", school.schoolId()))
+                .isEqualTo(250);
+            assertThat(count("SELECT count(*) FROM user_account WHERE school_id = ? AND "
+                + "subject_type = 'guardian'", school.schoolId())).isEqualTo(250);
+
+            // Committing the same batch twice imports one register, not two.
+            var again = post("/v1/people/imports/" + batchId + "/commit", null, token);
+            assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(count("SELECT count(*) FROM student WHERE school_id = ?", school.schoolId()))
+                .isEqualTo(500);
+        } finally {
+            dropImportSandbox(school);
+        }
     }
 
     @Test @Tag("P2")
@@ -246,6 +331,96 @@ class EnrolmentCertTest extends AbstractCertificationTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** A school of its own, with room for five hundred children. */
+    private record ImportSandbox(UUID schoolId, UUID staffId, UUID userId, String token) {}
+
+    private ImportSandbox importSandbox() {
+        var created = post("/v1/tenancy/schools", Map.of(
+            "slug", "cert-import", "name", "Import Probe School", "boardCode", "CBSE", "stateCode", "KA"),
+            chainAdminToken());
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID schoolId = UUID.fromString(created.getBody().get("id").asText());
+        UUID staffId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+
+        inChainDo(jdbc -> {
+            jdbc.update("INSERT INTO campus (school_id, name, is_primary) VALUES (?, 'Main', TRUE)", schoolId);
+            jdbc.update("INSERT INTO academic_year (school_id, code, starts_on, ends_on, is_current) " +
+                "VALUES (?, '2026-27', '2026-06-01', '2027-03-31', TRUE)", schoolId);
+            jdbc.update("INSERT INTO grade (school_id, code, name, sort_order) VALUES (?, '1', 'Grade 1', 1)",
+                schoolId);
+            // Two sections with room to spare: capacity is checked, and a file
+            // that overfills one is a different scenario.
+            for (String code : java.util.List.of("A", "B")) {
+                jdbc.update("INSERT INTO section (school_id, grade_id, academic_year_id, code, name, " +
+                    "  strategy_code, capacity) " +
+                    "SELECT ?, g.id, ay.id, ?, 'Grade 1-' || ?, 'CBSE-CCE-2024', 300 " +
+                    "FROM grade g, academic_year ay " +
+                    "WHERE g.school_id = ? AND g.code = '1' AND ay.school_id = ? AND ay.is_current",
+                    schoolId, code, code, schoolId, schoolId);
+            }
+            jdbc.update("INSERT INTO staff (id, school_id, employee_no, first_name, last_name, email, " +
+                "  employment_type, joined_on) " +
+                "VALUES (?, ?, 'EMP-IMPORT', 'Import', 'Registrar', ?, 'permanent', '2026-05-01')",
+                staffId, schoolId, "import.registrar+" + staffId + "@oakridge.test");
+            jdbc.update("INSERT INTO user_account (id, school_id, subject_type, subject_id, email) " +
+                "VALUES (?, ?, 'staff', ?, ?)",
+                userId, schoolId, staffId, "import.registrar+" + staffId + "@oakridge.test");
+            jdbc.update("INSERT INTO staff_role (staff_id, role_code, scope_type, scope_id) " +
+                "VALUES (?, 'registrar', 'school', ?)", staffId, schoolId);
+        });
+
+        String token = jwt.issueAccess(userId, seed.chainId().toString(), seed.chainSchema(), schoolId, "staff");
+        return new ImportSandbox(schoolId, staffId, userId, token);
+    }
+
+    /**
+     * Five hundred children, two to a family. {@code withErrors} adds the four
+     * bad rows a real file arrives with.
+     */
+    private String registerCsv(ImportSandbox school, boolean withErrors) {
+        StringBuilder csv = new StringBuilder(
+            "admission_no,First Name,last_name,dob,gender,grade_code,section_code,"
+            + "guardian_name,guardian_relation,guardian_phone,guardian_email\n");
+        for (int i = 1; i <= 500; i++) {
+            int family = (i + 1) / 2;
+            csv.append("IMP-").append(String.format("%04d", i)).append(',')
+               .append("Child").append(i).append(',')
+               // A comma inside a quoted field, which is what a spreadsheet exports.
+               .append("\"Kumar, ").append(family).append("\"").append(',')
+               .append("2015-0").append((i % 9) + 1).append("-1").append(i % 9).append(',')
+               .append(i % 2 == 0 ? "female" : "male").append(',')
+               .append("1,").append(i <= 250 ? "A" : "B").append(',')
+               .append("Parent ").append(family).append(",mother,")
+               .append("+9199000").append(String.format("%04d", family)).append(',')
+               .append("import.parent").append(family).append("@probe.test")
+               .append('\n');
+        }
+        if (withErrors) {
+            csv.append("IMP-9001,Wrong Section,Kumar,2015-01-01,male,1,Z,Parent X,mother,+919900109001,x1@probe.test\n");
+            csv.append("IMP-9002,Bad Date,Kumar,05/06/2015,male,1,A,Parent Y,mother,+919900109002,x2@probe.test\n");
+            csv.append("IMP-0001,Duplicate Number,Kumar,2015-01-01,male,1,A,Parent Z,mother,+919900109003,x3@probe.test\n");
+            csv.append("IMP-9004,No Way To Reach,Kumar,2015-01-01,male,1,A,Parent W,mother,,\n");
+        }
+        return csv.toString();
+    }
+
+    private void dropImportSandbox(ImportSandbox school) {
+        inChainDo(jdbc -> {
+            jdbc.update("DELETE FROM enrolment WHERE school_id = ?", school.schoolId());
+            jdbc.update("DELETE FROM guardian_student WHERE student_id IN "
+                + "(SELECT id FROM student WHERE school_id = ?)", school.schoolId());
+            jdbc.update("DELETE FROM user_account WHERE school_id = ?", school.schoolId());
+            jdbc.update("DELETE FROM guardian WHERE school_id = ?", school.schoolId());
+            jdbc.update("DELETE FROM student WHERE school_id = ?", school.schoolId());
+            jdbc.update("DELETE FROM import_batch WHERE school_id = ?", school.schoolId());
+            jdbc.update("DELETE FROM number_series WHERE school_id = ?", school.schoolId());
+            jdbc.update("DELETE FROM staff_role WHERE staff_id = ?", school.staffId());
+            jdbc.update("DELETE FROM staff WHERE school_id = ?", school.schoolId());
+            jdbc.update("DELETE FROM school WHERE id = ?", school.schoolId());
+        });
+    }
 
     private UUID createStudent(String admissionNo) {
         var created = post("/v1/people/students", Map.of(

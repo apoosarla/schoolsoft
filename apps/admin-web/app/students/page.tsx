@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, getSession, hasScreen, listStudents, Session, StudentDto } from "@/lib/api";
+import ImportPanel from "./import-panel";
 
 export default function StudentsPage() {
   const router = useRouter();
@@ -11,6 +12,8 @@ export default function StudentsPage() {
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Bumped after an import so the list below re-reads the register it just changed.
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     const s = getSession();
@@ -33,12 +36,14 @@ export default function StudentsPage() {
       .then(setStudents)
       .catch((err) => setError(err instanceof ApiError ? `${err.code}: ${err.message}` : "Failed to load"))
       .finally(() => setLoading(false));
-  }, [session, q]);
+  }, [session, q, reload]);
 
   if (!session) return null;
 
   return (
     <main className="shell">
+      <ImportPanel schoolId={session.schoolId} onImported={() => setReload((n) => n + 1)} />
+
       <div className="panel">
         <h2>Students</h2>
         <div className="form-row">
