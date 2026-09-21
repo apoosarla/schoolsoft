@@ -458,7 +458,54 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
         }
     }
 
+    /**
+     * What {@code draft} is for. A half-built school shows a parent an empty
+     * timetable, an empty ledger and a child on no register, and none of that
+     * says "not yet" — so until somebody opens the school, the door is the
+     * office's alone.
+     */
+    @Test @Tag("P1")
+    void cert_TEN_15_aFamilyCannotSignInUntilTheSchoolOpens() {
+        UUID schoolId = createProbeSchool("cert-probe-door");
+        String guardianEmail = "probe.family+" + schoolId + "@oakridge.test";
+        try {
+            inChainDo(jdbc -> jdbc.update(
+                "INSERT INTO user_account (school_id, subject_type, subject_id, email) " +
+                "VALUES (?, 'guardian', NULL, ?)", schoolId, guardianEmail));
+
+            var refused = signIn(guardianEmail);
+            assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(refused.getBody().get("message").asText()).contains("has not opened yet");
+
+            // The office gets in while the school is still being built —
+            // somebody has to build it.
+            fillBlockingSteps(schoolId, true);
+            String staffEmail = queryOne(
+                "SELECT email FROM user_account WHERE school_id = ? AND subject_type = 'staff'",
+                String.class, schoolId);
+            assertThat(signIn(staffEmail).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            // And the family's door opens with the school's.
+            assertThat(post("/v1/tenancy/schools/" + schoolId + "/go-live", null, chainAdminToken())
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+            var admitted = signIn(guardianEmail);
+            assertThat(admitted.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(admitted.getBody().get("accessToken").asText()).isNotBlank();
+        } finally {
+            inChainDo(jdbc -> jdbc.update("DELETE FROM user_account WHERE email = ?", guardianEmail));
+            deleteProbeSchool(schoolId);
+        }
+    }
+
     // ------------------------------------------------ the probe school
+
+    /** The OTP front door, with the dev bypass code the suite's profile leaves on. */
+    private org.springframework.http.ResponseEntity<JsonNode> signIn(String identifier) {
+        post("/v1/auth/otp/start", Map.of("identifier", identifier, "chainSlug", seed.chainSlug()), null);
+        return post("/v1/auth/otp/verify",
+            Map.of("identifier", identifier, "chainSlug", seed.chainSlug(), "code", "000000"), null);
+    }
+
 
     private JsonNode stepOf(JsonNode readiness, String key) {
         for (JsonNode step : readiness.get("steps")) {

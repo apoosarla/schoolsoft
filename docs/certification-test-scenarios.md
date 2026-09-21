@@ -38,6 +38,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | TEN-12 | An optional setup step is skipped with a reason and the skip is audited; a blocking step cannot be skipped, whatever reason is offered. | P2 |
 | TEN-13 | `HQ` opens a school in their own chain with no platform admin involved, and still cannot change anything inside it. | P1 |
 | TEN-14 | `PL` lists a chain's schools from the platform console and opens one in it on the chain's behalf; the school lands in that chain's schema in `draft`, and its setup checklist is readable from outside the chain. | P2 |
+| TEN-15 | A guardian cannot sign in to a school that has not opened yet, and is told why; the school's own staff can sign in while it is being set up, and the guardian can once it opens. | P1 |
 
 ## 2. Academic Year & Structure Setup (CERT-ACAD)
 

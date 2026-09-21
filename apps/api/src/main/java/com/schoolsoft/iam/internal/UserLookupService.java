@@ -39,12 +39,20 @@ public class UserLookupService {
         this.dataSource = dataSource;
     }
 
+    /**
+     * {@code schoolLifecycle} is the state of the school this account belongs
+     * to, read in the same step as the account itself — {@code null} for an
+     * account with no school, which is what a chain admin is. It is here so
+     * the door can refuse a family a school has not opened to yet without a
+     * second trip into the chain's schema.
+     */
     public record Resolved(
         UUID userAccountId,
         UUID chainId,
         String chainSchema,
         UUID schoolId,
-        String subjectType
+        String subjectType,
+        String schoolLifecycle
     ) {}
 
     public Optional<Resolved> resolve(String identifier, String chainSlug) {
@@ -72,7 +80,8 @@ public class UserLookupService {
     public Optional<Resolved> resolvePlatformAdmin(String email) {
         var rows = platformJdbc.query(
             "SELECT id FROM platform.platform_user WHERE is_active AND email = ?",
-            (rs, i) -> new Resolved(UUID.fromString(rs.getString("id")), null, "platform", null, "platform_admin"),
+            (rs, i) -> new Resolved(
+                UUID.fromString(rs.getString("id")), null, "platform", null, "platform_admin", null),
             email
         );
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
@@ -81,7 +90,8 @@ public class UserLookupService {
     public Optional<Resolved> resolvePlatformAdminById(UUID id) {
         var rows = platformJdbc.query(
             "SELECT id FROM platform.platform_user WHERE is_active AND id = ?",
-            (rs, i) -> new Resolved(UUID.fromString(rs.getString("id")), null, "platform", null, "platform_admin"),
+            (rs, i) -> new Resolved(
+                UUID.fromString(rs.getString("id")), null, "platform", null, "platform_admin", null),
             id
         );
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
@@ -93,13 +103,16 @@ public class UserLookupService {
         try {
             var jdbc = new JdbcTemplate(dataSource);
             var rows = jdbc.query(
-                "SELECT id, school_id, subject_type FROM user_account WHERE id = ? AND is_active",
+                "SELECT ua.id, ua.school_id, ua.subject_type, s.lifecycle FROM user_account ua " +
+                "LEFT JOIN school s ON s.id = ua.school_id " +
+                "WHERE ua.id = ? AND ua.is_active",
                 (rs, i) -> new Resolved(
                     UUID.fromString(rs.getString("id")),
                     null,
                     chainSchema,
                     rs.getString("school_id") == null ? null : UUID.fromString(rs.getString("school_id")),
-                    rs.getString("subject_type")
+                    rs.getString("subject_type"),
+                    rs.getString("lifecycle")
                 ),
                 userAccountId
             );
@@ -114,14 +127,16 @@ public class UserLookupService {
         try {
             var jdbc = new JdbcTemplate(dataSource);
             var rows = jdbc.query(
-                "SELECT id, school_id, subject_type FROM user_account " +
-                "WHERE is_active AND (email = ? OR phone = ?) LIMIT 1",
+                "SELECT ua.id, ua.school_id, ua.subject_type, s.lifecycle FROM user_account ua " +
+                "LEFT JOIN school s ON s.id = ua.school_id " +
+                "WHERE ua.is_active AND (ua.email = ? OR ua.phone = ?) LIMIT 1",
                 (rs, i) -> new Resolved(
                     UUID.fromString(rs.getString("id")),
                     chain.id,
                     chain.schemaName,
                     rs.getString("school_id") == null ? null : UUID.fromString(rs.getString("school_id")),
-                    rs.getString("subject_type")
+                    rs.getString("subject_type"),
+                    rs.getString("lifecycle")
                 ),
                 identifier, identifier
             );

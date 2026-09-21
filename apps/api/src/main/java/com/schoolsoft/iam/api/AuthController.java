@@ -4,6 +4,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.iam.internal.OtpStore;
 import com.schoolsoft.iam.internal.UserLookupService;
 import com.schoolsoft.platform.security.JwtService;
+import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.platform.web.NotFoundException;
 import jakarta.validation.constraints.NotBlank;
 import java.util.Map;
@@ -67,6 +68,7 @@ public class AuthController {
         }
         var resolved = lookup.resolve(req.identifier(), req.chainSlug())
             .orElseThrow(() -> new NotFoundException("No account for " + req.identifier()));
+        refuseUntilTheSchoolIsOpen(resolved);
 
         String access = jwt.issueAccess(
             resolved.userAccountId(),
@@ -122,6 +124,34 @@ public class AuthController {
         )));
     }
 
+    /**
+     * A school that has not opened yet is the office's to work in and nobody
+     * else's (V036). The people building it sign in; the families and
+     * students it will serve cannot, because a half-built school shows a
+     * parent an empty timetable, an empty fee ledger and a child who appears
+     * to be on no register — and none of that says "not yet".
+     *
+     * <p>Applied at the door rather than on every request: a school moves
+     * from draft to live and, short of an operator suspending it, not back,
+     * so a token in a family's hands cannot go stale this way. Checking here
+     * and on the refresh costs one join on a read that was already being
+     * made; checking on every request would cost a query per request for a
+     * transition that happens once in a school's life.</p>
+     *
+     * <p>An account with no school — a chain admin — is not a family and has
+     * no school to be closed out of, so it passes.</p>
+     */
+    private void refuseUntilTheSchoolIsOpen(UserLookupService.Resolved resolved) {
+        boolean family = "guardian".equals(resolved.subjectType())
+            || "student".equals(resolved.subjectType());
+        String lifecycle = resolved.schoolLifecycle();
+        if (!family || lifecycle == null || "live".equals(lifecycle)) return;
+        throw new ForbiddenException("draft".equals(lifecycle)
+            ? "This school has not opened yet. While it is being set up only its own staff can "
+              + "sign in; the school will tell you when it is ready."
+            : "This school is not open. Please contact the school office.");
+    }
+
     @PreAuthorize("permitAll()")
     @PostMapping("/refresh")
     public ResponseEntity<AuthResponse> refresh(@RequestBody Map<String, String> body) {
@@ -136,6 +166,9 @@ public class AuthController {
         var resolved = lookup.resolveById(sub, cs);
         if (resolved.isEmpty()) return ResponseEntity.status(401).build();
         var r = resolved.get();
+        // Also on the refresh: a token minted before the school closed must
+        // not outlive it by the fifteen minutes an access token is good for.
+        refuseUntilTheSchoolIsOpen(r);
 
         String access = jwt.issueAccess(sub, cid, cs, r.schoolId(), r.subjectType());
         return ResponseEntity.ok(new AuthResponse(access, token, Map.of()));
