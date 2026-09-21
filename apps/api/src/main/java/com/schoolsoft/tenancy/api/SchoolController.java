@@ -41,7 +41,14 @@ public class SchoolController {
         String stateCode
     ) {}
 
-    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    /**
+     * Opening a school was platform-admin work, which made a chain wait on a
+     * ticket to Schoolsoft to open its own. {@code school.onboard} is held by
+     * the three heads and by a chain admin — whose grant is the one write in
+     * an otherwise read-only baseline, argued for in {@code PermissionChecker}.
+     * A platform admin still passes: they hold every permission there is.
+     */
+    @PreAuthorize("@perm.can('school.onboard')")
     @PostMapping("/schools")
     public SchoolDto create(@RequestBody CreateSchoolRequest req) {
         return repo.create(req.slug(), req.name(), req.boardCode(), req.gstin(), req.stateCode());

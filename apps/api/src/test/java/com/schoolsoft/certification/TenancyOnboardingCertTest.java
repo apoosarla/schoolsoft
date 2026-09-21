@@ -247,6 +247,149 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
         assertThat(publicView.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
+
+    // ------------------------------------------------- opening a school
+
+    @Test @Tag("P1")
+    void cert_TEN_09_newSchoolStartsInDraftAndNamesWhatIsLeftToDo() {
+        UUID schoolId = createProbeSchool("cert-probe-draft");
+        try {
+            var school = get("/v1/tenancy/schools/" + schoolId, chainAdminToken()).getBody();
+            assertThat(school.get("lifecycle").asText()).isEqualTo("draft");
+            // The API omits a null field, so "never opened" is the absence of
+            // the moment rather than a null one.
+            assertThat(school.hasNonNull("wentLiveAt")).isFalse();
+
+            var readiness = get("/v1/tenancy/schools/" + schoolId + "/readiness", chainAdminToken());
+            assertThat(readiness.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(readiness.getBody().get("canGoLive").asBoolean()).isFalse();
+
+            var steps = readiness.getBody().get("steps");
+            var blockingOpen = new java.util.ArrayList<String>();
+            steps.forEach(step -> {
+                assertThat(step.get("done").asBoolean()).isFalse();
+                assertThat(step.get("why").asText()).isNotBlank();
+                if (step.get("blocking").asBoolean()) blockingOpen.add(step.get("key").asText());
+            });
+            assertThat(blockingOpen).containsExactly(
+                "campus", "academic_year", "terms", "grades", "sections", "subjects", "admin_account");
+
+            // Derived, not stored: give the school a campus and the same
+            // question answers differently with nothing else written.
+            inChainDo(jdbc -> jdbc.update(
+                "INSERT INTO campus (school_id, name, is_primary) VALUES (?, 'Main Campus', TRUE)", schoolId));
+            var after = get("/v1/tenancy/schools/" + schoolId + "/readiness", chainAdminToken()).getBody();
+            assertThat(stepOf(after, "campus").get("done").asBoolean()).isTrue();
+            assertThat(stepOf(after, "campus").get("count").asLong()).isEqualTo(1);
+            assertThat(after.get("canGoLive").asBoolean()).isFalse();
+        } finally {
+            deleteProbeSchool(schoolId);
+        }
+    }
+
+    @Test @Tag("P1")
+    void cert_TEN_10_goingLiveIsRefusedWhileABlockingStepIsOpen() {
+        UUID schoolId = createProbeSchool("cert-probe-refused");
+        try {
+            fillBlockingSteps(schoolId, false);   // everything but the sections
+
+            var refused = post("/v1/tenancy/schools/" + schoolId + "/go-live", null, chainAdminToken());
+            assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(refused.getBody().get("message").asText()).contains("Sections");
+
+            // Refused means unchanged, not half-opened.
+            assertThat(queryOne("SELECT lifecycle FROM school WHERE id = ?", String.class, schoolId))
+                .isEqualTo("draft");
+        } finally {
+            deleteProbeSchool(schoolId);
+        }
+    }
+
+    @Test @Tag("P1")
+    void cert_TEN_11_goingLiveTwiceIsNotAnError() {
+        UUID schoolId = createProbeSchool("cert-probe-live");
+        try {
+            fillBlockingSteps(schoolId, true);
+
+            var opened = post("/v1/tenancy/schools/" + schoolId + "/go-live", null, chainAdminToken());
+            assertThat(opened.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(opened.getBody().get("lifecycle").asText()).isEqualTo("live");
+            assertThat(opened.getBody().get("canGoLive").asBoolean()).isTrue();
+            String wentLiveAt = opened.getBody().get("wentLiveAt").asText();
+            assertThat(wentLiveAt).isNotBlank();
+
+            // The retry a dropped response would produce.
+            var again = post("/v1/tenancy/schools/" + schoolId + "/go-live", null, chainAdminToken());
+            assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(again.getBody().get("lifecycle").asText()).isEqualTo("live");
+            assertThat(again.getBody().get("wentLiveAt").asText()).isEqualTo(wentLiveAt);
+        } finally {
+            deleteProbeSchool(schoolId);
+        }
+    }
+
+    @Test @Tag("P2")
+    void cert_TEN_12_anOptionalStepIsSkippedWithAReasonAndABlockingOneCannotBe() {
+        UUID schoolId = createProbeSchool("cert-probe-skip");
+        try {
+            String token = chainAdminToken();
+
+            var skipped = post("/v1/tenancy/schools/" + schoolId + "/steps/fee_structure/skip",
+                Map.of("reason", "the chain bills centrally this year"), token);
+            assertThat(skipped.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(stepOf(skipped.getBody(), "fee_structure").get("skipped").asBoolean()).isTrue();
+            assertThat(stepOf(skipped.getBody(), "fee_structure").get("skipReason").asText())
+                .isEqualTo("the chain bills centrally this year");
+
+            assertThat(count("SELECT count(*) FROM audit_log WHERE action = 'school.setup_step_skipped' "
+                + "AND target_id = ?", schoolId)).isEqualTo(1);
+
+            // A skip with no reason is refused by the audit interceptor, ahead
+            // of the handler, and nothing is written.
+            var noReason = post("/v1/tenancy/schools/" + schoolId + "/steps/working_week/skip",
+                Map.of(), token);
+            assertThat(noReason.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+            // A blocking step is not skippable at any price.
+            var refused = post("/v1/tenancy/schools/" + schoolId + "/steps/sections/skip",
+                Map.of("reason", "we will do it later"), token);
+            assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(count("SELECT count(*) FROM school_onboarding_skip WHERE school_id = ? "
+                + "AND step_key = 'sections'", schoolId)).isZero();
+
+            var restored = post("/v1/tenancy/schools/" + schoolId + "/steps/fee_structure/unskip", null, token);
+            assertThat(stepOf(restored.getBody(), "fee_structure").get("skipped").asBoolean()).isFalse();
+        } finally {
+            deleteProbeSchool(schoolId);
+        }
+    }
+
+    /**
+     * The chain admin's single write. Opening a school is theirs so a chain
+     * does not raise a ticket with Schoolsoft to open its own; everything
+     * inside the school stays with the people who work there.
+     */
+    @Test @Tag("P1")
+    void cert_TEN_13_chainAdminOpensASchoolAndCanChangeNothingInsideIt() {
+        UUID schoolId = createProbeSchool("cert-probe-hq");
+        try {
+            String token = chainAdminToken();
+            fillBlockingSteps(schoolId, true);
+            assertThat(post("/v1/tenancy/schools/" + schoolId + "/go-live", null, token).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+            // And nothing else in the school is theirs to change.
+            assertThat(post("/v1/tenancy/schools/" + schoolId + "/grades",
+                Map.of("code", "HQ1", "name", "Grade HQ", "sortOrder", 1), token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(post("/v1/tenancy/schools/" + schoolId + "/subjects",
+                Map.of("code", "HQ-MATH", "name", "Mathematics"), token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        } finally {
+            deleteProbeSchool(schoolId);
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void dropProbeChain() {
@@ -270,4 +413,85 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
             throw new IllegalStateException("Cannot enumerate chain migrations", e);
         }
     }
+
+    // ------------------------------------------------ the probe school
+
+    private JsonNode stepOf(JsonNode readiness, String key) {
+        for (JsonNode step : readiness.get("steps")) {
+            if (step.get("key").asText().equals(key)) return step;
+        }
+        throw new AssertionError("No setup step '" + key + "' in the readiness answer");
+    }
+
+    /** Opened by the chain's own HQ admin, which is the point of TEN-13. */
+    private UUID createProbeSchool(String slug) {
+        var created = post("/v1/tenancy/schools",
+            Map.of("slug", slug, "name", "Probe School", "boardCode", "CBSE", "stateCode", "KA"),
+            chainAdminToken());
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return UUID.fromString(created.getBody().get("id").asText());
+    }
+
+    /**
+     * Fills the blocking steps by writing the rows they ask about — the
+     * scenario is about readiness, not about the structure endpoints, which
+     * ACAD covers. {@code withSections} false leaves exactly one step open.
+     */
+    private void fillBlockingSteps(UUID schoolId, boolean withSections) {
+        inChainDo(jdbc -> {
+            jdbc.update("INSERT INTO campus (school_id, name, is_primary) VALUES (?, 'Main Campus', TRUE)",
+                schoolId);
+            jdbc.update("INSERT INTO academic_year (school_id, code, starts_on, ends_on, is_current) " +
+                "VALUES (?, '2026-27', '2026-06-01', '2027-03-31', TRUE)", schoolId);
+            jdbc.update("INSERT INTO term (academic_year_id, code, name, starts_on, ends_on) " +
+                "SELECT id, 'T1', 'Term 1', '2026-06-01', '2026-09-30' FROM academic_year " +
+                "WHERE school_id = ? AND is_current", schoolId);
+            jdbc.update("INSERT INTO grade (school_id, code, name, sort_order) VALUES (?, '1', 'Grade 1', 1)",
+                schoolId);
+            jdbc.update("INSERT INTO subject (school_id, code, name) VALUES (?, 'MATH', 'Mathematics')",
+                schoolId);
+            if (withSections) {
+                // campus_id is left to the trigger, which lands it on the
+                // school's primary campus.
+                jdbc.update("INSERT INTO section (school_id, grade_id, academic_year_id, code, name, " +
+                    "  strategy_code, capacity) " +
+                    "SELECT ?, g.id, ay.id, 'A', 'Grade 1-A', 'CBSE-CCE-2024', 40 " +
+                    "FROM grade g, academic_year ay " +
+                    "WHERE g.school_id = ? AND g.code = '1' AND ay.school_id = ? AND ay.is_current",
+                    schoolId, schoolId, schoolId);
+            }
+            // Somebody who can run the place: a staff member with an account
+            // and a role that holds structure.manage.
+            UUID staffId = UUID.randomUUID();
+            jdbc.update("INSERT INTO staff (id, school_id, employee_no, first_name, last_name, email, " +
+                "  employment_type, joined_on) " +
+                "VALUES (?, ?, 'EMP-PROBE-HEAD', 'Probe', 'Head', ?, 'permanent', '2026-05-01')",
+                staffId, schoolId, "probe.head+" + staffId + "@oakridge.test");
+            jdbc.update("INSERT INTO user_account (id, school_id, subject_type, subject_id, email) " +
+                "VALUES (?, ?, 'staff', ?, ?)",
+                UUID.randomUUID(), schoolId, staffId, "probe.head+" + staffId + "@oakridge.test");
+            jdbc.update("INSERT INTO staff_role (staff_id, role_code, scope_type, scope_id) " +
+                "VALUES (?, 'principal', 'school', ?)", staffId, schoolId);
+        });
+    }
+
+    /**
+     * Takes the probe school back out of the chain so the scenarios that count
+     * this chain's schools still count two. The audit rows it wrote stay where
+     * they are — deleting a subset of {@code audit_log} forks the hash chain,
+     * which is the thing the chain exists to expose.
+     */
+    private void deleteProbeSchool(UUID schoolId) {
+        inChainDo(jdbc -> {
+            jdbc.update("DELETE FROM school_onboarding_skip WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM staff_role WHERE staff_id IN (SELECT id FROM staff WHERE school_id = ?)",
+                schoolId);
+            jdbc.update("DELETE FROM user_account WHERE school_id = ?", schoolId);
+            jdbc.update("DELETE FROM staff WHERE school_id = ?", schoolId);
+            // section / subject / term / academic_year / grade / campus cascade
+            // from the school row itself.
+            jdbc.update("DELETE FROM school WHERE id = ?", schoolId);
+        });
+    }
+
 }

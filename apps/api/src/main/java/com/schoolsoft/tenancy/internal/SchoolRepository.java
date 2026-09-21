@@ -46,6 +46,9 @@ public class SchoolRepository {
             String.join(",", scope.stream().map(x -> "?").toList()) + ")";
     }
 
+    private static final String SCHOOL_COLS =
+        "id, slug, name, board_code, gstin, state_code, is_active, lifecycle, went_live_at";
+
     private static final RowMapper<SchoolDto> SCHOOL = (rs, i) -> new SchoolDto(
         UUID.fromString(rs.getString("id")),
         rs.getString("slug"),
@@ -53,28 +56,38 @@ public class SchoolRepository {
         rs.getString("board_code"),
         rs.getString("gstin"),
         rs.getString("state_code"),
-        rs.getBoolean("is_active")
+        rs.getBoolean("is_active"),
+        rs.getString("lifecycle"),
+        rs.getTimestamp("went_live_at") == null ? null : rs.getTimestamp("went_live_at").toInstant()
     );
 
     public List<SchoolDto> list() {
         return jdbc.query(
-            "SELECT id, slug, name, board_code, gstin, state_code, is_active FROM school ORDER BY name",
+            "SELECT " + SCHOOL_COLS + " FROM school ORDER BY name",
             SCHOOL
         );
     }
 
     public Optional<SchoolDto> find(UUID id) {
         var rows = jdbc.query(
-            "SELECT id, slug, name, board_code, gstin, state_code, is_active FROM school WHERE id = ?",
+            "SELECT " + SCHOOL_COLS + " FROM school WHERE id = ?",
             SCHOOL, id
         );
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
+    /**
+     * A school starts in {@code draft}: it exists, it can be built, and nobody
+     * outside the office is let into it until somebody declares its setup
+     * finished. The column defaults to {@code live} for the schools that were
+     * already open when V036 landed, so the create says what it means rather
+     * than leaning on the default.
+     */
     public SchoolDto create(String slug, String name, String boardCode, String gstin, String stateCode) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO school (id, slug, name, board_code, gstin, state_code) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO school (id, slug, name, board_code, gstin, state_code, lifecycle) " +
+            "VALUES (?, ?, ?, ?, ?, ?, 'draft')",
             id, slug, name, boardCode, gstin, stateCode
         );
         return find(id).orElseThrow();

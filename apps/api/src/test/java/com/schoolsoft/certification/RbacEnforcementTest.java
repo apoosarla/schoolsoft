@@ -516,6 +516,63 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             .getBody().get("entranceTestRequired").asBoolean()).isTrue();
     }
 
+    // ===================== opening a school =====================
+
+    /**
+     * {@code school.onboard} is the structural permission with the widest
+     * blast radius on a school nobody is in yet: it decides when families and
+     * teachers are let through the door. The office reads the checklist; only
+     * the heads and the chain's HQ admin act on it.
+     */
+    @Test
+    @DisplayName("a registrar reads the setup checklist and cannot open the school")
+    void registrarReadsReadinessAndCannotGoLive() {
+        String registrar = registrarToken(cbse());
+
+        assertThat(get("/v1/tenancy/schools/" + cbse().id() + "/readiness", registrar).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(post("/v1/tenancy/schools/" + cbse().id() + "/go-live", null, registrar).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/tenancy/schools/" + cbse().id() + "/steps/theme/skip",
+            body("reason", "a registrar should not be able to do this"), registrar).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(count("SELECT count(*) FROM school_onboarding_skip WHERE school_id = ?",
+            cbse().id())).isZero();
+    }
+
+    /** The positive half: the gate is a gate, not a wall. */
+    @Test
+    @DisplayName("a principal skips an optional setup step and puts it back")
+    void principalSkipsAnOptionalSetupStep() {
+        String principal = principalToken(cbse());
+        try {
+            var skipped = post("/v1/tenancy/schools/" + cbse().id() + "/steps/fee_structure/skip",
+                body("reason", "rbac enforcement test"), principal);
+            assertThat(skipped.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(count("SELECT count(*) FROM school_onboarding_skip WHERE school_id = ? "
+                + "AND step_key = 'fee_structure'", cbse().id())).isEqualTo(1);
+        } finally {
+            post("/v1/tenancy/schools/" + cbse().id() + "/steps/fee_structure/unskip", null, principal);
+        }
+        assertThat(count("SELECT count(*) FROM school_onboarding_skip WHERE school_id = ?",
+            cbse().id())).isZero();
+    }
+
+    /**
+     * A guardian is inside the school and still nowhere near this: opening a
+     * school is not a thing a family does, and the checklist is not theirs to
+     * read either.
+     */
+    @Test
+    @DisplayName("a guardian cannot read or act on the setup checklist")
+    void guardianIsNowhereNearOnboarding() {
+        UUID studentId = firstStudentIn(currentFocusSection(cbse()));
+        String guardian = guardianTokenFor(cbse(), studentId);
+
+        assertThat(post("/v1/tenancy/schools/" + cbse().id() + "/go-live", null, guardian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
     private org.assertj.core.api.ListAssert<String> perms(String roleCode) {
         return org.assertj.core.api.Assertions.assertThat(
             queryList("SELECT perm_code FROM role_perm WHERE role_code = ?", String.class, roleCode));

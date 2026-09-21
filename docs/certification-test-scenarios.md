@@ -32,6 +32,11 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | TEN-06 | A chain is suspended / plan downgraded — feature flags gate the modules the plan excludes; existing data stays readable. | P2 |
 | TEN-07 | Multi-campus school: sections, staff, and timetables are campus-scoped; a campus-level admin sees only their campus. `GAP-24` | P2 |
 | TEN-08 | School theme/branding change propagates to parent app, public site, and generated documents without a redeploy. | P3 |
+| TEN-09 | A school created through the API starts in `draft`; its readiness checklist derives each setup step from the rows that step is about, and names every blocking one still open. | P1 |
+| TEN-10 | Going live is refused while a blocking step is open, and the refusal names the steps rather than saying only that the school is not ready. | P1 |
+| TEN-11 | Going live twice is not an error — the retry answers with the same live school and does not move the moment it opened. | P1 |
+| TEN-12 | An optional setup step is skipped with a reason and the skip is audited; a blocking step cannot be skipped, whatever reason is offered. | P2 |
+| TEN-13 | `HQ` opens a school in their own chain with no platform admin involved, and still cannot change anything inside it. | P1 |
 
 ## 2. Academic Year & Structure Setup (CERT-ACAD)
 

@@ -97,12 +97,33 @@ public class PermissionChecker {
 
     /**
      * A chain (HQ) admin oversees every school in the chain: they read
-     * anything and change nothing. Derived from {@link Perm#isUnrestrictedRead()}
-     * so a permission added later lands on the right side of that line without
-     * anybody remembering to come back here.
+     * anything and change one thing. The read set is derived from
+     * {@link Perm#isUnrestrictedRead()} so a permission added later lands on
+     * the right side of that line without anybody remembering to come back
+     * here.
+     *
+     * <h2>The one write</h2>
+     * {@link Perm#SCHOOL_ONBOARD} is granted here and nowhere else for this
+     * subject type, because a chain admin holds no {@code staff_role} row at
+     * any school — they are school-less by construction, which is the same
+     * reason {@code PeopleRepository} excludes them from the staff directory.
+     * So the grant cannot be data in {@code role_perm} the way every other
+     * grant is; it is either this line or a chain that must raise a ticket
+     * with Schoolsoft to open its own school.
+     *
+     * <p>It is the narrowest write that buys that: opening a school and
+     * declaring its setup finished. It does not reach a child's record, a
+     * mark, or a rupee — and if a later permission needs to be theirs too,
+     * that is another deliberate line here, not a widening of this one.</p>
      */
-    static final Set<Perm> CHAIN_ADMIN_BASELINE = EnumSet.copyOf(
-        java.util.Arrays.stream(Perm.values()).filter(Perm::isUnrestrictedRead).toList());
+    static final Set<Perm> CHAIN_ADMIN_BASELINE = chainAdminBaseline();
+
+    private static Set<Perm> chainAdminBaseline() {
+        var perms = EnumSet.copyOf(
+            java.util.Arrays.stream(Perm.values()).filter(Perm::isUnrestrictedRead).toList());
+        perms.add(Perm.SCHOOL_ONBOARD);
+        return java.util.Collections.unmodifiableSet(perms);
+    }
 
     private final DataSource dataSource;
 

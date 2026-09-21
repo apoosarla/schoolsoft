@@ -36,6 +36,7 @@ import java.util.stream.Collectors;
 public enum Perm {
 
     // ===== academic structure (tenancy) =====
+    SCHOOL_ONBOARD("school.onboard", "Open a school: create it, and declare its setup finished"),
     STRUCTURE_VIEW("structure.view", "Read schools, campuses, grades, sections, subjects, terms"),
     STRUCTURE_MANAGE("structure.manage", "Create and edit the academic structure"),
     ACADEMIC_YEAR_MANAGE("academic_year.manage", "Open, lock and close an academic year"),
