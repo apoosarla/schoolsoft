@@ -28,10 +28,13 @@ public class ChainProvisioningService {
 
     private final JdbcTemplate platformJdbc;
     private final ChainSchemaMigrator migrator;
+    private final TenantHosts hosts;
 
-    public ChainProvisioningService(JdbcTemplate platformJdbc, ChainSchemaMigrator migrator) {
+    public ChainProvisioningService(JdbcTemplate platformJdbc, ChainSchemaMigrator migrator,
+                                    TenantHosts hosts) {
         this.platformJdbc = platformJdbc;
         this.migrator = migrator;
+        this.hosts = hosts;
     }
 
     public record NewChain(UUID id, String schemaName, boolean created) {}
@@ -65,6 +68,10 @@ public class ChainProvisioningService {
         // CREATE SCHEMA is idempotent on IF NOT EXISTS; Flyway will do it too if missing.
         platformJdbc.execute("CREATE SCHEMA IF NOT EXISTS " + schemaName);
         migrator.migrateChain(chainId, schemaName);
+
+        // The HQ door, so the chain's own admins have an address to arrive on
+        // rather than a slug to type. Re-running provisioning re-asserts it.
+        hosts.registerChainHq(chainId, slug);
 
         return new NewChain(chainId, schemaName, created);
     }

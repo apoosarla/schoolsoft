@@ -1,6 +1,7 @@
 package com.schoolsoft.tenancy.internal;
 
 import com.schoolsoft.iam.api.CampusScope;
+import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.AcademicYearDto;
@@ -27,10 +28,12 @@ public class SchoolRepository {
 
     private final JdbcTemplate jdbc;
     private final CampusScope campusScope;
+    private final TenantHostRegistry hosts;
 
-    public SchoolRepository(JdbcTemplate jdbc, CampusScope campusScope) {
+    public SchoolRepository(JdbcTemplate jdbc, CampusScope campusScope, TenantHostRegistry hosts) {
         this.jdbc = jdbc;
         this.campusScope = campusScope;
+        this.hosts = hosts;
     }
 
     /**
@@ -90,7 +93,17 @@ public class SchoolRepository {
             "VALUES (?, ?, ?, ?, ?, ?, 'draft')",
             id, slug, name, boardCode, gstin, stateCode
         );
+        // A school that has no address answers on nothing, and its staff would
+        // have no door to sign in at. The name is derivable, so it is issued
+        // here rather than asked for.
+        var tenant = TenantContext.require();
+        hosts.registerSchool(tenant.chainId(), id, chainSlugOf(tenant.chainSchema()), slug);
         return find(id).orElseThrow();
+    }
+
+    /** {@code chain_oakridge} is the schema; {@code oakridge} is the name on the address. */
+    private static String chainSlugOf(String chainSchema) {
+        return chainSchema.startsWith("chain_") ? chainSchema.substring("chain_".length()) : chainSchema;
     }
 
     private static final String AY_COLS =

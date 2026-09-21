@@ -2,6 +2,7 @@ package com.schoolsoft.certification.support;
 
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.tenancy.api.ChainProvisioningService;
+import com.schoolsoft.tenancy.api.TenantHosts;
 import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -78,12 +79,14 @@ public class CertificationFixture {
     private final DataSource dataSource;
     private final JdbcTemplate platformJdbc;
     private final ChainProvisioningService provisioning;
+    private final TenantHosts hosts;
 
     public CertificationFixture(DataSource dataSource, JdbcTemplate platformJdbc,
-                                ChainProvisioningService provisioning) {
+                                ChainProvisioningService provisioning, TenantHosts hosts) {
         this.dataSource = dataSource;
         this.platformJdbc = platformJdbc;
         this.provisioning = provisioning;
+        this.hosts = hosts;
     }
 
     // ------------------------------------------------------------------ types
@@ -160,6 +163,11 @@ public class CertificationFixture {
             "INSERT INTO school (id, slug, name, board_code, gstin, state_code, address) " +
             "VALUES (?, ?, ?, ?, ?, ?, '{\"city\":\"Hyderabad\",\"state\":\"Telangana\"}'::jsonb)",
             schoolId, slug, name, boardCode, "36AABCU9603R1ZM", "36");
+
+        // The seed inserts schools directly rather than through SchoolRepository,
+        // so the address a browser would arrive on has to be registered here too
+        // — without it the school has no door for TENANT-01 to knock on.
+        hosts.registerSchool(TenantContext.require().chainId(), schoolId, CHAIN_SLUG, slug);
 
         UUID mainCampus = id(slug + ":campus:main");
         UUID annexCampus = id(slug + ":campus:annex");

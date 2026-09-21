@@ -170,7 +170,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setDrawerOpen(false);
   }, [pathname]);
 
-  if (!session || pathname === "/login") return <>{children}</>;
+  if (!session || pathname.startsWith("/login")) return <>{children}</>;
 
   const chainAdmin = isChainAdmin(session);
   const screens = chainAdmin ? CHAIN_SCREENS : SCREEN_DEFS;

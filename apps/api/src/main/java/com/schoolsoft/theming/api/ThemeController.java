@@ -1,6 +1,8 @@
 package com.schoolsoft.theming.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import com.schoolsoft.platform.tenancy.TenantContext;
+import com.schoolsoft.tenancy.api.TenantHosts;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,7 +13,12 @@ import org.springframework.web.bind.annotation.*;
 public class ThemeController {
 
     private final JdbcTemplate jdbc;
-    public ThemeController(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final TenantHosts hosts;
+
+    public ThemeController(JdbcTemplate jdbc, TenantHosts hosts) {
+        this.jdbc = jdbc;
+        this.hosts = hosts;
+    }
 
     @PreAuthorize("@perm.can('theme.view')")
     @GetMapping("/schools/{id}")
@@ -49,6 +56,12 @@ public class ThemeController {
             "WHERE school_id = ?",
             req.primaryColor(), req.accentColor(), req.parentAppName(), req.customDomain(), req.emailFrom(), id
         );
+        // A custom domain nobody can resolve is decoration. Setting one here is
+        // what makes it a door: the login page reads the school off the host,
+        // and until this row exists that host answers to no tenant at all.
+        if (req.customDomain() != null) {
+            hosts.setCustomDomain(TenantContext.require().chainId(), id, req.customDomain());
+        }
         return theme(id);
     }
 }

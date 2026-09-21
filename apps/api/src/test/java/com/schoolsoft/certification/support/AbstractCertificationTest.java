@@ -7,6 +7,7 @@ import com.schoolsoft.certification.support.CertificationFixture.Seed;
 import com.schoolsoft.platform.security.JwtService;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.tenancy.api.ChainProvisioningService;
+import com.schoolsoft.tenancy.api.TenantHosts;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
@@ -53,6 +54,7 @@ public abstract class AbstractCertificationTest {
     @Autowired protected DataSource dataSource;
     @Autowired protected JdbcTemplate platformJdbc;
     @Autowired protected ChainProvisioningService provisioning;
+    @Autowired protected TenantHosts tenantHosts;
 
     protected final ObjectMapper json = new ObjectMapper();
 
@@ -72,7 +74,7 @@ public abstract class AbstractCertificationTest {
     @BeforeEach
     void ensureFixture() {
         if (sharedSeed == null) {
-            sharedSeed = new CertificationFixture(dataSource, platformJdbc, provisioning).rebuild();
+            sharedSeed = new CertificationFixture(dataSource, platformJdbc, provisioning, tenantHosts).rebuild();
         }
         seed = sharedSeed;
     }

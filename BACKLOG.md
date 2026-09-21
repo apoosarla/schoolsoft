@@ -1693,6 +1693,51 @@ several are security-relevant.
   ingestion trusts the `schoolId` in the request body rather than the device's
   registration (DEV-04); no alerting path carries tenant context (NFR-10).
 
+## Sign-in: what the host resolver still needs
+
+`platform.tenant_host` (V005) and `GET /v1/public/tenant` landed with the
+sign-in redesign: a school is *resolved* from the address the browser arrived
+on, never *chosen* from a list, because a school picker is a customer list and
+a searchable one hands the roster to anyone who opens a login page. What is
+still missing around it:
+
+- **Access codes are not issued.** `/login/find-school` offers three ways in —
+  the school's address, the invite link, an access code — and only the first
+  works. The code needs an issuer (opaque, not derived from the school's name,
+  so it cannot be guessed at), a 14-day expiry, and a per-device attempt limit;
+  the field is drawn and disabled until it exists.
+
+- **No invite links.** The admission letter and welcome email should carry a
+  signed link that names the tenant, so a family types nothing at all. This is
+  also what the native apps need: a Capacitor build has no host to resolve.
+
+- **The resolver is not rate-limited.** It answers about one named host at a
+  time and never lists, so it is no worse than DNS — but a client hammering it
+  with guessed hostnames should be slowed down.
+
+- **Codes have no attempt limit.** `OtpStore` returns 401 for a wrong code
+  indefinitely. The design shows "2 tries left" and throws the code away after
+  three; that count does not exist yet.
+
+- **Wildcard certificate.** Issuing a per-tenant certificate for every
+  `<school>.<chain>.schoolsoft.app` publishes the whole customer list to the
+  public Certificate Transparency logs on the day each one is issued. A single
+  wildcard for `*.schoolsoft.app` keeps subdomains out of CT. A school on its
+  own domain is its own disclosure and its own choice.
+
+- **`GET /v1/public/schools/{chain}/{school}` is an enumeration oracle.** It
+  predates the resolver and answers 200 vs 404 on guessed slugs with no token,
+  which is the leak the login redesign was careful to avoid. It should serve
+  only schools that have opted into a public site, and answer uniformly
+  otherwise.
+
+- **Only `school-web` is redesigned.** `platform-web`, `parent-app`,
+  `teacher-app` and `driver-app` still carry the original chain-slug form and
+  the single-field OTP input. The six-box code step in
+  `school-web/app/login/page.tsx` is the piece worth extracting into
+  `@schoolsoft/api-client`'s sibling UI package when one exists.
+
+
 _Fixed while building the harness: an expired or malformed bearer token
 returned **403** rather than 401, because `TenantResolverFilter` used
 `sendError`, which re-dispatches through `/error` and is then rejected as an

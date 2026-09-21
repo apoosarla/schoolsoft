@@ -9,9 +9,9 @@
  * OTP code "000000" (OtpStore's dev bypass).
  */
 
-import { createApiClient } from "@schoolsoft/api-client";
+import { ApiError, createApiClient } from "@schoolsoft/api-client";
 
-export { ApiError } from "@schoolsoft/api-client";
+export { ApiError };
 
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
 const SESSION_KEY = "schoolsoft_school_session";
@@ -67,6 +67,40 @@ const client = createApiClient({
 });
 
 const apiFetch = client.apiFetch;
+
+/**
+ * Who answers on this address.
+ *
+ * The sign-in page asks this before it draws anything, so the school is read
+ * from the host rather than picked from a list — there is no endpoint that
+ * lists tenants, and there must never be one: a school picker is a customer
+ * list, and a searchable one hands the roster to anyone who opens a login page.
+ *
+ * A 404 is the ordinary case on an address nobody has claimed (a dev machine,
+ * a typo, a bare platform domain), so it resolves to null rather than throwing.
+ */
+export type TenantResolution = {
+  kind: "school" | "chain_hq";
+  chainSlug: string;
+  chainName: string;
+  schoolId: string | null;
+  schoolSlug: string | null;
+  schoolName: string | null;
+  primaryColor: string | null;
+  accentColor: string | null;
+  appName: string | null;
+  /** False on a school's own domain: the page then carries the school's name alone. */
+  vendorBranded: boolean;
+};
+
+export async function resolveTenant(host: string): Promise<TenantResolution | null> {
+  try {
+    return await apiFetch<TenantResolution>(`/v1/public/tenant?host=${encodeURIComponent(host)}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
 
 export async function startOtp(identifier: string, chainSlug: string): Promise<void> {
   await apiFetch<{ status: string }>("/v1/auth/otp/start", {

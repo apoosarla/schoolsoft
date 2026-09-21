@@ -375,6 +375,32 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         assertThat(school.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
+    /**
+     * The sign-in page has to know which school it is drawing before anybody
+     * has a token, so the host resolver answers without one. What it must never
+     * do is answer a question nobody asked: it resolves one named host, and an
+     * address no tenant has claimed is a 404, not a hint. There is no listing
+     * endpoint to test the absence of, and that is the point — a school picker
+     * would publish the customer list to every visitor of every login page.
+     */
+    @Test
+    @DisplayName("the host resolver answers without a token, and only about a host you already named")
+    void tenantResolutionNeedsNoToken() {
+        var school = get("/v1/public/tenant?host=oakridge." + seed.chainSlug() + ".schoolsoft.app", null);
+        assertThat(school.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(school.getBody().path("schoolName").asText()).isEqualTo("Oakridge Public School");
+
+        var hq = get("/v1/public/tenant?host=" + seed.chainSlug() + ".schoolsoft.app", null);
+        assertThat(hq.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(hq.getBody().path("kind").asText()).isEqualTo("chain_hq");
+        // A chain's HQ door names no school: it is the door above all of them.
+        assertThat(hq.getBody().path("schoolName").asText("")).isEmpty();
+
+        var stranger = get("/v1/public/tenant?host=nobody.example.invalid", null);
+        assertThat(stranger.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(stranger.getBody().toString()).doesNotContain(seed.chainSlug());
+    }
+
     @Test
     @DisplayName("an authenticated endpoint refuses a request with no token")
     void authenticatedEndpointsNeedOne() {
