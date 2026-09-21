@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { CSSProperties, Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ApiError,
@@ -31,6 +31,11 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Which view the user last chose. Per browser, not per school. */
+const VIEW_KEY = "schoolsoft.timetable.view";
+
+type ViewMode = "table" | "grid";
+
 const emptyForm = {
   subjectId: "",
   teacherStaffId: "",
@@ -55,6 +60,11 @@ export default function TimetablePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The table lists the week; the grid lays it out. Same slots, same date
+  // question — the toggle is a preference, so it is remembered per browser.
+  const [view, setView] = useState<ViewMode>("table");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
@@ -69,6 +79,20 @@ export default function TimetablePage() {
   const [day, setDay] = useState<SectionDayDto | null>(null);
   const [bell, setBell] = useState<BellScheduleDto | null>(null);
   const [warnings, setWarnings] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(VIEW_KEY);
+    if (stored === "grid" || stored === "table") setView(stored);
+  }, []);
+
+  function chooseView(next: ViewMode) {
+    setView(next);
+    try {
+      window.localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // A browser refusing storage is not worth an error banner.
+    }
+  }
 
   useEffect(() => {
     const s = getSession();
@@ -113,6 +137,10 @@ export default function TimetablePage() {
   }, [sectionId, asOf]);
 
   useEffect(() => {
+    if (selectedId && slots && !slots.some((s) => s.id === selectedId)) setSelectedId(null);
+  }, [slots, selectedId]);
+
+  useEffect(() => {
     if (!sectionId) return;
     setDay(null);
     sectionDay(sectionId, dayDate)
@@ -135,6 +163,8 @@ export default function TimetablePage() {
   }, [sectionId]);
 
   const teachingPeriods = bell?.periods.filter((p) => !p.isBreak) ?? [];
+  const selectedSlot = slots?.find((s) => s.id === selectedId) ?? null;
+  const selectedTeacher = staff?.find((s) => s.id === selectedSlot?.teacherStaffId);
 
   async function onCreate() {
     setCreating(true);
@@ -197,9 +227,29 @@ export default function TimetablePage() {
       <div className="panel">
         <div className="form-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
           <h2>Timetable</h2>
-          <button type="button" onClick={() => setShowForm((v) => !v)} disabled={!subjects || subjects.length === 0}>
-            {showForm ? "Cancel" : "Add slot"}
-          </button>
+          <div className="form-row inline" style={{ alignItems: "center", marginBottom: 0 }}>
+            <div className="tabs" style={{ marginBottom: 0 }}>
+              <button
+                type="button"
+                className={`tab${view === "table" ? " active" : ""}`}
+                aria-pressed={view === "table"}
+                onClick={() => chooseView("table")}
+              >
+                Table
+              </button>
+              <button
+                type="button"
+                className={`tab${view === "grid" ? " active" : ""}`}
+                aria-pressed={view === "grid"}
+                onClick={() => chooseView("grid")}
+              >
+                Grid
+              </button>
+            </div>
+            <button type="button" onClick={() => setShowForm((v) => !v)} disabled={!subjects || subjects.length === 0}>
+              {showForm ? "Cancel" : "Add slot"}
+            </button>
+          </div>
         </div>
         <div className="form-row">
           <select value={sectionId} onChange={(e) => setSectionId(e.target.value)} disabled={!sections}>
@@ -323,7 +373,7 @@ export default function TimetablePage() {
           <p className="hint">Nothing was on this section&rsquo;s timetable on {asOf}.</p>
         )}
 
-        {slots && slots.length > 0 && (
+        {view === "table" && slots && slots.length > 0 && (
           <table>
             <thead>
               <tr>
@@ -395,6 +445,118 @@ export default function TimetablePage() {
                 })}
             </tbody>
           </table>
+        )}
+
+        {view === "grid" && slots && (
+          <WeekGrid
+            slots={slots}
+            staff={staff}
+            bell={bell}
+            selectedId={selectedId}
+            onPick={(id) => {
+              setSelectedId(id);
+              setRetiringId(null);
+            }}
+            onAddAt={(row, dayOfWeek) => {
+              // A free cell is the add form with the day and the period
+              // already answered: the two fields nobody should retype.
+              setForm((f) => ({
+                ...f,
+                dayOfWeek: String(dayOfWeek),
+                periodId: row.periodId ?? "",
+                periodNo: String(row.periodNo),
+                startsAt: hhmm(row.startsAt),
+                endsAt: hhmm(row.endsAt),
+                effectiveFrom: asOf,
+              }));
+              setSelectedId(null);
+              setShowForm(true);
+            }}
+          />
+        )}
+
+        {view === "grid" && selectedSlot && (
+          <div className="tt-selected">
+            <div className="head">
+              <span>{selectedSlot.subjectName}</span>
+              <span className="badge">
+                {DAY_NAMES[selectedSlot.dayOfWeek]} &middot; P{selectedSlot.periodNo}
+              </span>
+            </div>
+            <dl>
+              <div className="pair">
+                <dt>Teacher</dt>
+                <dd>{selectedTeacher ? `${selectedTeacher.firstName} ${selectedTeacher.lastName ?? ""}` : "\u2014"}</dd>
+              </div>
+              <div className="pair">
+                <dt>Room</dt>
+                <dd>{selectedSlot.room ?? "\u2014"}</dd>
+              </div>
+              <div className="pair">
+                <dt>Time</dt>
+                <dd>
+                  {hhmm(selectedSlot.startsAt)}&ndash;{hhmm(selectedSlot.endsAt)}
+                </dd>
+              </div>
+              <div className="pair">
+                <dt>In force</dt>
+                <dd>
+                  {selectedSlot.effectiveFrom}
+                  {selectedSlot.effectiveTo ? ` \u2013 ${selectedSlot.effectiveTo}` : " \u2013"}
+                </dd>
+              </div>
+            </dl>
+            <div className="form-row inline" style={{ marginTop: 10, alignItems: "center" }}>
+              {retiringId === selectedSlot.id ? (
+                <>
+                  <label className="hint" htmlFor="retire-on">
+                    last day
+                  </label>
+                  <input
+                    id="retire-on"
+                    type="date"
+                    value={retireDate}
+                    min={selectedSlot.effectiveFrom}
+                    onChange={(e) => setRetireDate(e.target.value)}
+                  />
+                  <button type="button" onClick={() => onRetire(selectedSlot.id)} disabled={retiring}>
+                    {retiring ? "\u2026" : "Retire"}
+                  </button>
+                  <button type="button" className="secondary" onClick={() => setRetiringId(null)} disabled={retiring}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setRetiringId(selectedSlot.id);
+                      setRetireDate(selectedSlot.effectiveTo ?? todayIso());
+                    }}
+                  >
+                    Retire
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => onDelete(selectedSlot.id)}
+                    disabled={deletingId === selectedSlot.id}
+                  >
+                    {deletingId === selectedSlot.id ? "\u2026" : "Delete"}
+                  </button>
+                  <button type="button" className="secondary" onClick={() => setSelectedId(null)}>
+                    Close
+                  </button>
+                </>
+              )}
+            </div>
+            <p className="hint">
+              Retire ends the window from a last day and leaves the slot resolvable, so the attendance and
+              lesson plans hung off it still read back. Delete is for a slot authored by mistake.
+            </p>
+          </div>
         )}
       </div>
 
@@ -488,6 +650,234 @@ export default function TimetablePage() {
         )}
       </div>
     </main>
+  );
+}
+
+/** A bell schedule's times carry seconds; a grid has no room for them. */
+function hhmm(t: string): string {
+  return t.slice(0, 5);
+}
+
+/**
+ * A subject keeps its colour between sections and across a reload, because the
+ * hue is a hash of its id rather than its position in the week.
+ */
+function hueOf(subjectId: string): string {
+  let h = 0;
+  for (let i = 0; i < subjectId.length; i++) h = (h * 31 + subjectId.charCodeAt(i)) >>> 0;
+  return `var(--tt-h${h % 8})`;
+}
+
+type GridRow = {
+  kind: "period" | "break";
+  key: string;
+  label: string;
+  periodNo: number;
+  startsAt: string;
+  endsAt: string;
+  /** Set only for a teaching period of a bell schedule. */
+  periodId?: string;
+};
+
+/**
+ * The rows are the bell schedule's periods when the grade has one — breaks
+ * included, since a break is a band across the week rather than six cells
+ * nobody may teach in. Without a bell schedule the rows are whatever period
+ * numbers the slots themselves carry, timed by the first slot sitting on each.
+ */
+function gridRows(bell: BellScheduleDto | null, slots: TimetableSlotDto[]): GridRow[] {
+  if (bell && bell.periods.length > 0) {
+    return bell.periods
+      .slice()
+      .sort((a, b) => a.periodNo - b.periodNo)
+      .map((p) => ({
+        kind: p.isBreak ? ("break" as const) : ("period" as const),
+        key: p.id,
+        label: p.label,
+        periodNo: p.periodNo,
+        startsAt: p.startsAt,
+        endsAt: p.endsAt,
+        periodId: p.isBreak ? undefined : p.id,
+      }));
+  }
+  const byNo = new Map<number, TimetableSlotDto>();
+  for (const s of slots) if (!byNo.has(s.periodNo)) byNo.set(s.periodNo, s);
+  return [...byNo.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([no, s]) => ({
+      kind: "period" as const,
+      key: `p${no}`,
+      label: `P${no}`,
+      periodNo: no,
+      startsAt: s.startsAt,
+      endsAt: s.endsAt,
+    }));
+}
+
+/** Monday to Saturday, plus any other day something is actually timetabled on. */
+function gridDays(slots: TimetableSlotDto[]): number[] {
+  const days = new Set([1, 2, 3, 4, 5, 6]);
+  for (const s of slots) days.add(s.dayOfWeek);
+  return [...days].sort((a, b) => a - b);
+}
+
+function WeekGrid({
+  slots,
+  staff,
+  bell,
+  selectedId,
+  onPick,
+  onAddAt,
+}: {
+  slots: TimetableSlotDto[];
+  staff: StaffDto[] | null;
+  bell: BellScheduleDto | null;
+  selectedId: string | null;
+  onPick: (id: string) => void;
+  onAddAt: (row: GridRow, dayOfWeek: number) => void;
+}) {
+  const rows = gridRows(bell, slots);
+  const days = gridDays(slots);
+
+  const byCell = new Map<string, TimetableSlotDto[]>();
+  const perDay = new Map<number, number>();
+  for (const s of slots) {
+    const key = `${s.dayOfWeek}:${s.periodNo}`;
+    const at = byCell.get(key);
+    if (at) at.push(s);
+    else byCell.set(key, [s]);
+    perDay.set(s.dayOfWeek, (perDay.get(s.dayOfWeek) ?? 0) + 1);
+  }
+
+  // One legend entry per subject on this week's grid, in the order they read.
+  const subjects = new Map<string, string>();
+  for (const s of slots) if (!subjects.has(s.subjectId)) subjects.set(s.subjectId, s.subjectName);
+
+  if (rows.length === 0) {
+    return (
+      <p className="hint">
+        No bell schedule for this grade and nothing timetabled, so there are no rows to draw. Add a slot
+        with its own times, or give the grade a bell schedule.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <div
+        className="tt-grid"
+        style={{ gridTemplateColumns: `104px repeat(${days.length}, minmax(0, 1fr))` }}
+      >
+        <div />
+        {days.map((d) => (
+          <div key={d} className="tt-day-head">
+            <div className="name">{DAY_NAMES[d]}</div>
+            <div className="count">
+              {perDay.get(d) ?? 0} period{(perDay.get(d) ?? 0) === 1 ? "" : "s"}
+            </div>
+          </div>
+        ))}
+
+        {rows.map((row) =>
+          row.kind === "break" ? (
+            <div key={row.key} className="tt-break">
+              <span className="label">{row.label}</span>
+              <span className="time">
+                {hhmm(row.startsAt)}&ndash;{hhmm(row.endsAt)}
+              </span>
+            </div>
+          ) : (
+            <Fragment key={row.key}>
+              <div className="tt-period">
+                <div className="no">{row.label}</div>
+                <div className="time">
+                  {hhmm(row.startsAt)}&ndash;{hhmm(row.endsAt)}
+                </div>
+              </div>
+              {days.map((d) => {
+                const at = byCell.get(`${d}:${row.periodNo}`) ?? [];
+                if (at.length === 0) {
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      className="tt-cell free"
+                      onClick={() => onAddAt(row, d)}
+                      aria-label={`Add a slot on ${DAY_NAMES[d]}, ${row.label}`}
+                    >
+                      + Add slot
+                    </button>
+                  );
+                }
+                return (
+                  <div key={d} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {at.map((slot) => {
+                      const teacher = staff?.find((t) => t.id === slot.teacherStaffId);
+                      // The two warnings the grid can answer for itself: a slot
+                      // with no room is one of the publish warnings above, and a
+                      // window with a last day is a revision already filed.
+                      const roomless = !slot.room;
+                      const ends = Boolean(slot.effectiveTo);
+                      // A slot with its own times sits on the row its period
+                      // number names, but it does not run when that row runs:
+                      // say so rather than let the row's clock speak for it.
+                      const offRow = hhmm(slot.startsAt) !== hhmm(row.startsAt);
+                      const selected = slot.id === selectedId;
+                      return (
+                        <button
+                          key={slot.id}
+                          type="button"
+                          className={`tt-cell${roomless ? " warn" : ""}${ends ? " ends" : ""}${
+                            selected ? " selected" : ""
+                          }`}
+                          style={{ "--dot": hueOf(slot.subjectId) } as CSSProperties}
+                          aria-pressed={selected}
+                          onClick={() => onPick(slot.id)}
+                        >
+                          <span className="subject">{slot.subjectName}</span>
+                          <span className="who">
+                            {teacher ? `${teacher.firstName} ${teacher.lastName ?? ""}`.trim() : "\u2014"}
+                            {slot.room ? ` \u00b7 ${slot.room}` : ""}
+                          </span>
+                          {offRow && (
+                            <span className="mark time">
+                              {hhmm(slot.startsAt)}&ndash;{hhmm(slot.endsAt)}
+                            </span>
+                          )}
+                          {roomless && <span className="mark warn">no room</span>}
+                          {ends && <span className="mark ends">last day {slot.effectiveTo}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </Fragment>
+          )
+        )}
+      </div>
+
+      <div className="tt-legend">
+        {[...subjects.entries()].map(([id, name]) => (
+          <span key={id}>
+            <span className="swatch dot" style={{ "--dot": hueOf(id) } as CSSProperties} />
+            {name}
+          </span>
+        ))}
+        <span>
+          <span className="swatch warn" />
+          no room assigned
+        </span>
+        <span>
+          <span className="swatch ends" />
+          window has a last day
+        </span>
+        <span>
+          <span className="swatch free" />
+          free &mdash; click to add
+        </span>
+      </div>
+    </>
   );
 }
 

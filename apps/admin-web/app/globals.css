@@ -899,6 +899,10 @@ tbody tr[role="button"] { cursor: pointer; }
   font-size: 10.5px;
   font-weight: 600;
 }
+.tt-cell .mark.time {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
 .tt-cell .mark.warn { color: var(--warning); }
 .tt-cell .mark.ends { color: var(--gold); }
 
