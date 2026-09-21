@@ -118,6 +118,12 @@ const ICON: Record<string, JSX.Element> = {
       <path d="M6.5 9.2L8.2 10.9L11.5 7.3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  settings: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M9 1.8V3.4M9 14.6V16.2M16.2 9H14.6M3.4 9H1.8M14.1 3.9L13 5M5 13L3.9 14.1M14.1 14.1L13 13M5 5L3.9 3.9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  ),
 };
 
 function humanize(code: string): string {

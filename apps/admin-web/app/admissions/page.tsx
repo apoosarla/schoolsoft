@@ -7,7 +7,9 @@ import {
   AdmissionApplicationDto,
   AdmissionFunnelSummaryDto,
   AdmissionPolicyDto,
+  admissionMovesByState,
   admissionMovesForState,
+  AdmissionSearchResultDto,
   ApiError,
   createAdmissionApplication,
   enrolAdmissionApplication,
@@ -20,7 +22,7 @@ import {
   listAdmissionApplications,
   listGrades,
   listSections,
-  saveAdmissionPolicy,
+  searchAdmissionApplications,
   SectionDto,
   Session,
   transitionAdmissionApplication,
@@ -29,6 +31,17 @@ import {
 const SOURCES = ["website", "walkin", "referral", "ad"];
 
 const PAGE_SIZE = 25;
+
+/** What the advanced panel can narrow by, empty. */
+const emptyAdvanced = {
+  name: "",
+  dob: "",
+  guardianPhone: "",
+  applicationNo: "",
+  gradeId: "",
+  state: "",
+  source: "",
+};
 
 /**
  * The thirteen states, grouped the way an admissions office talks about them.
@@ -100,8 +113,17 @@ export default function AdmissionsPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
-  const [savingPolicy, setSavingPolicy] = useState(false);
   const [rowSection, setRowSection] = useState<Record<string, string>>({});
+
+  // Search is the other way into the same rows: the tiles are for browsing a
+  // stage, this is for finding one child when a parent rings up.
+  const [q, setQ] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [adv, setAdv] = useState(emptyAdvanced);
+  const [results, setResults] = useState<AdmissionSearchResultDto | null>(null);
+  const [searchOffset, setSearchOffset] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const [movesByState, setMovesByState] = useState<Record<string, string[]>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -120,12 +142,14 @@ export default function AdmissionsPage() {
       listGrades(s.schoolId),
       listSections(s.schoolId),
       getAdmissionPolicy(s.schoolId),
+      admissionMovesByState(s.schoolId),
     ])
-      .then(([y, g, sec, pol]) => {
+      .then(([y, g, sec, pol, allMoves]) => {
         setYears(y);
         setGrades(g);
         setSections(sec);
         setPolicy(pol);
+        setMovesByState(allMoves);
         const current = y.find((yr) => yr.isCurrent) ?? y[0];
         setForm((f) => ({ ...f, academicYearId: current?.id ?? "", gradeId: g[0]?.id ?? "" }));
       })
@@ -166,6 +190,7 @@ export default function AdmissionsPage() {
       setRows(null);
       return;
     }
+    setResults(null);
     setSelected(state);
     setOffset(0);
     loadStage(session.schoolId, state, 0);
@@ -177,11 +202,49 @@ export default function AdmissionsPage() {
     loadStage(session.schoolId, selected, nextOffset);
   }
 
+  const hasCriteria =
+    q.trim() !== "" || Object.values(adv).some((v) => v.trim() !== "");
+
+  function runSearch(nextOffset: number) {
+    if (!session || !hasCriteria) return;
+    // Searching and browsing a stage are two answers to different questions;
+    // showing both at once leaves nobody sure which list they are looking at.
+    setSelected(null);
+    setRows(null);
+    setSearching(true);
+    setError(null);
+    setSearchOffset(nextOffset);
+    searchAdmissionApplications(session.schoolId, {
+      q: q.trim() || undefined,
+      name: adv.name || undefined,
+      dob: adv.dob || undefined,
+      guardianPhone: adv.guardianPhone || undefined,
+      applicationNo: adv.applicationNo || undefined,
+      gradeId: adv.gradeId || undefined,
+      state: adv.state || undefined,
+      source: adv.source || undefined,
+      limit: PAGE_SIZE,
+      offset: nextOffset,
+    })
+      .then(setResults)
+      .catch((err) => setError(describeError(err)))
+      .finally(() => setSearching(false));
+  }
+
+  function clearSearch() {
+    setQ("");
+    setAdv(emptyAdvanced);
+    setResults(null);
+    setSearchOffset(0);
+    setError(null);
+  }
+
   /** After a move both the counts and the open page are stale. */
   function afterChange() {
     if (!session) return;
     refreshSummary(session.schoolId);
     if (selected) loadStage(session.schoolId, selected, offset);
+    if (results) runSearch(searchOffset);
   }
 
   async function onCreate() {
@@ -244,20 +307,6 @@ export default function AdmissionsPage() {
     }
   }
 
-  async function onSavePolicy(next: AdmissionPolicyDto) {
-    setSavingPolicy(true);
-    setError(null);
-    try {
-      setPolicy(await saveAdmissionPolicy(next));
-      // Which moves exist changes with the funnel, so the open stage is stale.
-      afterChange();
-    } catch (err) {
-      setError(describeError(err));
-    } finally {
-      setSavingPolicy(false);
-    }
-  }
-
   const gradeName = useMemo(() => {
     const map: Record<string, string> = {};
     grades?.forEach((g) => (map[g.id] = g.name));
@@ -270,7 +319,11 @@ export default function AdmissionsPage() {
     return map;
   }, [summary]);
 
-  /** A school with no entrance test has no assessment lane to draw. */
+  /**
+   * Still read here, though it is no longer set here: the lane strip has to
+   * match the funnel this school runs, and a school with no entrance test has
+   * no assessment lane to draw. Changing it lives on School settings.
+   */
   const lanes = useMemo(
     () => (policy?.entranceTestRequired === false ? LANES.filter((l) => l.key !== "assessment") : LANES),
     [policy]
@@ -384,41 +437,110 @@ export default function AdmissionsPage() {
         )}
       </div>
 
-      {policy && (
-        <div className="panel">
-          <div className="form-row" style={{ flexWrap: "wrap", alignItems: "center", gap: 14 }}>
-            <label className="form-row" style={{ gap: 6, alignItems: "center", margin: 0 }}>
-              <input
-                id="entrance-test-required"
-                type="checkbox"
-                checked={policy.entranceTestRequired}
-                disabled={savingPolicy}
-                onChange={(e) => onSavePolicy({ ...policy, entranceTestRequired: e.target.checked })}
-              />
-              This school holds an entrance test
-            </label>
-            <label className="form-row" style={{ gap: 6, alignItems: "center", margin: 0 }}>
-              Offer valid for
-              <input
-                id="offer-validity-days"
-                type="number"
-                min={1}
-                value={policy.offerValidityDays}
-                disabled={savingPolicy}
-                style={{ width: 70 }}
-                onChange={(e) => setPolicy({ ...policy, offerValidityDays: Number(e.target.value) })}
-                onBlur={() => onSavePolicy(policy)}
-              />
-              days
-            </label>
-            <span className="hint">
-              {policy.entranceTestRequired
-                ? "An offer follows the entrance test."
-                : "An offer is made straight from review — there is no test to schedule."}
-            </span>
-          </div>
+      <div className="panel">
+        <div className="search-bar">
+          <input
+            id="admissions-search"
+            className="search-input"
+            placeholder="Find a child — name, application no., guardian or phone"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") runSearch(0);
+            }}
+          />
+          <button type="button" onClick={() => runSearch(0)} disabled={!hasCriteria || searching}>
+            {searching ? "Searching\u2026" : "Search"}
+          </button>
+          <button
+            type="button"
+            className={"tab" + (advancedOpen ? " active" : "")}
+            onClick={() => setAdvancedOpen((v) => !v)}
+          >
+            More filters
+          </button>
+          {(results || hasCriteria) && (
+            <button type="button" className="tab" onClick={clearSearch}>
+              Clear
+            </button>
+          )}
         </div>
-      )}
+
+        {advancedOpen && (
+          <div className="search-advanced">
+            <label>
+              <span>Applicant name</span>
+              <input
+                value={adv.name}
+                onChange={(e) => setAdv((a) => ({ ...a, name: e.target.value }))}
+                onKeyDown={(e) => e.key === "Enter" && runSearch(0)}
+              />
+            </label>
+            <label>
+              <span>Date of birth</span>
+              <input
+                type="date"
+                value={adv.dob}
+                onChange={(e) => setAdv((a) => ({ ...a, dob: e.target.value }))}
+              />
+            </label>
+            <label>
+              <span>Guardian phone</span>
+              <input
+                value={adv.guardianPhone}
+                onChange={(e) => setAdv((a) => ({ ...a, guardianPhone: e.target.value }))}
+                onKeyDown={(e) => e.key === "Enter" && runSearch(0)}
+              />
+            </label>
+            <label>
+              <span>Application no.</span>
+              <input
+                value={adv.applicationNo}
+                onChange={(e) => setAdv((a) => ({ ...a, applicationNo: e.target.value }))}
+                onKeyDown={(e) => e.key === "Enter" && runSearch(0)}
+              />
+            </label>
+            <label>
+              <span>Grade</span>
+              <select value={adv.gradeId} onChange={(e) => setAdv((a) => ({ ...a, gradeId: e.target.value }))}>
+                <option value="">Any</option>
+                {grades?.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Stage</span>
+              <select value={adv.state} onChange={(e) => setAdv((a) => ({ ...a, state: e.target.value }))}>
+                <option value="">Any</option>
+                {Object.keys(STATE_LABEL).map((st) => (
+                  <option key={st} value={st}>
+                    {STATE_LABEL[st]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Source</span>
+              <select value={adv.source} onChange={(e) => setAdv((a) => ({ ...a, source: e.target.value }))}>
+                <option value="">Any</option>
+                {SOURCES.map((src) => (
+                  <option key={src} value={src}>
+                    {src}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="search-advanced-actions">
+              <button type="button" onClick={() => runSearch(0)} disabled={!hasCriteria || searching}>
+                Search
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {error && <div className="error-banner">{error}</div>}
 
@@ -477,6 +599,123 @@ export default function AdmissionsPage() {
           ))}
         </div>
       </div>
+
+      {results && (
+        <div className="panel">
+          <div className="form-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>
+              Search{" "}
+              <span className="hint" style={{ fontWeight: 400 }}>
+                {results.total === 0
+                  ? "\u2014 nothing matched"
+                  : `\u2014 showing ${searchOffset + 1}\u2013${Math.min(
+                      searchOffset + PAGE_SIZE,
+                      results.total
+                    )} of ${results.total}`}
+              </span>
+            </h3>
+            <button type="button" className="tab" onClick={clearSearch}>
+              Clear
+            </button>
+          </div>
+
+          {results.total === 0 && (
+            <p className="hint">
+              No application matches. A child who applied in an earlier year is still here — try the
+              application number, or widen the stage filter to Any.
+            </p>
+          )}
+
+          {results.rows.length > 0 && (
+            <>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Application no.</th>
+                    <th>Applicant</th>
+                    <th>Born</th>
+                    <th>Grade</th>
+                    <th>Guardian</th>
+                    <th>Status</th>
+                    <th>Move to</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.rows.map((a) => {
+                    const allowed = movesByState[a.state] ?? [];
+                    return (
+                      <tr key={a.id}>
+                        <td>{a.applicationNo}</td>
+                        <td>
+                          {a.applicantFirstName} {a.applicantLastName ?? ""}
+                        </td>
+                        <td>{a.applicantDob ?? <span className="hint">—</span>}</td>
+                        <td>{gradeName[a.gradeId] ?? "\u2014"}</td>
+                        <td>
+                          {a.guardianName}
+                          <br />
+                          <span className="hint">{a.guardianPhone}</span>
+                        </td>
+                        <td>
+                          <span className="badge">{STATE_LABEL[a.state] ?? a.state}</span>
+                          {a.state === "offered" && a.offerExpiresOn && (
+                            <>
+                              <br />
+                              <span className={"hint " + expiryClass(a.offerExpiresOn)}>
+                                expires {a.offerExpiresOn}
+                              </span>
+                            </>
+                          )}
+                        </td>
+                        <td>
+                          {allowed.length === 0 ? (
+                            <span className="hint">Nothing follows this stage.</span>
+                          ) : (
+                            <div className="move-actions">
+                              {allowed.map((to) => (
+                                <button
+                                  key={to}
+                                  type="button"
+                                  className="tab"
+                                  disabled={busyId === a.id}
+                                  onClick={() => onMove(a, to)}
+                                >
+                                  {STATE_LABEL[to] ?? to}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {results.total > PAGE_SIZE && (
+                <div className="form-row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="tab"
+                    disabled={searchOffset === 0 || searching}
+                    onClick={() => runSearch(Math.max(0, searchOffset - PAGE_SIZE))}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="tab"
+                    disabled={searchOffset + PAGE_SIZE >= results.total || searching}
+                    onClick={() => runSearch(searchOffset + PAGE_SIZE)}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {selected && (
         <div className="panel">

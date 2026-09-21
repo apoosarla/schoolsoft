@@ -703,3 +703,341 @@ tbody tr[role="button"] { cursor: pointer; }
   color: var(--warning);
   font-weight: 600;
 }
+
+/* ============ School settings ============ */
+
+/* A setting is a name, the sentence that says what it does to the rest of the
+   product, and the control. The sentence is the point: a switch that silently
+   reshapes the admissions funnel needs to say so where it is thrown. */
+.setting-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.setting-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 62ch;
+}
+
+.setting-name {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 3px;
+}
+
+.setting-why {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.setting-control {
+  flex: 0 0 auto;
+  padding-top: 2px;
+}
+
+.switch-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .setting {
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+/* ============ Admissions search ============ */
+
+.search-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+/* The advanced fields are labelled, because "name" and "guardian phone" look
+   the same when they are two bare boxes side by side. */
+.search-advanced {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.search-advanced label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.search-advanced label span {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.search-advanced-actions {
+  display: flex;
+  align-items: flex-end;
+}
+
+/* ============ Timetable grid ============ */
+
+/* The same slots the table lists, laid out the way a week is read: periods
+   down, days across. It answers the same question about a date — the grid is
+   the week in force on the date above it, not "the" timetable. */
+.tt-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  min-width: 820px;
+}
+
+.tt-day-head {
+  padding: 0 2px 2px;
+}
+.tt-day-head .name {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.tt-day-head .count {
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.tt-period {
+  min-height: 66px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-right: 6px;
+}
+.tt-period .no { font-size: 12.5px; font-weight: 600; }
+.tt-period .time {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A cell is the row it replaces: the same actions, reached where the lesson
+   sits. Hence a button, not a div — the grid stays reachable by keyboard. */
+.tt-cell {
+  min-height: 66px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 9px 11px;
+  border: none;
+  border-radius: 9px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  box-shadow: none;
+  background: color-mix(in srgb, var(--dot, var(--accent)) 12%, transparent);
+}
+.tt-cell:hover {
+  background: color-mix(in srgb, var(--dot, var(--accent)) 20%, transparent);
+  transform: none;
+}
+.tt-cell .subject {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.tt-cell .subject::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dot, var(--accent));
+}
+.tt-cell .who {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.tt-cell .mark {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.tt-cell .mark.warn { color: var(--warning); }
+.tt-cell .mark.ends { color: var(--gold); }
+
+.tt-cell.warn {
+  background: var(--warning-wash);
+  box-shadow: inset 0 0 0 1.5px var(--warning);
+}
+.tt-cell.ends { box-shadow: inset 0 -2px 0 0 var(--gold); }
+.tt-cell.selected { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* Free is an affordance, not a blank: clicking one opens the add form with
+   that day and period already filled in. */
+.tt-cell.free {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-faint);
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+.tt-cell.free:hover {
+  background: var(--surface-hover);
+  color: var(--text-dim);
+}
+
+/* A break is not a cell anybody can teach in, so it is a band across the
+   week rather than six empty boxes. */
+.tt-break {
+  grid-column: 1 / -1;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.tt-break .label {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tt-break .time { font-variant-numeric: tabular-nums; }
+
+.tt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.tt-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tt-legend .swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+.tt-legend .swatch.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot);
+}
+.tt-legend .swatch.warn {
+  background: var(--warning-wash);
+  box-shadow: inset 0 0 0 1.5px var(--warning);
+}
+.tt-legend .swatch.ends { box-shadow: inset 0 -2px 0 0 var(--gold); }
+.tt-legend .swatch.free { border: 1px dashed var(--border-strong); }
+
+/* The selected cell's detail, below the grid rather than floating over it. */
+.tt-selected {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.tt-selected .head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.tt-selected dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+}
+.tt-selected dt {
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tt-selected dd {
+  margin: 0 0 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.tt-selected .pair { display: flex; align-items: baseline; }
+
+/* Eight hues, one per subject, assigned by a hash of the subject's id so a
+   subject keeps its colour between sections and across a reload. */
+:root {
+  --tt-h0: #3d4ea6;
+  --tt-h1: #b8902e;
+  --tt-h2: #2f8558;
+  --tt-h3: #7a4fa3;
+  --tt-h4: #b4593a;
+  --tt-h5: #2b7a8c;
+  --tt-h6: #5b6178;
+  --tt-h7: #a64570;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tt-h0: #7c8bdb;
+    --tt-h1: #d7b564;
+    --tt-h2: #57bc8a;
+    --tt-h3: #a986c9;
+    --tt-h4: #d98a6c;
+    --tt-h5: #6fb6c6;
+    --tt-h6: #9aa0b8;
+    --tt-h7: #d489ab;
+  }
+}

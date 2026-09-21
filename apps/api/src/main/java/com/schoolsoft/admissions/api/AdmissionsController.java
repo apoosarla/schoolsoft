@@ -52,6 +52,55 @@ public class AdmissionsController {
     }
 
     /**
+     * Find one child. The office takes a phone call and has a name, sometimes a
+     * date of birth, sometimes the number off the acknowledgement — so {@code q}
+     * searches the few things a family quotes back, and the named fields narrow
+     * it when the name alone brings back six children.
+     *
+     * <p>A search with no criteria is refused rather than answered: it is a
+     * request for the whole table wearing a question's clothes, and the stage
+     * tiles are the way to browse.</p>
+     */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/applications/search")
+    public AdmissionSearchResultDto search(
+        @RequestParam UUID schoolId,
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String name,
+        @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso =
+            org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate dob,
+        @RequestParam(required = false) String guardianPhone,
+        @RequestParam(required = false) String applicationNo,
+        @RequestParam(required = false) UUID gradeId,
+        @RequestParam(required = false) UUID academicYearId,
+        @RequestParam(required = false) String state,
+        @RequestParam(required = false) String source,
+        @RequestParam(defaultValue = "25") Integer limit,
+        @RequestParam(defaultValue = "0") int offset
+    ) {
+        var criteria = new AdmissionsRepository.SearchCriteria(
+            schoolId, q, name, dob, guardianPhone, applicationNo, gradeId, academicYearId,
+            state, source, limit, offset);
+        if (criteria.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Give the search something to go on \u2014 a name, a date of birth, an application number "
+                + "or a phone. Browse by stage instead to see everyone.");
+        }
+        return repo.search(criteria);
+    }
+
+    /**
+     * Every stage's legal moves at this school, in one answer. Search results
+     * hold applications in many states at once, so the screen takes the whole
+     * map rather than a request per row.
+     */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/moves/all")
+    public Map<String, List<String>> allMoves(@RequestParam UUID schoolId) {
+        return repo.allMoves(applications.policy(schoolId).entranceTestRequired());
+    }
+
+    /**
      * The moves a stage may make at this school, without naming an application.
      * Every row in a stage shares them, so the screen asks once rather than
      * once per row.

@@ -338,6 +338,42 @@ export function getAdmissionSummary(schoolId: string): Promise<AdmissionFunnelSu
   return apiFetch<AdmissionFunnelSummaryDto>(`/v1/admissions/summary?schoolId=${schoolId}`);
 }
 
+export type AdmissionSearchCriteria = {
+  /** The one box: name, application number, guardian name or phone. */
+  q?: string;
+  name?: string;
+  dob?: string;
+  guardianPhone?: string;
+  applicationNo?: string;
+  gradeId?: string;
+  academicYearId?: string;
+  state?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type AdmissionSearchResultDto = {
+  total: number;
+  rows: AdmissionApplicationDto[];
+};
+
+export function searchAdmissionApplications(
+  schoolId: string,
+  criteria: AdmissionSearchCriteria
+): Promise<AdmissionSearchResultDto> {
+  const params = new URLSearchParams({ schoolId });
+  Object.entries(criteria).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && String(v).trim() !== "") params.set(k, String(v));
+  });
+  return apiFetch<AdmissionSearchResultDto>(`/v1/admissions/applications/search?${params.toString()}`);
+}
+
+/** Every stage's legal moves at once — search results span many states. */
+export function admissionMovesByState(schoolId: string): Promise<Record<string, string[]>> {
+  return apiFetch<Record<string, string[]>>(`/v1/admissions/moves/all?schoolId=${schoolId}`);
+}
+
 /** The moves a stage may make at this school — asked once per stage, not per row. */
 export function admissionMovesForState(schoolId: string, fromState: string): Promise<string[]> {
   const params = new URLSearchParams({ schoolId, fromState });
@@ -2639,6 +2675,7 @@ export const SCREEN_DEFS = [
   { key: "library", label: "Library", path: "/library" },
   { key: "transport", label: "Transport", path: "/transport" },
   { key: "admin", label: "Roles & Users", path: "/roles" },
+  { key: "settings", label: "Settings", path: "/settings" },
 ] as const;
 
 export type RoleDto = {

@@ -4,6 +4,7 @@ import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.admissions.api.AdmissionEventDto;
 import com.schoolsoft.admissions.api.AdmissionFunnelSummaryDto;
 import com.schoolsoft.admissions.api.AdmissionPolicyDto;
+import com.schoolsoft.admissions.api.AdmissionSearchResultDto;
 import com.schoolsoft.enrolment.api.RollNumbers;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -100,6 +101,131 @@ public class AdmissionsRepository {
             args.add(Math.max(0, offset));
         }
         return jdbc.query(sql.toString(), MAPPER, args.toArray());
+    }
+
+    // ------------------------------------------------------------------ search
+
+    /**
+     * What the office types when a parent rings up. {@code q} is the one-box
+     * case — a name, an application number or a phone, whichever they have to
+     * hand; the named fields are the case where they have more than one thing
+     * and the name alone brings back six children.
+     *
+     * <p>Every field is optional and they combine with AND: adding a field
+     * narrows, never widens, which is the only behaviour that makes a second
+     * field worth typing.</p>
+     */
+    public record SearchCriteria(
+        UUID schoolId, String q, String name, LocalDate dob, String guardianPhone,
+        String applicationNo, UUID gradeId, UUID academicYearId, String state, String source,
+        Integer limit, int offset
+    ) {
+        /** A search with no criteria at all would be a full table scan dressed as a question. */
+        public boolean isEmpty() {
+            return blank(q) && blank(name) && dob == null && blank(guardianPhone) && blank(applicationNo)
+                && gradeId == null && academicYearId == null && blank(state) && blank(source);
+        }
+
+        private static boolean blank(String s) {
+            return s == null || s.isBlank();
+        }
+    }
+
+    /**
+     * Builds the WHERE once, so the count and the page cannot drift apart and
+     * say "3 matches" above four rows.
+     *
+     * <p>Values are bound, never concatenated: the free-text box goes to the
+     * database as a parameter and the {@code %} wrapping happens here.</p>
+     */
+    private String whereFor(SearchCriteria c, List<Object> args) {
+        var where = new StringBuilder(" WHERE school_id = ?");
+        args.add(c.schoolId());
+
+        if (!SearchCriteria.blank(c.q())) {
+            // The one box searches what a family would quote back: the child's
+            // name, the number on their acknowledgement, the parent's name, or
+            // the phone they applied with.
+            where.append(" AND (applicant_first_name ILIKE ? OR applicant_last_name ILIKE ?"
+                + " OR (applicant_first_name || ' ' || COALESCE(applicant_last_name, '')) ILIKE ?"
+                + " OR application_no ILIKE ? OR guardian_name ILIKE ?"
+                + " OR replace(guardian_phone, ' ', '') ILIKE ?)");
+            String like = "%" + c.q().trim() + "%";
+            for (int i = 0; i < 5; i++) args.add(like);
+            args.add("%" + c.q().trim().replace(" ", "") + "%");
+        }
+        if (!SearchCriteria.blank(c.name())) {
+            where.append(" AND (applicant_first_name || ' ' || COALESCE(applicant_last_name, '')) ILIKE ?");
+            args.add("%" + c.name().trim() + "%");
+        }
+        if (c.dob() != null) {
+            where.append(" AND applicant_dob = ?");
+            args.add(Date.valueOf(c.dob()));
+        }
+        if (!SearchCriteria.blank(c.guardianPhone())) {
+            // Typed with or without spaces, and often only the last few digits.
+            where.append(" AND replace(guardian_phone, ' ', '') ILIKE ?");
+            args.add("%" + c.guardianPhone().trim().replace(" ", "") + "%");
+        }
+        if (!SearchCriteria.blank(c.applicationNo())) {
+            where.append(" AND application_no ILIKE ?");
+            args.add("%" + c.applicationNo().trim() + "%");
+        }
+        if (c.gradeId() != null) {
+            where.append(" AND grade_id = ?");
+            args.add(c.gradeId());
+        }
+        if (c.academicYearId() != null) {
+            where.append(" AND academic_year_id = ?");
+            args.add(c.academicYearId());
+        }
+        if (!SearchCriteria.blank(c.state())) {
+            where.append(" AND state = ?");
+            args.add(c.state());
+        }
+        if (!SearchCriteria.blank(c.source())) {
+            where.append(" AND source = ?");
+            args.add(c.source());
+        }
+        return where.toString();
+    }
+
+    public AdmissionSearchResultDto search(SearchCriteria c) {
+        var countArgs = new java.util.ArrayList<Object>();
+        String where = whereFor(c, countArgs);
+
+        Long total = jdbc.queryForObject(
+            "SELECT count(*) FROM admission_application" + where, Long.class, countArgs.toArray());
+
+        var pageArgs = new java.util.ArrayList<Object>();
+        String sql = "SELECT " + COLS + " FROM admission_application" + whereFor(c, pageArgs)
+            + " ORDER BY created_at DESC, id DESC";
+        if (c.limit() != null) {
+            sql += " LIMIT ? OFFSET ?";
+            pageArgs.add(c.limit());
+            pageArgs.add(Math.max(0, c.offset()));
+        }
+        return new AdmissionSearchResultDto(total == null ? 0 : total, jdbc.query(sql, MAPPER, pageArgs.toArray()));
+    }
+
+    /**
+     * Every stage's legal moves in one answer. A list of search results holds
+     * applications in a dozen different states, and asking per row would be a
+     * request per row.
+     */
+    public java.util.Map<String, List<String>> allMoves(boolean schoolTests) {
+        var byState = new java.util.LinkedHashMap<String, List<String>>();
+        STATES.forEach(state -> byState.put(state, new java.util.ArrayList<>()));
+        jdbc.query(
+            "SELECT from_state, to_state FROM admission_transition "
+            + "WHERE requires_entrance_test IS NULL OR requires_entrance_test = ? "
+            + "ORDER BY from_state, note, to_state",
+            rs -> {
+                var moves = byState.get(rs.getString("from_state"));
+                if (moves != null) moves.add(rs.getString("to_state"));
+            },
+            schoolTests);
+        return byState;
     }
 
     /**
