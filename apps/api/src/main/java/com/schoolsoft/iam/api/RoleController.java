@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 
 /**
  * Role catalog (seeded personas + custom roles) and staff-role assignment.
- * Screen-level access control for admin-web: each role names the set of
+ * Screen-level access control for school-web: each role names the set of
  * frontend routes ("screen keys") it unlocks; a staff member's effective
  * access is the union of screen_keys across every role granted to them via
  * {@code staff_role} — see {@link Authz#rolesOfCurrentUser()}.

@@ -275,7 +275,7 @@ SELECT 'librarian', p.perm FROM (VALUES
 ) AS p(perm)
 ON CONFLICT DO NOTHING;
 
--- admin-web's Exits screen: the withdrawals queue, its checklists, and the
+-- school-web's Exits screen: the withdrawals queue, its checklists, and the
 -- certificates issued off them.
 UPDATE role
 SET screen_keys = array_append(screen_keys, 'exits')

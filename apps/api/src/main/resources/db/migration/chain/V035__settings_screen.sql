@@ -13,7 +13,7 @@
 -- ----------------------------------------------------------------------------
 UPDATE role
    SET screen_keys = array_append(screen_keys, 'settings'),
-       -- `role` is versioned (V028) and admin-web sends the version back on
+       -- `role` is versioned (V028) and school-web sends the version back on
        -- save, so a migration that edits a role behind the UI has to move it
        -- too, or the next save from a stale screen wins a conflict it should
        -- have lost.

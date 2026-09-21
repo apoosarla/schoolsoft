@@ -150,11 +150,11 @@ entries under **Done** below.
   `ForbiddenException` → 403 otherwise). 2026-08-02.
 
 - ~~Chain HQ Console app — tenant/school onboarding UI.~~ Scaffolded
-  `apps/hq-web` (Next.js App Router + TS). `/chains` page lists chains and
+  `apps/platform-web` (Next.js App Router + TS). `/chains` page lists chains and
   provisions new ones against the endpoint above. 2026-08-02.
 
 - ~~Build verification gap.~~ Both apps now actually compile/build/boot in
-  this environment (Java 25 + Maven locally; Node 24 + npm for hq-web).
+  this environment (Java 25 + Maven locally; Node 24 + npm for platform-web).
   `./mvnw -DskipTests package` produces a working jar; `npm install && npm
   run build` produces a working Next.js build. All of the below was verified
   against a live local Postgres instance, not just compiled. 2026-08-03.
@@ -162,7 +162,7 @@ entries under **Done** below.
 - ~~Rename mcb → schoolsoft.~~ Folder, git repo, Java packages
   (`com.mcb` → `com.schoolsoft`), config keys (`mcb.*` → `schoolsoft.*` in
   both `application.yml` and every `@Value`), npm workspace package names
-  (`@mcb/*` → `@schoolsoft/*` in root and `hq-web` `package.json` — these
+  (`@mcb/*` → `@schoolsoft/*` in root and `platform-web` `package.json` — these
   were missed by the first rename pass since nothing had `npm install`ed
   against them until the HQ Console work below), `MCB-design.md` →
   `schoolsoft-design.md`. 2026-08-02/03.
@@ -274,7 +274,7 @@ entries under **Done** below.
   Verified live: searched, added a second staff member as a participant,
   created the thread, and sent/received a message in it. 2026-08-09.
 
-- ~~Role-based screen access (RBAC) for admin-web.~~ Seeded 11 personas for
+- ~~Role-based screen access (RBAC) for school-web.~~ Seeded 11 personas for
   a Cambridge-curriculum international school in India — Principal, Vice
   Principal, IT Administrator, Cambridge Coordinator, Exams Officer,
   Registrar, Class Teacher, Subject Teacher, Accountant, Librarian, Front
@@ -287,7 +287,7 @@ entries under **Done** below.
   `PUT/DELETE /v1/iam/roles/{id}` (system roles can't be deleted),
   `GET /v1/iam/staff-roles`, `POST /v1/iam/staff-roles/{assign,unassign}`,
   `GET /v1/iam/me/screens` (union of `screen_keys` across the caller's role
-  grants, via `Authz.rolesOfCurrentUser()`). admin-web: `Session` gained
+  grants, via `Authz.rolesOfCurrentUser()`). school-web: `Session` gained
   `screens`/`roleCodes`, fetched right after OTP verify; `Nav` is now a
   client component that only renders links the session has access to; every
   page gained a `hasScreen(s, "...")` redirect-to-`/dashboard` guard;
@@ -318,7 +318,7 @@ entries under **Done** below.
   that navigating directly to `/fees` or `/roles` by URL redirected to
   `/dashboard`. 2026-08-09.
 
-- ~~Modern responsive design for admin-web.~~ Prototyped a redesign first as
+- ~~Modern responsive design for school-web.~~ Prototyped a redesign first as
   a standalone artifact (four persona dashboards — Principal, Class Teacher,
   Accountant, Librarian — demonstrating the RBAC nav filtering visually)
   before touching the real app; design plan: cool "paper" neutral (not the
@@ -327,7 +327,7 @@ entries under **Done** below.
   Georgia serif for titles/headings paired with system-sans for
   everything operational, tabular numerals throughout.
 
-  Ported into `apps/admin-web` as a **CSS-and-shell-only** change — zero
+  Ported into `apps/school-web` as a **CSS-and-shell-only** change — zero
   edits to any of the 11 page components. This worked because every page
   already funneled its markup through a small, consistent class contract
   (`.panel`, `.stat-grid`/`.stat-tile`, `.badge`/`.badge-active`/
@@ -351,9 +351,9 @@ entries under **Done** below.
   themes, plus the real app's Dashboard/Students/Fees/Roles pages rendering
   actual backend data through the new design. 2026-08-10.
 
-- ~~Same design system ported into hq-web.~~ hq-web (`/`, `/chains`) used
+- ~~Same design system ported into platform-web.~~ platform-web (`/`, `/chains`) used
   the exact same original bare-bones dark CSS and class contract as
-  admin-web pre-redesign, so the same zero-page-edit trick applied:
+  school-web pre-redesign, so the same zero-page-edit trick applied:
   swapped `globals.css` for the same token system (scoped down — no
   sidebar/gold-accent/serif-in-cards machinery this 2-page app doesn't
   need), added active-link state to the topbar nav via a small `nav.tsx`
@@ -369,7 +369,7 @@ entries under **Done** below.
   see below.)
   2026-08-10.
 
-- ~~Platform-admin login flow.~~ hq-web's paste-a-bearer-token workaround is
+- ~~Platform-admin login flow.~~ platform-web's paste-a-bearer-token workaround is
   gone. New OTP flow parallel to the existing chain one, but resolving
   against `platform.platform_user` instead of scanning chain schemas (that
   table existed since the original platform migration but nothing had ever
@@ -382,7 +382,7 @@ entries under **Done** below.
   a seed platform-admin row (`platform/V004`) since there was previously no
   way to create the first one short of a manual `INSERT` — a real
   chicken-and-egg gap, same shape as the curriculum-template seed in
-  `platform/V003`. hq-web: new `/login` page (mirrors admin-web's OTP login
+  `platform/V003`. platform-web: new `/login` page (mirrors school-web's OTP login
   UI, minus the chain-slug field platform admins don't have), `/chains` now
   guards on `isLoggedIn()` instead of exposing a raw token paste-box.
   Verified live end-to-end against local Postgres: start → verify with the
@@ -395,10 +395,10 @@ entries under **Done** below.
 - ~~Teacher app — Login, Today, Attendance.~~ New `apps/teacher-app`
   (`@schoolsoft/teacher-app`, `next dev -p 3003`; added to root
   `package.json`'s workspaces — the slot already existed — and a
-  `teacher:dev` script). Mobile-first, not admin-web's sidebar shell:
+  `teacher:dev` script). Mobile-first, not school-web's sidebar shell:
   single scrolling column under a fixed bottom tab bar (Today, Attendance —
   written so a third tab drops in without restructuring), 44px+ touch
-  targets, same design tokens as admin-web/hq-web (Oxford-indigo,
+  targets, same design tokens as school-web/platform-web (Oxford-indigo,
   Georgia/system-sans, light-default with a dark media-query override).
   Reuses the existing chain OTP login flow. New backend endpoint
   `GET /v1/iam/me` (`RoleController` + `RoleRepository.subjectIdForUserAccount`)
@@ -407,11 +407,11 @@ entries under **Done** below.
   Today pulls `GET /v1/timetable/teachers/{staffId}`, filters to
   `dayOfWeek === new Date().getDay()`, and links each period into
   Attendance with the section pre-selected via a `?section=` query param;
-  Attendance itself is the same roster/mark-bulk flow as admin-web's page,
+  Attendance itself is the same roster/mark-bulk flow as school-web's page,
   scoped to the distinct sections the teacher's timetable actually covers.
 
   Found and fixed a real bug during live verification, present in
-  **both** teacher-app and admin-web's attendance pages: the existing-marks
+  **both** teacher-app and school-web's attendance pages: the existing-marks
   matching logic checked `e.periodNo === null`, but Jackson's
   `non_null` property inclusion (`application.yml`) *omits* a null field
   from the JSON entirely rather than serializing it as `null` — so
@@ -522,7 +522,7 @@ entries under **Done** below.
   academic year via `is_current`, generates `applicationNo` as
   `"WEB-" + <8 random hex chars>`, and reuses the existing
   `AdmissionsRepository.create(...)` so applications land in the same
-  funnel admin-web's Admissions screen already reads.
+  funnel school-web's Admissions screen already reads.
 
   Verified live against local Postgres and a real API instance: curled
   both GET endpoints with zero auth headers (200s, correct data for the
@@ -546,7 +546,7 @@ entries under **Done** below.
   submissions inline. Comms: post + auto-publish section-scoped
   announcements, plus a read-only feed of announcements visible to the
   teacher's sections. `lib/api.ts` gained the assessment/lms/comms clients
-  (mirrors admin-web's, scoped down). Bottom tab bar grew from 2 to 5 tabs.
+  (mirrors school-web's, scoped down). Bottom tab bar grew from 2 to 5 tabs.
 
   Verified live end-to-end against local Postgres and a real API instance
   (`priya.menon@oakridge-hyd.test`, real timetable/section data): created
@@ -649,7 +649,7 @@ entries under **Done** below.
   factory where `getAccessToken` may be async so a future Capacitor
   Preferences-backed token store slots in without an API change), OTP wire
   shapes (`createAuthApi` — deliberately *not* a shared `verifyOtp`, since
-  admin-web resolves `screens`/`roleCodes` while parent/teacher/driver
+  school-web resolves `screens`/`roleCodes` while parent/teacher/driver
   resolve `subjectId`, a real divergence not worth papering over), and
   chain-scoped domain wrappers grouped by API module (`createPeopleApi`,
   `createTenancyApi`, `createCommsApi`, `createAttendanceApi`,
@@ -898,7 +898,7 @@ are different claims:
   migrate call) silently zeroed `platform.chain.schema_version` and
   `platform.chain_schema_version`. Found via the new HQ Console stats UI.
 - `GeofenceStatusDto`'s real field names (`insideGeofence`, `distanceMeters`,
-  `geofenceRadiusM`) didn't match what admin-web's new Transport screen
+  `geofenceRadiusM`) didn't match what school-web's new Transport screen
   client assumed (`inside`, `distanceM`, `radiusM`) — silently rendered
   "NaN" instead of erroring, since both sides were plain TS objects never
   cross-checked against the actual JSON. Caught during live verification,
@@ -936,9 +936,9 @@ are different claims:
 
 
 - **Remaining frontend surfaces — mostly closed out.** All six frontends
-  (`admin-web`, `hq-web`, `teacher-app`, `driver-app`, `parent-app`,
+  (`school-web`, `platform-web`, `teacher-app`, `driver-app`, `parent-app`,
   `public-site`) now have at least two slices each, including a new
-  Transport screen for `admin-web` — see Done above. What's still
+  Transport screen for `school-web` — see Done above. What's still
   genuinely open:
   - **LMS quiz engine authoring** (question/option/answer UI) — skipped
     everywhere so far as its own distinct UI investment, not scoped to any
@@ -1539,7 +1539,7 @@ several are security-relevant.
   for a slot authored by mistake, retire is for one the school has taught.
   `V032` adds the `effective_to >= effective_from` check the table never had
   and the two window indexes. Certified by `cert_TT_05`, previously disabled.
-  admin-web's timetable grid gained an "in force on" date and a Retire action.
+  school-web's timetable grid gained an "in force on" date and a Retire action.
 
 - **GAP-35 — Notification producers are unwired.** ✅ **Closed 2026-09-09
   (Phase 8).** Four write paths now send: a public enquiry is acknowledged to

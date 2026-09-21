@@ -2,7 +2,7 @@
  * Thin client for the Schoolsoft API's chain-scoped endpoints
  * (apps/api/.../iam/api/AuthController.java, dashboard/api/DashboardController.java).
  *
- * Unlike hq-web (platform-admin, no login flow yet — see BACKLOG.md), this
+ * Unlike platform-web (platform-admin, no login flow yet — see BACKLOG.md), this
  * app authenticates against a real endpoint: POST /v1/auth/otp/start +
  * /v1/auth/otp/verify resolve identities inside a chain schema
  * (staff/guardian/student via `user_account`). Dev builds accept the literal
@@ -14,7 +14,7 @@ import { createApiClient } from "@schoolsoft/api-client";
 export { ApiError } from "@schoolsoft/api-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
-const SESSION_KEY = "schoolsoft_admin_session";
+const SESSION_KEY = "schoolsoft_school_session";
 
 export type Session = {
   accessToken: string;
@@ -2657,7 +2657,7 @@ export function activateRollover(
 
 // -------------------------- Roles & access --------------------------
 
-/** Every admin-web route that's gated by a role's screen_keys, plus "admin" for this Roles & Users screen itself. */
+/** Every school-web route that's gated by a role's screen_keys, plus "admin" for this Roles & Users screen itself. */
 export const SCREEN_DEFS = [
   { key: "dashboard", label: "Dashboard", path: "/dashboard" },
   { key: "students", label: "Students", path: "/students" },

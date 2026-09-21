@@ -1,4 +1,4 @@
--- Grants the two admin-web screens added for Phases 1 and 5.
+-- Grants the two school-web screens added for Phases 1 and 5.
 --
 -- `calendar` is the school calendar, working-day pattern, academic-year
 -- lifecycle and same-day closure declaration: office roles, not teaching ones,

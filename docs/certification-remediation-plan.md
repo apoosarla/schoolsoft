@@ -539,7 +539,7 @@ Five things the plan did not anticipate:
   rollover scenario builds its own small school (`RolloverSandbox`) and rolls
   that.
 
-The **rollover wizard** landed with it (`/rollover` in admin-web, screen key
+The **rollover wizard** landed with it (`/rollover` in school-web, screen key
 granted to the office roles): five steps with the run's state between them —
 readiness with its lists, the clone, the allocation table with per-child
 override, batched commit, and the deliberate activation that ends
@@ -622,7 +622,7 @@ SEC-09, TRN-02/05.
 
 Not phases — they run alongside from Phase 1 onward.
 
-- **Frontend slices.** Every phase carries admin-web / teacher-app /
+- **Frontend slices.** Every phase carries school-web / teacher-app /
   parent-app work. Two need real design investment rather than a form:
   the **rollover wizard** (Phase 6) and the **report card template renderer**
   (Phase 5).

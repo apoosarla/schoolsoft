@@ -1,12 +1,12 @@
 {
-  "name": "@schoolsoft/hq-web",
+  "name": "@schoolsoft/platform-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Chain HQ Console \u2014 tenant/school onboarding, cross-school dashboards (schoolsoft-design.md \u00a715).",
+  "description": "Platform Console \u2014 Schoolsoft's own operators: chain provisioning and the schools inside each chain (schoolsoft-design.md \u00a715).",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3002",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3002",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },

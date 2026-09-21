@@ -1,4 +1,4 @@
--- Grants the admin-web screen added for Phase 2.
+-- Grants the school-web screen added for Phase 2.
 --
 -- `academics` is the structural master: the subject catalogue, what each
 -- section is taught and by whom, the option blocks a grade offers, section

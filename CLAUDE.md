@@ -21,12 +21,12 @@ From the repo root: `npm run api:dev`, `npm run api:build`, `npm run db:seed`.
 
 ### Frontends
 
-Six Next.js apps in one npm workspace: `admin-web`, `hq-web`, `public-site`,
-`parent-app`, `teacher-app`, `driver-app`.
+Six Next.js apps in one npm workspace: `school-web`, `platform-web`,
+`public-site`, `parent-app`, `teacher-app`, `driver-app`.
 
 ```sh
-npm run admin:dev      # also hq:dev, teacher:dev, parent:dev, driver:dev, public:dev
-npm run dev:web        # admin + hq + public together
+npm run school:dev     # also platform:dev, teacher:dev, parent:dev, driver:dev, public:dev
+npm run dev:web        # school + platform + public together
 ```
 
 ### Infrastructure

@@ -1,4 +1,4 @@
--- Grants the new admin-web Transport screen (vehicles, drivers, routes,
+-- Grants the new school-web Transport screen (vehicles, drivers, routes,
 -- student assignment, live trips) to the same top-level roles that already
 -- hold full operational access (see V013 principal/vice_principal/it_admin).
 UPDATE role

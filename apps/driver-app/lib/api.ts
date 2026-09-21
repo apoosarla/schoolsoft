@@ -1,6 +1,6 @@
 /**
  * Thin client for the Schoolsoft API's chain-scoped endpoints, driver-app's
- * slice of it: OTP login (same flow as admin-web/teacher-app — POST
+ * slice of it: OTP login (same flow as school-web/teacher-app — POST
  * /v1/auth/otp/{start,verify}, dev bypass code "000000"), /v1/iam/me to
  * resolve the caller's staff.id (the JWT only carries user_account.id), and
  * the transport module (drivers, routes, stops, vehicles, trips, GPS pings).

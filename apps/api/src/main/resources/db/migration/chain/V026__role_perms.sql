@@ -1,7 +1,7 @@
 -- Permission grants: which role may do what.
 --
 -- Until now `role.screen_keys` was the only thing standing between a caller
--- and an endpoint, and it stood nowhere near one — it drives admin-web's
+-- and an endpoint, and it stood nowhere near one — it drives school-web's
 -- navigation and nothing else, so any authenticated token could call any
 -- endpoint, including `POST /v1/iam/staff-roles/assign`. This table is the
 -- grant side of the fix; the vocabulary side is

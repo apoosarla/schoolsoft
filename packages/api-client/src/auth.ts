@@ -1,6 +1,6 @@
 /**
  * OTP wire shapes. Only the request/response envelopes are shared: what an app
- * folds them into is genuinely divergent (admin-web resolves screens/roleCodes,
+ * folds them into is genuinely divergent (school-web resolves screens/roleCodes,
  * parent/teacher/driver resolve subjectId via /v1/iam/me), so each app keeps
  * its own `verifyOtp` that builds its own Session.
  */

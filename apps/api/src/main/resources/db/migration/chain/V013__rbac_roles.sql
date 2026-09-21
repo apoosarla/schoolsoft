@@ -2,7 +2,7 @@
 -- staff_role table (§5, unused until now) as (staff_id, role_code, scope_type,
 -- scope_id) rows — this migration turns role_code from a free-text
 -- convention into a real catalog entry with a name, description, and the
--- set of admin-web screens it unlocks, and adds custom-role support (any
+-- set of school-web screens it unlocks, and adds custom-role support (any
 -- school can define additional roles beyond the seeded set).
 --
 -- Deliberately decoupled from how the caller authenticated (OTP today,

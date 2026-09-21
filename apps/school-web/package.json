@@ -1,8 +1,8 @@
 {
-  "name": "@schoolsoft/admin-web",
+  "name": "@schoolsoft/school-web",
   "version": "0.1.0",
   "private": true,
-  "description": "School Admin Web Console \u2014 OTP login, operational dashboard, students (schoolsoft-design.md \u00a715).",
+  "description": "School Web Console \u2014 the school's own office, and the chain HQ that opens one (schoolsoft-design.md \u00a715).",
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",

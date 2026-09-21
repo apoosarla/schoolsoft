@@ -15,7 +15,7 @@ Any valid token could call any endpoint. The sharpest instance:
 means any parent could grant themselves `it_admin`.
 
 `role.screen_keys` existed and looked like access control, but it drives
-admin-web's navigation and nothing else. It is a per-tenant, UI-mutable list —
+school-web's navigation and nothing else. It is a per-tenant, UI-mutable list —
 useful for hiding a tab, no use at all as a security boundary.
 
 Meanwhile authorization decisions that *did* exist had leaked downward:

@@ -72,7 +72,7 @@ jobs:
 
       - name: Typecheck every app and the shared client
         run: |
-          for workspace in packages/api-client apps/admin-web apps/hq-web apps/public-site \
+          for workspace in packages/api-client apps/school-web apps/platform-web apps/public-site \
                            apps/parent-app apps/teacher-app apps/driver-app; do
             echo "== $workspace"
             (cd "$workspace" && npx tsc --noEmit)
