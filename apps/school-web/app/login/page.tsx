@@ -7,6 +7,7 @@ import { CodeStep } from "@schoolsoft/ui";
 import {
   ApiError,
   TenantResolution,
+  homeFor,
   resolveTenant,
   startOtp,
   verifyOtp,
@@ -74,8 +75,12 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await verifyOtp(identifier.trim(), chainSlug.trim(), code);
-      router.replace("/dashboard");
+      // Where they land is decided by who signed in, not by this screen: a
+      // chain HQ admin holds no school, so /dashboard answers 403 to every
+      // read on it and they arrive at a page that can only say "Failed to
+      // load". homeFor is the one copy of that decision.
+      const session = await verifyOtp(identifier.trim(), chainSlug.trim(), code);
+      router.replace(homeFor(session));
     } catch (err) {
       setError(describeError(err));
     } finally {
