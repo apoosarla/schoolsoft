@@ -1,0 +1,77 @@
+/* Six boxes, one code. Wide enough for a thumb, monospaced so a mistyped
+   digit is visible at a glance. The colours are the host app's tokens —
+   this package ships the behaviour and the geometry, not a palette. */
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lede {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+.boxes {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+
+.boxes input {
+  /* A grid item's automatic minimum is its intrinsic width, and an input's
+     intrinsic width is its `size` — twenty characters at 22px. Without these
+     two the six boxes push the column out past the form. */
+  min-width: 0;
+  width: 100%;
+  height: 56px;
+  padding: 0;
+  text-align: center;
+  font-size: 22px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+.boxes input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.boxes input:disabled {
+  opacity: 0.6;
+}
+
+/* A link in a sentence, not a control: the "change" that walks back to the
+   identifier is a change of mind, and should not compete with Verify. */
+.inline {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.inline:hover { background: none; color: var(--accent-strong); }
+.inline:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.note {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+@media (max-width: 860px) {
+  .boxes { gap: 6px; }
+  .boxes input { height: 50px; font-size: 19px; }
+}

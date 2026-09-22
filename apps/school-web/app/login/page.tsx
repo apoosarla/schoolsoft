@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { CodeStep } from "@schoolsoft/ui";
 import {
   ApiError,
   TenantResolution,
@@ -190,7 +191,7 @@ export default function LoginPage() {
             </form>
           ) : (
             <CodeStep
-              identifier={identifier}
+              sentTo={identifier}
               submitting={submitting}
               onSubmit={onVerify}
               onBack={() => {
@@ -211,86 +212,6 @@ export default function LoginPage() {
         </div>
       </section>
     </main>
-  );
-}
-
-/**
- * Six boxes rather than one field, so the phone offers the SMS code to
- * `one-time-code` and a pasted code lands in all six at once. Verification
- * fires on the sixth digit: there is nothing else the screen could be for.
- */
-function CodeStep({
-  identifier,
-  submitting,
-  onSubmit,
-  onBack,
-}: {
-  identifier: string;
-  submitting: boolean;
-  onSubmit: (code: string) => void;
-  onBack: () => void;
-}) {
-  const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
-  const boxes = useRef<(HTMLInputElement | null)[]>([]);
-
-  useEffect(() => {
-    boxes.current[0]?.focus();
-  }, []);
-
-  function place(next: string[]) {
-    setDigits(next);
-    const code = next.join("");
-    if (code.length === 6 && !next.includes("")) onSubmit(code);
-  }
-
-  function onChange(i: number, raw: string) {
-    const typed = raw.replace(/\D/g, "");
-    if (!typed) {
-      const next = [...digits];
-      next[i] = "";
-      setDigits(next);
-      return;
-    }
-    // A paste arrives as one long value in whichever box had focus; spread it.
-    const next = [...digits];
-    for (let k = 0; k < typed.length && i + k < 6; k++) next[i + k] = typed[k];
-    place(next);
-    boxes.current[Math.min(i + typed.length, 5)]?.focus();
-  }
-
-  function onKeyDown(i: number, e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Backspace" && !digits[i] && i > 0) boxes.current[i - 1]?.focus();
-    if (e.key === "ArrowLeft" && i > 0) boxes.current[i - 1]?.focus();
-    if (e.key === "ArrowRight" && i < 5) boxes.current[i + 1]?.focus();
-  }
-
-  return (
-    <div className="login-code">
-      <p className="login-lede">
-        Sent to <strong>{identifier}</strong> ·{" "}
-        <button type="button" className="login-inline" onClick={onBack} disabled={submitting}>
-          change
-        </button>
-      </p>
-      <div className="login-boxes">
-        {digits.map((d, i) => (
-          <input
-            key={i}
-            ref={(el) => {
-              boxes.current[i] = el;
-            }}
-            value={d}
-            aria-label={`Digit ${i + 1}`}
-            inputMode="numeric"
-            autoComplete={i === 0 ? "one-time-code" : "off"}
-            disabled={submitting}
-            onChange={(e) => onChange(i, e.target.value)}
-            onKeyDown={(e) => onKeyDown(i, e)}
-          />
-        ))}
-      </div>
-      <p className="hint">{submitting ? "Checking…" : "Codes last five minutes."}</p>
-    </div>
   );
 }
 
