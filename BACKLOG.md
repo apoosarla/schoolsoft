@@ -20,11 +20,13 @@ entries under **Done** below.
 - **The six frontends have zero tests.** HMS's `lims-web` is 385 source files
   to 187 test files. Vitest + React Testing Library is the shape.
 
-- **No shared UI package.** `app-shell.tsx` is duplicated four times
-  (216/129/113/83 lines) across admin/parent/teacher/driver, and there are no
-  design tokens. `packages/api-client` is already shared and is the model —
-  one implementation of bearer auth, error mapping and the 401 → refresh →
-  replay dance. Add `packages/ui` before app number seven.
+- **No shared UI package, beyond a first piece.** `packages/ui` now exists and
+  holds exactly one thing — the sign-in `CodeStep`, extracted 2026-09-22. What
+  is still duplicated: `app-shell.tsx` four times (216/129/113/83 lines) across
+  school/parent/teacher/driver, and the design tokens, which are copied into
+  each app's `globals.css` rather than shipped. `packages/api-client` is the
+  model for how far this should go — one implementation of bearer auth, error
+  mapping and the 401 → refresh → replay dance.
 
 - **Frontends have no per-route permission check.** `screen_keys` drives
   navigation, which is fine — frontend gates are UX and the backend is the
@@ -372,6 +374,15 @@ entries under **Done** below.
   themes, plus the real app's Dashboard/Students/Fees/Roles pages rendering
   actual backend data through the new design. 2026-08-10.
 
+- ~~platform-web's operator door.~~ Done 2026-09-22. It was one page toggling
+  between the chain-HQ and platform-admin flows; the HQ half moved to
+  school-web first (`ddfc2e7`), and what is left is a single door on the
+  school-web sign-in layout — deliberately not school-branded, resolving no
+  tenant, saying instead that platform accounts are a separate register and
+  that the session is audited. It takes the code in `@schoolsoft/ui`'s
+  `CodeStep`, and the console's topbar no longer frames it. A wrong address
+  gets the same sentence as a deactivated one, because the resolver 404s both
+  and the difference would say which addresses are Schoolsoft's.
 - ~~Same design system ported into platform-web.~~ platform-web (`/`, `/chains`) used
   the exact same original bare-bones dark CSS and class contract as
   school-web pre-redesign, so the same zero-page-edit trick applied:
@@ -1731,23 +1742,12 @@ still missing around it:
   only schools that have opted into a public site, and answer uniformly
   otherwise.
 
-### The five surfaces still on the old form
+### The three surfaces still on the old form
 
-Only `school-web` is redesigned. The rest still ask for a chain slug and take
-the code in a single text field. Each has its own reason to differ, so they are
-listed separately rather than as one sweep — the designs are on the canvas the
-redesign came from.
-
-- **`platform-web` — two doors, not a toggle.** Today one page switches between
-  the chain-HQ and platform-admin flows with a pair of buttons, which reads as
-  one login with a setting. They are different account lists answering
-  different endpoints (`/v1/auth/otp/*` against a chain's `user_account`, vs
-  `/v1/auth/platform-admin/otp/*` against `platform.platform_user`), and they
-  should look it: the operator door is its own page, deliberately not
-  school-branded, stating that the session is audited and that platform
-  accounts are a separate list. The HQ door resolves its chain from the host
-  like `school-web` does, falling back to a `<chain>.schoolsoft.app` address
-  field rather than a bare slug. Each links to the other; neither is a tab.
+`school-web` and `platform-web` are redesigned. The three native-shell apps
+still ask for a chain slug and take the code in a single text field. Each has
+its own reason to differ, so they are listed separately rather than as one
+sweep — the designs are on the canvas the redesign came from.
 
 - **`parent-app` — mobile number first, and no host to resolve.** A Capacitor
   build has no hostname, so the tenant has to arrive some other way: the invite
@@ -1770,12 +1770,13 @@ redesign came from.
   One number maps to one vehicle, so the screen after sign-in has to be
   checkable against the bus actually being driven.
 
-- **Extract the code step.** The six-box input in
-  `school-web/app/login/page.tsx` — `one-time-code` autofill, paste spread
-  across all six, verify on the sixth digit — is the piece all five surfaces
-  want. There is no shared UI package yet; `@schoolsoft/api-client` is the
-  obvious sibling to put one beside. Doing this before porting the other four
-  avoids five copies that drift.
+- ~~**Extract the code step.**~~ Done 2026-09-22, before the second copy
+  rather than after the fifth: `@schoolsoft/ui` (`packages/ui`, source-exported
+  beside `@schoolsoft/api-client`) ships `CodeStep` with its own CSS module, and
+  `school-web` and `platform-web` both use it. The extraction found a bug in
+  the original on the way: a grid item's automatic minimum is its intrinsic
+  width, so the six boxes were pushing out past the form until the input got
+  `min-width: 0`. The three remaining apps import it rather than copying it.
 
 ### Sign-in states nothing renders yet
 

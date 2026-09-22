@@ -24,6 +24,12 @@ From the repo root: `npm run api:dev`, `npm run api:build`, `npm run db:seed`.
 Six Next.js apps in one npm workspace: `school-web`, `platform-web`,
 `public-site`, `parent-app`, `teacher-app`, `driver-app`.
 
+Two shared packages sit beside them: `@schoolsoft/api-client` (transport,
+error type, the 401 → refresh → replay dance) and `@schoolsoft/ui`, which so
+far holds one piece — `CodeStep`, the six-box sign-in code input, extracted
+before the second surface copied it. Both are source-exported and listed in
+each app's `transpilePackages`.
+
 `school-web` (:3001) is the school's own: the office's screens, and — on
 `/chain`, for a `chain_admin` — the chain HQ that opens a school and watches
 its setup. One login, two kinds of person; `homeFor(session)` decides where

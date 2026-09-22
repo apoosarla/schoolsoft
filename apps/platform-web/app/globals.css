@@ -23,6 +23,8 @@
   --accent-wash-strong: rgba(61, 78, 166, 0.14);
   --success: #2f8558;
   --success-wash: rgba(47, 133, 88, 0.12);
+  --gold-wash: rgba(184, 144, 46, 0.14);
+  --warning: #b07c1f;
   --critical: #c1403f;
   --critical-wash: rgba(193, 64, 63, 0.12);
   --shadow-sm: 0 1px 2px rgba(20, 24, 43, 0.05);
@@ -47,6 +49,9 @@
     --accent-wash-strong: rgba(124, 139, 219, 0.22);
     --success: #57bc8a;
     --success-wash: rgba(87, 188, 138, 0.16);
+    --gold: #d7b564;
+    --gold-wash: rgba(215, 181, 100, 0.16);
+    --warning: #dcab4c;
     --critical: #e37472;
     --critical-wash: rgba(227, 116, 114, 0.16);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -205,16 +210,6 @@ button:hover { background: var(--accent-strong); }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-/* The unchosen half of a pair: the sign-in door not being used, the step not
-   being taken. Quiet enough that the chosen one reads as the answer. */
-button.secondary {
-  background: var(--surface-2);
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  box-shadow: none;
-}
-button.secondary:hover { background: var(--surface-hover); color: var(--text); }
-
 .badge {
   display: inline-flex;
   align-items: center;
@@ -257,4 +252,129 @@ button.secondary:hover { background: var(--surface-hover); color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+/* ============ Sign-in ============
+   Its own layout, not the console's: there is no navigation to offer somebody
+   who has not signed in yet. School-web's door carries the school's crest;
+   this one carries Schoolsoft's, and says what an operator is signing in to
+   instead — a separate register of accounts, and an audited session. */
+
+.login {
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  min-height: 100vh;
+}
+
+.login-brand {
+  background: var(--indigo-strong);
+  color: #ffffff;
+  padding: 48px 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.login-vendor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.login-vendor-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--gold);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+.login-vendor-rule { width: 1px; height: 15px; background: rgba(255, 255, 255, 0.3); }
+.login-vendor-tag {
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* The heading and the two facts are one block: what this door is, and what
+   signing in through it means. The vendor mark and the other-door line sit at
+   the ends of the column, so only these travel together. */
+.login-said { display: flex; flex-direction: column; gap: 26px; }
+.login-identity { display: flex; flex-direction: column; gap: 10px; }
+.login-identity h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 700;
+  text-wrap: pretty;
+}
+.login-chain { margin: 0; font-size: 14px; color: rgba(255, 255, 255, 0.82); }
+
+/* The two things an operator should have read before typing. Prose, not a
+   warning banner: it is how the console works, not an alarm. */
+.login-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 360px;
+}
+.login-facts li {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.8);
+  padding-left: 14px;
+  border-left: 2px solid rgba(255, 255, 255, 0.28);
+}
+.login-facts strong { display: block; color: #ffffff; font-weight: 600; }
+
+.login-aside-foot p { margin: 0; font-size: 13.5px; color: rgba(255, 255, 255, 0.86); }
+.login-aside-foot a { color: #ffffff; }
+
+.login-form { display: grid; place-items: center; padding: 48px; background: var(--surface); }
+.login-form-inner { width: 100%; max-width: 420px; }
+.login-form-inner h2 { font-size: 28px; font-weight: 700; margin: 0 0 8px; }
+.login-form-inner form { display: flex; flex-direction: column; gap: 18px; }
+
+.login-lede {
+  margin: 0 0 22px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+.login-field { display: flex; flex-direction: column; gap: 7px; }
+.login-field label { font-size: 12.5px; font-weight: 600; }
+.login-field input { height: 44px; font-size: 14.5px; }
+
+.login-primary { height: 46px; font-size: 14.5px; }
+
+.login-dev {
+  margin-top: 22px;
+  padding: 11px 13px;
+  border: 1px dashed var(--gold);
+  border-radius: 9px;
+  background: var(--gold-wash);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.login-dev code,
+.login-dev span { font-size: 11.5px; color: var(--warning); }
+.login-dev code { background: none; border: none; padding: 0; }
+
+@media (max-width: 860px) {
+  .login { grid-template-columns: 1fr; }
+  .login-brand { padding: 32px 22px; gap: 22px; }
+  .login-identity h1 { font-size: 24px; }
+  .login-form { padding: 32px 22px 48px; }
 }

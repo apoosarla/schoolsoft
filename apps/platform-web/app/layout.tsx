@@ -1,20 +1,17 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Nav from "./nav";
+import TopBar from "./topbar";
 
 export const metadata: Metadata = {
-  title: "Schoolsoft — Chain HQ Console",
-  description: "Tenant and school onboarding for the Schoolsoft platform.",
+  title: "Schoolsoft — Platform Console",
+  description: "Schoolsoft's own operators: chain provisioning and the schools inside each chain.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <div className="topbar">
-          <div className="topbar-brand">Schoolsoft · Chain HQ</div>
-          <Nav />
-        </div>
+        <TopBar />
         {children}
       </body>
     </html>
