@@ -260,6 +260,39 @@ class RbacEnforcementTest extends AbstractCertificationTest {
     }
 
     /**
+     * The chain admin's second write, and the reason it is not a third: a
+     * school with nobody in it has nobody who could appoint anybody, so the
+     * first keyholder comes from the chain. Everything else about staff stays
+     * where it was — a chain admin still cannot grant a role, and the office's
+     * own hiring is the school's.
+     */
+    @Test
+    @DisplayName("appointing a school's first administrator is school.onboard, not role.manage")
+    void firstAdminIsOnboardingAndNotRoleManagement() {
+        String hq = chainAdminToken();
+        String teacher = teacherToken(cbse(), 1);
+
+        // A teacher is refused whatever the school's state — the gate is the
+        // permission, and a subject teacher holds neither school.onboard nor
+        // any business appointing a head.
+        assertThat(post("/v1/tenancy/schools/" + cbse().id() + "/first-admin", body(
+            "firstName", "Should", "lastName", "NotExist",
+            "email", "should.not.exist@oakridge.test"), teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // The chain admin passes the gate and is then refused by the use case,
+        // because this school already has people in it. 409, not 403: the
+        // permission was never the problem.
+        assertThat(post("/v1/tenancy/schools/" + cbse().id() + "/first-admin", body(
+            "firstName", "Should", "lastName", "NotExist",
+            "email", "should.not.exist@oakridge.test"), hq).getStatusCode())
+            .isEqualTo(HttpStatus.CONFLICT);
+
+        assertThat(count("SELECT count(*) FROM staff WHERE school_id = ? AND email = ?",
+            cbse().id(), "should.not.exist@oakridge.test")).isZero();
+    }
+
+    /**
      * The one that is not about permissions.
      *
      * <p>A chain admin's token carries no school, and V009's policy reads

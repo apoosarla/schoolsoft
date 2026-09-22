@@ -2923,6 +2923,48 @@ export function goLive(schoolId: string): Promise<SchoolReadinessDto> {
   return apiFetch<SchoolReadinessDto>(`/v1/tenancy/schools/${schoolId}/go-live`, { method: "POST" });
 }
 
+/**
+ * Handing a school to its first administrator: who they are, how they sign
+ * in, and the checklist as it reads afterwards. `campusCreated` says whether
+ * the school's first campus was made along the way — a staff row needs one,
+ * so a school with none gets one here.
+ */
+export type SchoolHandoverDto = {
+  schoolId: string;
+  staff: StaffDto & { campusId: string | null };
+  userAccountId: string;
+  campusId: string;
+  campusCreated: boolean;
+  roleCode: string;
+  signsInWith: string;
+  readiness: SchoolReadinessDto;
+};
+
+export type FirstAdminRequest = {
+  firstName: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  employeeNo?: string;
+  roleCode?: string;
+  campusName?: string;
+};
+
+/**
+ * The chain's second write, and the last thing it can do to a school: appoint
+ * the person who will set it up. Refused with a 409 once the school has
+ * anybody who can run it — every later hire happens at the school.
+ */
+export function appointFirstAdmin(
+  schoolId: string,
+  req: FirstAdminRequest
+): Promise<SchoolHandoverDto> {
+  return apiFetch<SchoolHandoverDto>(`/v1/tenancy/schools/${schoolId}/first-admin`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
 export type CampusDto = { id: string; schoolId: string; name: string; isPrimary: boolean };
 
 export function listCampuses(schoolId: string): Promise<CampusDto[]> {

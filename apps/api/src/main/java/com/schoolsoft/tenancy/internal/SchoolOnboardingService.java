@@ -1,11 +1,16 @@
 package com.schoolsoft.tenancy.internal;
 
+import com.schoolsoft.iam.api.AccountProvisioning;
 import com.schoolsoft.iam.api.Authz;
+import com.schoolsoft.people.api.StaffDto;
+import com.schoolsoft.people.api.StaffOnboarding;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.tenancy.api.OnboardingStepDto;
+import com.schoolsoft.tenancy.api.SchoolHandoverDto;
 import com.schoolsoft.tenancy.api.SchoolReadinessDto;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -26,12 +31,25 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SchoolOnboardingService {
 
+    /** The permission that makes somebody able to run a school, not the name of a role. */
+    private static final String RUNS_THE_SCHOOL = "structure.manage";
+
+    /** What a chain gets if it names no role: the head of school. */
+    private static final String DEFAULT_ROLE = "principal";
+
     private final JdbcTemplate jdbc;
     private final Authz authz;
+    private final SchoolRepository schools;
+    private final StaffOnboarding staff;
+    private final AccountProvisioning accounts;
 
-    public SchoolOnboardingService(JdbcTemplate jdbc, Authz authz) {
+    public SchoolOnboardingService(JdbcTemplate jdbc, Authz authz, SchoolRepository schools,
+                                   StaffOnboarding staff, AccountProvisioning accounts) {
         this.jdbc = jdbc;
         this.authz = authz;
+        this.schools = schools;
+        this.staff = staff;
+        this.accounts = accounts;
     }
 
     // ----------------------------------------------------------- readiness
@@ -143,6 +161,77 @@ public class SchoolOnboardingService {
         return readiness(schoolId);
     }
 
+    // ------------------------------------------------------------ handover
+
+    /**
+     * Hands a newly opened school to the first person who can run it.
+     *
+     * <h2>Why this exists at all</h2>
+     * Every other account in a school is created by somebody already inside
+     * it — the office admits a student, the head grants a role. The first one
+     * cannot be: a school opened by its chain has nobody in it, so
+     * {@code ADMIN_ACCOUNT} was a checklist step no screen could ever tick and
+     * every environment answered with hand-written SQL. This is that act,
+     * named, audited and refused once it has happened.
+     *
+     * <h2>Why it also creates a campus</h2>
+     * {@code staff.campus_id} is NOT NULL — a person works somewhere — so a
+     * school with no campus cannot hold a staff row at all. Creating the
+     * school's first campus here is not scope creep but the same act: the
+     * alternative is a chain admin who can appoint a head only after somebody
+     * who does not exist yet has made a campus. An existing campus is used as
+     * it stands and nothing is created.
+     *
+     * <h2>Once only</h2>
+     * The guard is {@code ADMIN_ACCOUNT}'s own probe, so the question asked is
+     * the checklist's: has this school anybody holding
+     * {@code structure.manage}. Once it has, this door is closed and the rest
+     * of the school's staff are hired on the school's own screens by the
+     * person who came through it.
+     */
+    @Transactional
+    public SchoolHandoverDto handOver(UUID schoolId, String firstName, String lastName, String email,
+                                      String phone, String employeeNo, String roleCode, String campusName) {
+        school(schoolId);
+
+        long alreadyThere = jdbc.queryForObject(OnboardingStep.ADMIN_ACCOUNT.probe(), Long.class, schoolId);
+        if (alreadyThere > 0) {
+            throw new ConflictException(
+                "This school already has somebody who can run it. Further staff are added at the school, "
+                + "by the person who holds it — this door opens once.");
+        }
+
+        String role = roleCode == null || roleCode.isBlank() ? DEFAULT_ROLE : roleCode.trim();
+        if (!accounts.roleHolds(role, RUNS_THE_SCHOOL)) {
+            throw new ConflictException(
+                "The role '" + role + "' does not carry " + RUNS_THE_SCHOOL + ", so somebody holding it "
+                + "could not set the school up. Name a role that does.");
+        }
+
+        List<UUID> existingCampus = jdbc.queryForList(
+            "SELECT id FROM campus WHERE school_id = ? ORDER BY is_primary DESC, name LIMIT 1",
+            UUID.class, schoolId);
+        boolean campusCreated = existingCampus.isEmpty();
+        UUID campusId = campusCreated
+            ? schools.createCampus(schoolId,
+                campusName == null || campusName.isBlank() ? "Main Campus" : campusName.trim(), true).id()
+            : existingCampus.get(0);
+
+        StaffDto created = staff.create(new StaffOnboarding.NewStaff(
+            schoolId, campusId,
+            employeeNo == null || employeeNo.isBlank() ? "EMP-001" : employeeNo.trim(),
+            firstName, lastName, blankToNull(email), blankToNull(phone),
+            "permanent", LocalDate.now()));
+
+        UUID accountId = accounts.createStaffAccount(schoolId, created.id(), email, phone);
+        accounts.grantSchoolRole(created.id(), schoolId, role);
+
+        return new SchoolHandoverDto(
+            schoolId, created, accountId, campusId, campusCreated, role,
+            created.email() == null ? created.phone() : created.email(),
+            readiness(schoolId));
+    }
+
     // ------------------------------------------------------------- helpers
 
     private record SchoolState(String lifecycle, Instant wentLiveAt) {}
@@ -156,6 +245,10 @@ public class SchoolOnboardingService {
             schoolId);
         if (rows.isEmpty()) throw new NotFoundException("School not found: " + schoolId);
         return rows.get(0);
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     private Map<String, String> skips(UUID schoolId) {

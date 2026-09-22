@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ApiError,
   SchoolDto,
+  appointFirstAdmin,
   createMySchool,
   getSchoolReadiness,
   getSession,
@@ -98,6 +99,7 @@ export default function ChainPage() {
           return created.name;
         }}
         loadReadiness={getSchoolReadiness}
+        onAppointAdmin={appointFirstAdmin}
       />
     </main>
   );

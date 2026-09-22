@@ -5,6 +5,7 @@ import com.schoolsoft.iam.api.DirectoryScope;
 import com.schoolsoft.people.api.GuardianDto;
 import com.schoolsoft.people.api.PeopleController;
 import com.schoolsoft.people.api.StaffDto;
+import com.schoolsoft.people.api.StaffOnboarding;
 import com.schoolsoft.people.api.StudentDto;
 import com.schoolsoft.people.api.UserDirectoryEntryDto;
 import com.schoolsoft.tenancy.api.NumberSeries;
@@ -117,6 +118,48 @@ public class PeopleRepository {
         return findStudent(id).orElseThrow();
     }
 
+    /**
+     * Puts a member of staff on the books. Reached from outside the school
+     * only through {@link com.schoolsoft.people.api.StaffOnboarding}, which is
+     * the chain HQ handing a newly opened school its first keyholder — the
+     * office's own hiring runs through the school's screens.
+     */
+    public StaffDto createStaff(StaffOnboarding.NewStaff staff) {
+        UUID id = UUID.randomUUID();
+        jdbc.update(
+            "INSERT INTO staff (id, school_id, campus_id, employee_no, first_name, last_name, " +
+            "                   email, phone, employment_type, joined_on) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            id, staff.schoolId(), staff.campusId(), staff.employeeNo(), staff.firstName(), staff.lastName(),
+            staff.email(), staff.phone(), staff.employmentType(),
+            staff.joinedOn() == null ? null : Date.valueOf(staff.joinedOn())
+        );
+        return findStaff(id).orElseThrow();
+    }
+
+    private static RowMapper<StaffDto> staffMapper() {
+        return (rs, i) -> new StaffDto(
+            UUID.fromString(rs.getString("id")),
+            UUID.fromString(rs.getString("school_id")),
+            rs.getString("employee_no"),
+            rs.getString("first_name"),
+            rs.getString("last_name"),
+            rs.getString("email"),
+            rs.getString("phone"),
+            rs.getString("employment_type"),
+            rs.getDate("joined_on") == null ? null : rs.getDate("joined_on").toLocalDate(),
+            rs.getBoolean("is_active"),
+            rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id"))
+        );
+    }
+
+    public Optional<StaffDto> findStaff(UUID id) {
+        return jdbc.query(
+            "SELECT id, school_id, employee_no, first_name, last_name, email, phone, " +
+            "       employment_type, joined_on, is_active, campus_id FROM staff WHERE id = ?",
+            staffMapper(), id).stream().findFirst();
+    }
+
     public List<StudentDto> studentsOfGuardian(UUID guardianId) {
         return jdbc.query(
             "SELECT s.id, s.school_id, s.admission_no, s.first_name, s.middle_name, s.last_name, " +
@@ -190,20 +233,7 @@ public class PeopleRepository {
             args.addAll(scope);
         }
         sql.append(" ORDER BY first_name");
-        RowMapper<StaffDto> mapper = (rs, i) -> new StaffDto(
-            UUID.fromString(rs.getString("id")),
-            UUID.fromString(rs.getString("school_id")),
-            rs.getString("employee_no"),
-            rs.getString("first_name"),
-            rs.getString("last_name"),
-            rs.getString("email"),
-            rs.getString("phone"),
-            rs.getString("employment_type"),
-            rs.getDate("joined_on") == null ? null : rs.getDate("joined_on").toLocalDate(),
-            rs.getBoolean("is_active"),
-            rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id"))
-        );
-        return jdbc.query(sql.toString(), mapper, args.toArray());
+        return jdbc.query(sql.toString(), staffMapper(), args.toArray());
     }
 
     /**

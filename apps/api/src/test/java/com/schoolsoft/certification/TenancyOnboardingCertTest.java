@@ -434,6 +434,55 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
         }
     }
 
+    /**
+     * The handover. A school opened by its chain has nobody in it, so the
+     * step that asks for "somebody who can run the school" was one no screen
+     * could tick — every environment ticked it with hand-written SQL. This is
+     * that act through the front door: the chain appoints one person, that
+     * person signs in while the school is still draft and starts building it,
+     * and the door shuts behind them.
+     */
+    @Test @Tag("P1")
+    void cert_TEN_16_chainAppointsTheFirstAdministratorAndTheDoorShutsBehindThem() {
+        UUID schoolId = createProbeSchool("cert-probe-keys");
+        String headEmail = "probe.keys+" + schoolId + "@oakridge.test";
+        try {
+            String hq = chainAdminToken();
+            var before = get("/v1/tenancy/schools/" + schoolId + "/readiness", hq);
+            assertThat(stepOf(before.getBody(), "admin_account").get("done").asBoolean()).isFalse();
+            assertThat(stepOf(before.getBody(), "campus").get("done").asBoolean()).isFalse();
+
+            var handed = post("/v1/tenancy/schools/" + schoolId + "/first-admin", Map.of(
+                "firstName", "Probe", "lastName", "Keyholder",
+                "email", headEmail, "roleCode", "principal"), hq);
+            assertThat(handed.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            // A staff row needs a campus, so the first campus comes with the
+            // first keyholder — two steps of the checklist, one act.
+            assertThat(handed.getBody().get("campusCreated").asBoolean()).isTrue();
+            assertThat(stepOf(handed.getBody().get("readiness"), "admin_account").get("done").asBoolean())
+                .isTrue();
+            assertThat(stepOf(handed.getBody().get("readiness"), "campus").get("done").asBoolean()).isTrue();
+
+            // The point of appointing them: they can set the school up, while
+            // it is still draft, with nobody else involved.
+            var signedIn = signIn(headEmail);
+            assertThat(signedIn.getStatusCode()).isEqualTo(HttpStatus.OK);
+            String head = signedIn.getBody().get("accessToken").asText();
+            assertThat(post("/v1/tenancy/schools/" + schoolId + "/grades",
+                Map.of("code", "1", "name", "Grade 1", "sortOrder", 1), head).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+            // And the door shuts: the chain appoints one person, not a staff list.
+            var second = post("/v1/tenancy/schools/" + schoolId + "/first-admin", Map.of(
+                "firstName", "Second", "email", "probe.second+" + schoolId + "@oakridge.test"), hq);
+            assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(count("SELECT count(*) FROM staff WHERE school_id = ?", schoolId)).isEqualTo(1);
+        } finally {
+            deleteProbeSchool(schoolId);
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void dropProbeChain() {

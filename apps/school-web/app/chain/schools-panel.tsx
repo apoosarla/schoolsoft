@@ -1,7 +1,13 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { CreateSchoolRequest, SchoolDto, SchoolReadinessDto } from "@/lib/api";
+import {
+  CreateSchoolRequest,
+  FirstAdminRequest,
+  SchoolDto,
+  SchoolHandoverDto,
+  SchoolReadinessDto,
+} from "@/lib/api";
 
 const BOARD_CODES = ["CBSE", "CIE", "ICSE", "IB", "STATE"];
 
@@ -17,7 +23,10 @@ const BOARD_CODES = ["CBSE", "CIE", "ICSE", "IB", "STATE"];
  *
  * What this cannot do is finish a school's setup — that is built on screens
  * belonging to the school, by the people who work there, and the checklist
- * here is read-only for that reason.
+ * here is read-only for that reason. With one exception, and it is the
+ * exception that makes the rest possible: the first person who can run the
+ * school has to be appointed from outside it, because until they exist there
+ * is nobody inside to do it.
  */
 export default function SchoolsPanel({
   schools,
@@ -25,12 +34,14 @@ export default function SchoolsPanel({
   error,
   onCreate,
   loadReadiness,
+  onAppointAdmin,
 }: {
   schools: SchoolDto[] | null;
   loading: boolean;
   error: string | null;
   onCreate: (req: CreateSchoolRequest) => Promise<string>;
   loadReadiness: (schoolId: string) => Promise<SchoolReadinessDto>;
+  onAppointAdmin: (schoolId: string, req: FirstAdminRequest) => Promise<SchoolHandoverDto>;
 }) {
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
@@ -174,7 +185,15 @@ export default function SchoolsPanel({
                           {state === "error" && (
                             <span className="hint">Could not read this school&apos;s checklist.</span>
                           )}
-                          {state && state !== "loading" && state !== "error" && <Checklist readiness={state} />}
+                          {state && state !== "loading" && state !== "error" && (
+                            <Checklist
+                              readiness={state}
+                              onAppoint={(req) => onAppointAdmin(s.id, req)}
+                              onAppointed={(next) =>
+                                setReadiness((r) => ({ ...r, [s.id]: next }))
+                              }
+                            />
+                          )}
                         </td>
                       </tr>
                     )}
@@ -205,10 +224,22 @@ function Lifecycle({ school }: { school: SchoolDto }) {
 }
 
 /**
- * What is left, read-only. Seeing that a school is waiting on its sections is
- * oversight; building them is the school's own work.
+ * What is left. Read-only but for one step: until the school has somebody who
+ * can run it, there is nobody there to do any of the rest, so the form that
+ * appoints that person lives here. Once it is done the form is gone, and
+ * every later hire happens on the school's own screens.
  */
-function Checklist({ readiness }: { readiness: SchoolReadinessDto }) {
+function Checklist({
+  readiness,
+  onAppoint,
+  onAppointed,
+}: {
+  readiness: SchoolReadinessDto;
+  onAppoint: (req: FirstAdminRequest) => Promise<SchoolHandoverDto>;
+  onAppointed: (readiness: SchoolReadinessDto) => void;
+}) {
+  const admin = readiness.steps.find((s) => s.key === "admin_account");
+  const campus = readiness.steps.find((s) => s.key === "campus");
   const blocking = readiness.steps.filter((s) => s.blocking);
   const open = blocking.filter((s) => !s.done);
   return (
@@ -230,6 +261,130 @@ function Checklist({ readiness }: { readiness: SchoolReadinessDto }) {
           </span>
         ))}
       </div>
+      {admin && !admin.done && (
+        <FirstAdminForm
+          onAppoint={onAppoint}
+          onAppointed={onAppointed}
+          why={admin.why}
+          needsCampus={!campus?.done}
+        />
+      )}
     </div>
+  );
+}
+
+/** The three built-in roles that carry `structure.manage`. A chain that built
+ *  its own role can type its code instead — the server checks the grant, not
+ *  the name, and says so if the role cannot set a school up. */
+const RUNS_THE_SCHOOL_ROLES = ["principal", "vice_principal", "it_admin"];
+
+function FirstAdminForm({
+  onAppoint,
+  onAppointed,
+  why,
+  needsCampus,
+}: {
+  onAppoint: (req: FirstAdminRequest) => Promise<SchoolHandoverDto>;
+  onAppointed: (readiness: SchoolReadinessDto) => void;
+  why: string;
+  /** A staff row hangs off a campus, so a school with none gets its first one
+   *  here. Asked rather than assumed: the school has a name for it, and it is
+   *  the name every section and timetable will carry afterwards. */
+  needsCampus: boolean;
+}) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [roleCode, setRoleCode] = useState(RUNS_THE_SCHOOL_ROLES[0]);
+  const [campusName, setCampusName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<SchoolHandoverDto | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const handover = await onAppoint({
+        firstName: firstName.trim(),
+        lastName: lastName.trim() || undefined,
+        email: email.trim(),
+        roleCode,
+        campusName: needsCampus ? campusName.trim() || undefined : undefined,
+      });
+      setDone(handover);
+      onAppointed(handover.readiness);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <p className="hint" style={{ marginBottom: 0 }}>
+        {done.staff.firstName} {done.staff.lastName ?? ""} can sign in as{" "}
+        <code>{done.signsInWith}</code> and set the school up
+        {done.campusCreated ? ", from the campus created with them" : ""}. Everybody else there is
+        added by them, on the school&apos;s own screens.
+      </p>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} style={{ marginTop: 14 }}>
+      <p className="hint" style={{ marginTop: 0 }}>
+        Hand the school over. {why}
+        {needsCampus
+          ? " They need a campus to work at, so this school's first one is created with them."
+          : ""}
+      </p>
+      <div className="form-row">
+        <input
+          placeholder="First name"
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          disabled={busy}
+          required
+        />
+        <input
+          placeholder="Last name"
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
+          disabled={busy}
+        />
+        <input
+          type="email"
+          placeholder="Email they sign in with"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={busy}
+          required
+          style={{ minWidth: 240 }}
+        />
+        {needsCampus && (
+          <input
+            placeholder="Campus name (Main Campus)"
+            value={campusName}
+            onChange={(e) => setCampusName(e.target.value)}
+            disabled={busy}
+            style={{ minWidth: 200 }}
+          />
+        )}
+        <select value={roleCode} onChange={(e) => setRoleCode(e.target.value)} disabled={busy}>
+          {RUNS_THE_SCHOOL_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+        <button type="submit" disabled={busy}>
+          {busy ? "Appointing…" : "Appoint"}
+        </button>
+      </div>
+      {error && <div className="error-banner">{error}</div>}
+    </form>
   );
 }
