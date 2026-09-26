@@ -1058,6 +1058,22 @@ are different claims:
   which appoints, signs the appointee in through the ordinary OTP door, and
   has them open a school and appoint its keyholder with no operator involved.
 
+- **An audited reason is still asked for with `window.prompt` in six places.**
+  Found 2026-09-22 walking a school's setup in the browser: the Setup screen's
+  Skip asked that way, and a driven browser answered the modal itself, so a
+  step was skipped with the reason `"not sure"` written into the audit log —
+  the one column an auditor actually reads, filled with something nobody
+  typed. Setup now asks inline, the way the calendar screen already asked for
+  a reopen reason. The other six are unchanged:
+  `school-web/app/attendance/page.tsx` (allow and refuse a correction),
+  `school-web/app/roles/page.tsx` (revoke a role),
+  `school-web/app/assessment/page.tsx` (reopen an assessment, unlock a report
+  card) and `parent-app/app/report-cards/page.tsx` (ask for a re-look). Each
+  sits in different surrounding markup — a table row, a grid cell — so it is
+  six small edits rather than one, and each wants its own look afterwards.
+  A blocking modal also cannot be styled, translated, or driven by a test,
+  which is the other half of why these should go.
+
 - **A chain's HQ cannot add a second HQ account.** Opened by the fix above.
   The vendor hands a chain over once, deliberately; growing the HQ afterwards
   is the customer's own business and has no endpoint — a chain whose single
