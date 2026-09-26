@@ -483,7 +483,92 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
         }
     }
 
+    /**
+     * The handover one level up, and the act that used to be hand-written SQL
+     * in every environment. A chain Schoolsoft has just provisioned is empty:
+     * no schools, and — the part that mattered — no accounts, so nobody can
+     * sign in to it at all. Appointing a school's first keyholder is the chain
+     * admin's job (TEN-16), which is unreachable while the chain has no chain
+     * admin, so a chain the operator could not hand over was a chain whose
+     * schools could never leave {@code draft}.
+     *
+     * <p>The assertion that matters is the chain of custody: the operator
+     * appoints one person and stops, that person signs in through the ordinary
+     * door, and everything after it happens inside the customer's chain
+     * without Schoolsoft.</p>
+     */
+    @Test @Tag("P1")
+    void cert_TEN_17_operatorHandsAProvisionedChainToItsCustomerOnce() {
+        dropProbeChain();
+        String operator = platformAdminToken();
+        var provisioned = post("/v1/platform-admin/chains",
+            Map.of("slug", PROBE_SLUG, "name", "Probe Chain", "planCode", "starter"), operator);
+        UUID chainId = UUID.fromString(provisioned.getBody().get("chainId").asText());
+        String hqEmail = "probe.hq@" + PROBE_SLUG + ".test";
+        try {
+            // Provisioned and nobody's: the state the console has to be able to see.
+            assertThat(get("/v1/platform-admin/chains/" + chainId + "/admins", operator).getBody()).isEmpty();
+
+            var appointed = post("/v1/platform-admin/chains/" + chainId + "/admins",
+                Map.of("email", hqEmail), operator);
+            assertThat(appointed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(appointed.getBody().get("signsInWith").asText()).isEqualTo(hqEmail);
+
+            // Through the ordinary door, not a token the test minted itself.
+            var signedIn = signInTo(PROBE_SLUG, hqEmail);
+            assertThat(signedIn.getStatusCode()).isEqualTo(HttpStatus.OK);
+            String hq = signedIn.getBody().get("accessToken").asText();
+
+            // And they can do the chain admin's whole job with no operator
+            // involved: open a school, and appoint the person who will run it.
+            var school = post("/v1/tenancy/schools",
+                Map.of("slug", "probe-handover", "name", "Probe Handover School", "boardCode", "CBSE"), hq);
+            assertThat(school.getStatusCode()).isEqualTo(HttpStatus.OK);
+            UUID schoolId = UUID.fromString(school.getBody().get("id").asText());
+
+            var handed = post("/v1/tenancy/schools/" + schoolId + "/first-admin", Map.of(
+                "firstName", "Probe", "lastName", "Keyholder",
+                "email", "probe.head@" + PROBE_SLUG + ".test", "roleCode", "principal"), hq);
+            assertThat(handed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(stepOf(handed.getBody().get("readiness"), "admin_account").get("done").asBoolean())
+                .isTrue();
+
+            // Recorded where the customer can read it, naming the operator who
+            // put an account they did not create into their chain.
+            var trail = inProbeChain(jdbc -> jdbc.queryForList(
+                "SELECT reason FROM audit_log WHERE action = 'chain.admin_appointed'", String.class));
+            assertThat(trail).hasSize(1);
+            assertThat(trail.get(0)).contains("admin@schoolsoft.dev");
+
+            // The door shuts: a chain is handed over once, and the second HQ
+            // account is the customer's own business.
+            var second = post("/v1/platform-admin/chains/" + chainId + "/admins",
+                Map.of("email", "probe.hq2@" + PROBE_SLUG + ".test"), operator);
+            assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(get("/v1/platform-admin/chains/" + chainId + "/admins", operator).getBody()).hasSize(1);
+        } finally {
+            dropProbeChain();
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** Signs in against a chain other than the fixture's — a probe chain has its own slug. */
+    private org.springframework.http.ResponseEntity<JsonNode> signInTo(String chainSlug, String identifier) {
+        post("/v1/auth/otp/start", Map.of("identifier", identifier, "chainSlug", chainSlug), null);
+        return post("/v1/auth/otp/verify",
+            Map.of("identifier", identifier, "chainSlug", chainSlug, "code", "000000"), null);
+    }
+
+    /** Reads the probe chain's own tables, the way {@code inChain} reads the fixture's. */
+    private <T> T inProbeChain(java.util.function.Function<org.springframework.jdbc.core.JdbcTemplate, T> body) {
+        TenantContext.set(TenantContext.trustedJob("chain_" + PROBE_SLUG, null));
+        try {
+            return body.apply(new org.springframework.jdbc.core.JdbcTemplate(dataSource));
+        } finally {
+            TenantContext.clear();
+        }
+    }
 
     private void dropProbeChain() {
         TenantContext.set(TenantContext.platformAdmin(null));

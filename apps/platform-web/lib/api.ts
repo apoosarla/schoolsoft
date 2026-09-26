@@ -196,3 +196,39 @@ export function createChainSchool(chainId: string, req: CreateSchoolRequest): Pr
 export function getChainSchoolReadiness(chainId: string, schoolId: string): Promise<SchoolReadinessDto> {
   return apiFetch<SchoolReadinessDto>(`/v1/platform-admin/chains/${chainId}/schools/${schoolId}/readiness`);
 }
+
+// --------------------------------------------------- handing a chain over
+
+export type ChainAdminDto = {
+  accountId: string;
+  email?: string;
+  phone?: string;
+  signsInWith: string;
+  active: boolean;
+  createdAt: string;
+};
+
+export type AppointChainAdminRequest = {
+  email?: string;
+  phone?: string;
+};
+
+/** Who runs this chain. Empty means it has been provisioned and not handed over. */
+export function listChainAdmins(chainId: string): Promise<ChainAdminDto[]> {
+  return apiFetch<ChainAdminDto[]>(`/v1/platform-admin/chains/${chainId}/admins`);
+}
+
+/**
+ * Creates the chain's HQ account — the one account nothing inside the chain
+ * could create, because every door into a chain is an account in it. Once, per
+ * chain: a second is refused.
+ */
+export function appointChainAdmin(
+  chainId: string,
+  req: AppointChainAdminRequest
+): Promise<ChainAdminDto> {
+  return apiFetch<ChainAdminDto>(`/v1/platform-admin/chains/${chainId}/admins`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}

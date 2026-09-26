@@ -1033,6 +1033,39 @@ are different claims:
   groups → our role `code`s, so group membership can auto-assign roles
   instead of the manual assignment `/roles` does today.
 
+- ~~**A newly provisioned chain has nobody who can hand its first school
+  over.**~~ Fixed 2026-09-22. Found walking the vendor onboarding path in the
+  browser: the platform console provisioned a chain and opened a school in it,
+  and stopped there. Appointing a school's first administrator is
+  `POST /v1/tenancy/schools/{id}/first-admin`, reachable only by a **chain
+  admin** — and nothing minted a `chain_admin` account. No endpoint, no form,
+  no seed path; the only one that existed (`hq@smoketest.test`) was INSERTed
+  by hand, and `cert_TEN_01` papered over it by issuing a token for an account
+  that does not exist. So every real onboarding stalled at a draft school
+  until somebody ran SQL against the customer's schema — the act the console
+  exists to replace.
+
+  Closed with the narrow half of the two options: `POST` and `GET
+  /v1/platform-admin/chains/{id}/admins`, platform-admin only, creating the
+  chain's one HQ account (`ChainHandoverService`) and refusing a second — the
+  same "the door shuts behind them" rule `first-admin` already enforces per
+  school. The alternative, letting a platform admin call `first-admin`
+  directly, was not taken: it would put the vendor inside a school's own
+  hiring. The handover writes its audit row into the **customer's** chain,
+  naming the operator in `reason`, because that is the row the customer can be
+  shown; `@Audited` could not do it, being a web interceptor that runs while
+  the request still stands in the `platform` schema. Certified by `TEN-17`,
+  which appoints, signs the appointee in through the ordinary OTP door, and
+  has them open a school and appoint its keyholder with no operator involved.
+
+- **A chain's HQ cannot add a second HQ account.** Opened by the fix above.
+  The vendor hands a chain over once, deliberately; growing the HQ afterwards
+  is the customer's own business and has no endpoint — a chain whose single
+  HQ address stops working needs Schoolsoft to run SQL, which is the shape of
+  problem the handover endpoint just removed one level up. The screen belongs
+  in school-web `/chain`, gated on something a chain admin holds, and it
+  should refuse the last one being removed.
+
 ---
 
 ## Gaps found during certification scenario design (2026-08-12)

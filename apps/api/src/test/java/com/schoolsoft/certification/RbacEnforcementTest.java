@@ -293,6 +293,37 @@ class RbacEnforcementTest extends AbstractCertificationTest {
     }
 
     /**
+     * Handing a chain over is the operator's, and only the operator's. A chain
+     * admin appointing another chain admin would be a chain's HQ growing its
+     * own membership, which is a real need with no endpoint yet; what it must
+     * not be is this one, which exists because a chain with nobody in it has
+     * nobody to ask.
+     */
+    @Test
+    @DisplayName("appointing a chain's HQ administrator is platform-admin only")
+    void chainHandoverIsPlatformAdminOnly() {
+        String hq = chainAdminToken();
+        String principal = principalToken(cbse());
+
+        // The chain's own admin is refused at the filter: this path is not one
+        // of CHAIN_ADMIN_PREFIXES, so the subject type never reaches the gate.
+        assertThat(post("/v1/platform-admin/chains/" + seed.chainId() + "/admins",
+            body("email", "should.not.exist.hq@oakridge.test"), hq).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // And a school's own head, who holds every permission inside their
+        // school, holds nothing above it.
+        assertThat(post("/v1/platform-admin/chains/" + seed.chainId() + "/admins",
+            body("email", "should.not.exist.hq@oakridge.test"), principal).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/platform-admin/chains/" + seed.chainId() + "/admins", principal).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        assertThat(count("SELECT count(*) FROM user_account WHERE email = ?",
+            "should.not.exist.hq@oakridge.test")).isZero();
+    }
+
+    /**
      * The one that is not about permissions.
      *
      * <p>A chain admin's token carries no school, and V009's policy reads

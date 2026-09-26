@@ -5,15 +5,19 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ApiError,
+  ChainAdminDto,
   ChainDto,
   ChainSchoolDto,
+  appointChainAdmin,
   clearToken,
   createChainSchool,
   getChainSchoolReadiness,
   isLoggedIn,
+  listChainAdmins,
   listChainSchools,
   listChains,
 } from "@/lib/api";
+import HandoverPanel from "../../../handover-panel";
 import SchoolsPanel from "../../../schools-panel";
 
 /**
@@ -30,7 +34,9 @@ export default function ChainSchoolsPage() {
   const [ready, setReady] = useState(false);
   const [chain, setChain] = useState<ChainDto | null>(null);
   const [schools, setSchools] = useState<ChainSchoolDto[] | null>(null);
+  const [admins, setAdmins] = useState<ChainAdminDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [adminsError, setAdminsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -48,6 +54,18 @@ export default function ChainSchoolsPage() {
     }
   }, [chainId]);
 
+  /** Asked separately from the schools: it is a different question about the
+   *  chain, and a chain with no HQ account still has schools worth listing. */
+  const refreshAdmins = useCallback(async () => {
+    setAdminsError(null);
+    try {
+      setAdmins(await listChainAdmins(chainId));
+    } catch (err) {
+      setAdmins(null);
+      setAdminsError(describeError(err));
+    }
+  }, [chainId]);
+
   useEffect(() => {
     if (!isLoggedIn()) {
       router.replace("/login");
@@ -57,8 +75,11 @@ export default function ChainSchoolsPage() {
   }, [router]);
 
   useEffect(() => {
-    if (ready) refresh();
-  }, [ready, refresh]);
+    if (ready) {
+      refresh();
+      refreshAdmins();
+    }
+  }, [ready, refresh, refreshAdmins]);
 
   function signOut() {
     clearToken();
@@ -91,6 +112,17 @@ export default function ChainSchoolsPage() {
           </div>
         </div>
       </div>
+
+      <HandoverPanel
+        admins={admins}
+        loading={loading && admins === null}
+        error={adminsError}
+        onAppoint={async (email) => {
+          const appointed = await appointChainAdmin(chainId, { email });
+          await refreshAdmins();
+          return appointed;
+        }}
+      />
 
       <SchoolsPanel
         schools={schools}

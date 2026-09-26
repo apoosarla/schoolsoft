@@ -2,6 +2,7 @@ package com.schoolsoft.tenancy.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.platform.tenancy.TenantContext;
+import com.schoolsoft.tenancy.internal.ChainHandoverService;
 import com.schoolsoft.tenancy.internal.SchoolOnboardingService;
 import com.schoolsoft.tenancy.internal.SchoolRepository;
 import com.schoolsoft.platform.web.ForbiddenException;
@@ -38,15 +39,17 @@ public class ChainAdminController {
     private final DataSource dataSource;
     private final SchoolRepository schools;
     private final SchoolOnboardingService onboarding;
+    private final ChainHandoverService handover;
 
     public ChainAdminController(ChainProvisioningService provisioningService, JdbcTemplate platformJdbc,
                                 DataSource dataSource, SchoolRepository schools,
-                                SchoolOnboardingService onboarding) {
+                                SchoolOnboardingService onboarding, ChainHandoverService handover) {
         this.provisioningService = provisioningService;
         this.platformJdbc = platformJdbc;
         this.dataSource = dataSource;
         this.schools = schools;
         this.onboarding = onboarding;
+        this.handover = handover;
     }
 
     private void requirePlatformAdmin() {
@@ -175,6 +178,58 @@ public class ChainAdminController {
     public SchoolReadinessDto schoolReadiness(@PathVariable UUID id, @PathVariable UUID schoolId) {
         requirePlatformAdmin();
         return inChain(id, chainJdbc -> onboarding.readiness(schoolId));
+    }
+
+    // -------------------------------------------------- handing a chain over
+
+    public record AppointChainAdminRequest(String email, String phone) {}
+
+    /**
+     * Who runs this chain, if anybody yet. Empty is the state a chain is in
+     * between being provisioned and being handed over, and it is the state
+     * the console has to be able to see: schools can be opened in such a
+     * chain, but none of them can leave {@code draft}, because appointing a
+     * school's first administrator is the chain admin's act and there is no
+     * chain admin to perform it.
+     */
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @GetMapping("/{id}/admins")
+    public List<ChainAdminDto> admins(@PathVariable UUID id) {
+        requirePlatformAdmin();
+        return inChain(id, chainJdbc -> handover.admins());
+    }
+
+    /**
+     * Hands the chain to the customer: creates the one {@code chain_admin}
+     * account that everything else inside the chain descends from.
+     *
+     * <p>This is the operator's only write of a person into a customer's
+     * chain, and it exists because nothing inside a chain could do it — a
+     * chain's every door is a {@code user_account} in it, so a chain with no
+     * accounts has no door. Its schools are the vendor's to create and the
+     * customer's to open; see {@link ChainHandoverService}.</p>
+     *
+     * <p>Not {@code @Audited}: that interceptor is a web interceptor and runs
+     * while this request still stands in the {@code platform} schema, which
+     * holds no {@code audit_log}. The service writes the row itself, inside
+     * the customer's chain, where the customer can read it.</p>
+     */
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @PostMapping("/{id}/admins")
+    public ChainAdminDto appointAdmin(@PathVariable UUID id, @RequestBody AppointChainAdminRequest req) {
+        requirePlatformAdmin();
+        String operator = operatorLabel();
+        return inChain(id, chainJdbc -> handover.appoint(req.email(), req.phone(), operator));
+    }
+
+    /** The operator's own address, for the audit row the customer will read. */
+    private String operatorLabel() {
+        var snap = TenantContext.get();
+        UUID operatorId = snap == null ? null : snap.userAccountId();
+        if (operatorId == null) return "unknown";
+        return platformJdbc.query("SELECT email FROM platform.platform_user WHERE id = ?",
+            (rs, i) -> rs.getString("email"), operatorId)
+            .stream().findFirst().orElse(operatorId.toString());
     }
 
     /**

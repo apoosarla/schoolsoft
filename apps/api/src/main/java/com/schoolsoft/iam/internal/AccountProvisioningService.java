@@ -45,6 +45,25 @@ public class AccountProvisioningService implements AccountProvisioning {
     }
 
     @Override
+    public UUID createChainAdminAccount(String email, String phone) {
+        String mail = blankToNull(email);
+        String number = blankToNull(phone);
+        if (mail == null && number == null) {
+            throw new IllegalArgumentException("An account needs an email address or a mobile number to sign in with");
+        }
+        UUID id = UUID.randomUUID();
+        // school_id stays null on purpose, and that null is what makes the
+        // account chain-wide: V009's policies read
+        // `school_id = current_school_id() OR current_school_id() IS NULL`,
+        // so a session with no school sees every school in the chain.
+        jdbc.update(
+            "INSERT INTO user_account (id, school_id, subject_type, subject_id, email, phone) " +
+            "VALUES (?, NULL, 'chain_admin', NULL, ?, ?)",
+            id, mail, number);
+        return id;
+    }
+
+    @Override
     public void grantSchoolRole(UUID staffId, UUID schoolId, String roleCode) {
         roles.assignRole(staffId, schoolId, roleCode, "school", schoolId);
     }
