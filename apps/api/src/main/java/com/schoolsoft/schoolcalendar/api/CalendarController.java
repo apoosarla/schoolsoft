@@ -4,6 +4,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.audit.api.AuditService;
 import com.schoolsoft.notification.api.NotificationService;
 import com.schoolsoft.schoolcalendar.internal.CalendarRepository;
+import com.schoolsoft.schoolcalendar.internal.WorkingDayPatternService;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
@@ -35,13 +36,16 @@ public class CalendarController {
 
     private final CalendarRepository repo;
     private final WorkingDayService workingDays;
+    private final WorkingDayPatternService patterns;
     private final NotificationService notifications;
     private final AuditService audit;
 
     public CalendarController(CalendarRepository repo, WorkingDayService workingDays,
+                              WorkingDayPatternService patterns,
                               NotificationService notifications, AuditService audit) {
         this.repo = repo;
         this.workingDays = workingDays;
+        this.patterns = patterns;
         this.notifications = notifications;
         this.audit = audit;
     }
@@ -67,7 +71,7 @@ public class CalendarController {
     @PreAuthorize("@perm.can('calendar.manage')")
     @PostMapping("/patterns")
     public WorkingDayPatternDto createPattern(@RequestBody CreatePatternRequest req) {
-        return repo.upsertPattern(req.schoolId(), req.campusId(), req.effectiveFrom(), req.effectiveTo(),
+        return patterns.create(req.schoolId(), req.campusId(), req.effectiveFrom(), req.effectiveTo(),
             req.weekdayMask(), req.saturdayRule(), req.saturdayWeeks(), req.notes());
     }
 
