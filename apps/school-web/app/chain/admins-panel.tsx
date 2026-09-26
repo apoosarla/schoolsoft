@@ -73,8 +73,12 @@ export default function AdminsPanel({ selfAccountId }: { selfAccountId: string }
   }
 
   function remove(admin: ChainAdminDto, reason: string) {
-    setRemoving(null);
-    run(`${admin.signsInWith} can no longer sign in.`, () => deactivateChainAdmin(admin.accountId, reason));
+    // Closed only once the write lands: a refusal — the last active account,
+    // say — keeps the field open with what was typed.
+    run(`${admin.signsInWith} can no longer sign in.`, async () => {
+      await deactivateChainAdmin(admin.accountId, reason);
+      setRemoving(null);
+    });
   }
 
   return (

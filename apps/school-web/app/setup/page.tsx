@@ -240,8 +240,12 @@ export default function SetupPage() {
   // ------------------------------------------------------------------ actions
 
   function skip(step: OnboardingStepDto, reason: string) {
-    setSkipping(null);
-    run(`"${step.label}" will not be done.`, () => skipSetupStep(session!.schoolId, step.key, reason));
+    // Closed only once the write lands: a refused skip keeps the field open
+    // with what was typed, rather than asking for the reason again.
+    run(`"${step.label}" will not be done.`, async () => {
+      await skipSetupStep(session!.schoolId, step.key, reason);
+      setSkipping(null);
+    });
   }
 
   function unskip(step: OnboardingStepDto) {
