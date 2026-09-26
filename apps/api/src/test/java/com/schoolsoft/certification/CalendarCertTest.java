@@ -282,6 +282,121 @@ class CalendarCertTest extends AbstractCertificationTest {
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
+    /**
+     * The school whose Saturdays are a set, not a rule.
+     *
+     * <p>V016 offered four answers — all, none, odd, even — and a school that
+     * teaches on the 2nd and 4th Saturday fits none of them. Its only options
+     * were to declare a {@code working_saturday} entry every month forever, or
+     * to accept a wrong denominator under every attendance percentage, so this
+     * pins the set being asked position by position. May 2027 is the month
+     * chosen because it has five Saturdays: the fifth is where a rule that
+     * wrapped, or a mask read modulo four, would show itself.</p>
+     */
+    @Test @Tag("P1")
+    void cert_CAL_09_namedSaturdaysAreClassifiedOneByOne() {
+        String token = principalToken(cie());
+        UUID schoolId = cie().id();
+
+        // The 2nd and 4th Saturday, and no others.
+        var pattern = post("/v1/calendar/patterns", body(
+            "schoolId", schoolId, "effectiveFrom", "2027-05-01",
+            "weekdayMask", "1111110", "saturdayRule", "nth", "saturdayWeeks", "01010",
+            "notes", "Certification: 2nd and 4th Saturdays"), token);
+        assertThat(pattern.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(pattern.getBody().get("saturdayWeeks").asText()).isEqualTo("01010");
+        UUID patternId = UUID.fromString(pattern.getBody().get("id").asText());
+
+        try {
+            // May 2027: Saturdays fall on the 1st, 8th, 15th, 22nd and 29th.
+            assertThat(dayStatus(schoolId, "2027-05-01", token).get("working").asBoolean()).isFalse();
+            assertThat(dayStatus(schoolId, "2027-05-08", token).get("working").asBoolean()).isTrue();
+            assertThat(dayStatus(schoolId, "2027-05-15", token).get("working").asBoolean()).isFalse();
+            assertThat(dayStatus(schoolId, "2027-05-22", token).get("working").asBoolean()).isTrue();
+            // The fifth Saturday is asked at position five, and answered no.
+            assertThat(dayStatus(schoolId, "2027-05-29", token).get("working").asBoolean()).isFalse();
+
+            // The label says which Saturday it was, because "nth" says nothing.
+            assertThat(dayStatus(schoolId, "2027-05-08", token).get("reason").asText())
+                .contains("2nd Saturday");
+
+            // Weekdays are untouched by any of it.
+            assertThat(dayStatus(schoolId, "2027-05-06", token).get("working").asBoolean()).isTrue();
+
+            // A set nobody named is not a pattern, and a set under a rule that
+            // already answers the question would read as though it were in force.
+            assertThat(post("/v1/calendar/patterns", body(
+                "schoolId", schoolId, "effectiveFrom", "2027-06-01",
+                "weekdayMask", "1111110", "saturdayRule", "nth"), token).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(post("/v1/calendar/patterns", body(
+                "schoolId", schoolId, "effectiveFrom", "2027-06-01",
+                "weekdayMask", "1111110", "saturdayRule", "odd", "saturdayWeeks", "01010"), token)
+                .getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(count("SELECT count(*) FROM working_day_pattern WHERE school_id = ? "
+                + "AND effective_from = '2027-06-01'", schoolId)).isZero();
+        } finally {
+            inChainDo(jdbc -> jdbc.update("DELETE FROM working_day_pattern WHERE id = ?", patternId));
+        }
+    }
+
+    /**
+     * One week at a time. A school changes its week on a date — it stops
+     * teaching on Saturdays from the new term, say — and both facts have to
+     * survive: dates after the change follow the new pattern, dates before it
+     * still follow the old one, because last term's attendance percentages
+     * were computed against last term's week and must not move.
+     *
+     * <p>Before this, every saved pattern stayed open forever. Two patterns
+     * then answered for the same day, and which one won came down to the order
+     * Postgres happened to return them in.</p>
+     */
+    @Test @Tag("P1")
+    void cert_CAL_10_aNewPatternClosesTheOneBeforeIt() {
+        String token = principalToken(cie());
+        UUID schoolId = cie().id();
+
+        var first = post("/v1/calendar/patterns", body(
+            "schoolId", schoolId, "effectiveFrom", "2027-07-01",
+            "weekdayMask", "1111110", "saturdayRule", "all",
+            "notes", "Certification: six-day week"), token);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID firstId = UUID.fromString(first.getBody().get("id").asText());
+        assertThat(first.getBody().hasNonNull("effectiveTo")).isFalse();
+
+        var second = post("/v1/calendar/patterns", body(
+            "schoolId", schoolId, "effectiveFrom", "2027-09-01",
+            "weekdayMask", "1111100", "saturdayRule", "none",
+            "notes", "Certification: five-day week from September"), token);
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID secondId = UUID.fromString(second.getBody().get("id").asText());
+
+        try {
+            // The old week ended the day before the new one began.
+            assertThat(queryOne("SELECT effective_to FROM working_day_pattern WHERE id = ?",
+                java.sql.Date.class, firstId).toLocalDate())
+                .isEqualTo(java.time.LocalDate.of(2027, 8, 31));
+
+            // Exactly one pattern answers for any given day.
+            assertThat(count("SELECT count(*) FROM working_day_pattern WHERE school_id = ? "
+                + "AND effective_from <= '2027-09-04'::date "
+                + "AND (effective_to IS NULL OR effective_to >= '2027-09-04'::date)", schoolId))
+                .isEqualTo(1);
+
+            // August Saturdays still follow the six-day week they were taught under.
+            assertThat(dayStatus(schoolId, "2027-08-07", token).get("working").asBoolean()).isTrue();
+            // September ones follow the new five-day week.
+            assertThat(dayStatus(schoolId, "2027-09-04", token).get("working").asBoolean()).isFalse();
+            // Weekdays either side are unaffected.
+            assertThat(dayStatus(schoolId, "2027-08-05", token).get("working").asBoolean()).isTrue();
+            assertThat(dayStatus(schoolId, "2027-09-02", token).get("working").asBoolean()).isTrue();
+        } finally {
+            inChainDo(jdbc -> jdbc.update("DELETE FROM working_day_pattern WHERE id IN (?, ?)",
+                firstId, secondId));
+        }
+    }
+
     private JsonNode dayStatus(UUID schoolId, String date, String token) {
         return dayStatus(schoolId, date, null, null, token);
     }

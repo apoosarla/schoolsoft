@@ -1229,10 +1229,17 @@ export type WorkingDayPatternDto = {
   /** Mon..Sun, '1' for a teaching day. */
   weekdayMask: string;
   saturdayRule: string;
+  /**
+   * Which Saturdays, when the answer is a set rather than a rule: five
+   * characters over the 1st..5th Saturday of the month, '1' = taught. Only
+   * under the `nth` rule; null under the other four.
+   */
+  saturdayWeeks: string | null;
   notes: string | null;
 };
 
-export const SATURDAY_RULES = ["none", "odd", "even", "all"] as const;
+/** `nth` is "these Saturdays", spelled out in `saturdayWeeks`. */
+export const SATURDAY_RULES = ["none", "odd", "even", "all", "nth"] as const;
 
 export function listCalendarEntries(schoolId: string, from: string, to: string): Promise<CalendarEntryDto[]> {
   const params = new URLSearchParams({ schoolId, from, to });
@@ -1282,6 +1289,7 @@ export function createWorkingDayPattern(req: {
   effectiveTo?: string;
   weekdayMask: string;
   saturdayRule: string;
+  saturdayWeeks?: string;
   notes?: string;
 }): Promise<WorkingDayPatternDto> {
   return apiFetch<WorkingDayPatternDto>("/v1/calendar/patterns", {

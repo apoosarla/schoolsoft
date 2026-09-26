@@ -24,7 +24,7 @@ public class CalendarRepository {
                                 UUID gradeId, UUID campusId) {}
 
     public record Pattern(UUID id, UUID campusId, LocalDate effectiveFrom, LocalDate effectiveTo,
-                          String weekdayMask, String saturdayRule) {}
+                          String weekdayMask, String saturdayRule, String saturdayWeeks) {}
 
     private static final RowMapper<CalendarEntry> ENTRY = (rs, i) -> new CalendarEntry(
         UUID.fromString(rs.getString("id")),
@@ -41,7 +41,8 @@ public class CalendarRepository {
         rs.getDate("effective_from").toLocalDate(),
         rs.getDate("effective_to") == null ? null : rs.getDate("effective_to").toLocalDate(),
         rs.getString("weekday_mask"),
-        rs.getString("saturday_rule")
+        rs.getString("saturday_rule"),
+        rs.getString("saturday_weeks")
     );
 
     private static final RowMapper<CalendarEntryDto> ENTRY_DTO = (rs, i) -> new CalendarEntryDto(
@@ -71,11 +72,13 @@ public class CalendarRepository {
         rs.getDate("effective_to") == null ? null : rs.getDate("effective_to").toLocalDate(),
         rs.getString("weekday_mask"),
         rs.getString("saturday_rule"),
+        rs.getString("saturday_weeks"),
         rs.getString("notes")
     );
 
     private static final String PATTERN_COLS =
-        "id, school_id, campus_id, effective_from, effective_to, weekday_mask, saturday_rule, notes";
+        "id, school_id, campus_id, effective_from, effective_to, weekday_mask, saturday_rule, "
+        + "saturday_weeks, notes";
 
     // ------------------------------------------------------------ working days
 
@@ -85,12 +88,18 @@ public class CalendarRepository {
      * {@code WorkingDayService#patternInForce} is the right one: a
      * campus-specific pattern beats the school-wide one, and a newer
      * effective_from beats an older.
+     *
+     * <p>{@code created_at} breaks the tie, and it is not decoration: two
+     * patterns starting on the same day sorted only by {@code effective_from}
+     * come back in whatever order Postgres felt like, so a school could be
+     * told it teaches on Saturday and told it does not, by two identical
+     * requests. The later write wins, which is what a correction means.</p>
      */
     public List<Pattern> patternsFor(UUID schoolId, UUID campusId) {
         return jdbc.query(
             "SELECT " + PATTERN_COLS + " FROM working_day_pattern " +
             "WHERE school_id = ? AND (campus_id IS NULL OR campus_id = ?) " +
-            "ORDER BY (campus_id IS NOT NULL) DESC, effective_from DESC",
+            "ORDER BY (campus_id IS NOT NULL) DESC, effective_from DESC, created_at DESC",
             PATTERN, schoolId, campusId
         );
     }
@@ -116,20 +125,54 @@ public class CalendarRepository {
 
     public WorkingDayPatternDto upsertPattern(UUID schoolId, UUID campusId, LocalDate effectiveFrom,
                                               LocalDate effectiveTo, String weekdayMask,
-                                              String saturdayRule, String notes) {
+                                              String saturdayRule, String saturdayWeeks, String notes) {
         if (!weekdayMask.matches("[01]{7}")) {
             throw new IllegalArgumentException(
                 "weekdayMask must be 7 characters of 0/1, Monday first — got: " + weekdayMask);
         }
-        if (!List.of("all", "none", "odd", "even").contains(saturdayRule)) {
-            throw new IllegalArgumentException("saturdayRule must be all | none | odd | even");
+        if (!List.of("all", "none", "odd", "even", "nth").contains(saturdayRule)) {
+            throw new IllegalArgumentException("saturdayRule must be all | none | odd | even | nth");
         }
+        // 'nth' is the school whose Saturdays are a set rather than a rule —
+        // the 2nd and 4th, or the 1st alone. Told here rather than left to the
+        // CHECK constraint, so the caller reads which Saturdays it failed to
+        // name instead of a constraint's name out of a 409.
+        String weeks = saturdayWeeks == null || saturdayWeeks.isBlank() ? null : saturdayWeeks.trim();
+        if ("nth".equals(saturdayRule)) {
+            if (weeks == null || !weeks.matches("[01]{5}")) {
+                throw new IllegalArgumentException(
+                    "saturdayWeeks must be 5 characters of 0/1 — the 1st to 5th Saturday of the month, "
+                    + "'1' = taught — when saturdayRule is 'nth'. Got: " + saturdayWeeks);
+            }
+            if (!weeks.contains("1")) {
+                throw new IllegalArgumentException(
+                    "saturdayWeeks names no Saturday at all; a school that teaches on none of them "
+                    + "has saturdayRule 'none'.");
+            }
+        } else if (weeks != null) {
+            throw new IllegalArgumentException(
+                "saturdayWeeks only means something under saturdayRule 'nth'; the '" + saturdayRule
+                + "' rule already says which Saturdays count.");
+        }
+        // The week this school keeps changed on a date, so the week it kept
+        // before that ended the day before. Without this every pattern stays
+        // open forever and the screen shows three of them all "in force",
+        // leaving the reader to work out which one an attendance percentage
+        // was actually computed against. Only patterns that started earlier
+        // are closed: one starting on the same day or later is a correction to
+        // a future week, and the ordering above decides between those.
+        jdbc.update(
+            "UPDATE working_day_pattern SET effective_to = ?::date - 1 " +
+            "WHERE school_id = ? AND effective_to IS NULL AND effective_from < ?::date " +
+            "  AND campus_id IS NOT DISTINCT FROM ?",
+            Date.valueOf(effectiveFrom), schoolId, Date.valueOf(effectiveFrom), campusId);
+
         UUID id = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO working_day_pattern (id, school_id, campus_id, effective_from, effective_to, " +
-            "  weekday_mask, saturday_rule, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "  weekday_mask, saturday_rule, saturday_weeks, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             id, schoolId, campusId, Date.valueOf(effectiveFrom),
-            effectiveTo == null ? null : Date.valueOf(effectiveTo), weekdayMask, saturdayRule, notes
+            effectiveTo == null ? null : Date.valueOf(effectiveTo), weekdayMask, saturdayRule, weeks, notes
         );
         return jdbc.queryForObject(
             "SELECT " + PATTERN_COLS + " FROM working_day_pattern WHERE id = ?", PATTERN_DTO, id);

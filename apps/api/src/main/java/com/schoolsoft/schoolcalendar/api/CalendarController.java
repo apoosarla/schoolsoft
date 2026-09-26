@@ -54,16 +54,21 @@ public class CalendarController {
         return repo.listPatterns(schoolId);
     }
 
+    /**
+     * {@code saturdayRule} is {@code all | none | odd | even | nth};
+     * {@code saturdayWeeks} is the 1st..5th-Saturday mask that {@code nth}
+     * requires and the other four rules forbid.
+     */
     public record CreatePatternRequest(
         @NotNull UUID schoolId, UUID campusId, @NotNull LocalDate effectiveFrom, LocalDate effectiveTo,
-        @NotBlank String weekdayMask, @NotBlank String saturdayRule, String notes
+        @NotBlank String weekdayMask, @NotBlank String saturdayRule, String saturdayWeeks, String notes
     ) {}
 
     @PreAuthorize("@perm.can('calendar.manage')")
     @PostMapping("/patterns")
     public WorkingDayPatternDto createPattern(@RequestBody CreatePatternRequest req) {
         return repo.upsertPattern(req.schoolId(), req.campusId(), req.effectiveFrom(), req.effectiveTo(),
-            req.weekdayMask(), req.saturdayRule(), req.notes());
+            req.weekdayMask(), req.saturdayRule(), req.saturdayWeeks(), req.notes());
     }
 
     // -------------------------------------------------------- calendar entries

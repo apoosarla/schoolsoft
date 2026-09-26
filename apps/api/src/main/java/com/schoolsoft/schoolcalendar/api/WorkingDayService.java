@@ -142,6 +142,16 @@ public class WorkingDayService {
         return null;
     }
 
+    /** "2nd", for the day label — which Saturday it is, since the set has no name. */
+    private static String ordinal(int n) {
+        return switch (n) {
+            case 1 -> "1st";
+            case 2 -> "2nd";
+            case 3 -> "3rd";
+            default -> n + "th";
+        };
+    }
+
     private DayStatus applyPattern(CalendarRepository.Pattern pattern, LocalDate date) {
         int index = date.getDayOfWeek().getValue() - 1;              // Mon=0 .. Sun=6
         boolean workingByMask = pattern.weekdayMask().charAt(index) == '1';
@@ -154,11 +164,19 @@ public class WorkingDayService {
                 case "none" -> false;
                 case "odd"  -> nth % 2 == 1;
                 case "even" -> nth % 2 == 0;
+                // The set, not a rule: a school teaching only the 2nd and 4th
+                // Saturday, or only the 1st. A month with a 5th Saturday asks
+                // position 5, which the mask answers like any other.
+                case "nth"  -> pattern.saturdayWeeks() != null
+                    && pattern.saturdayWeeks().length() >= nth
+                    && pattern.saturdayWeeks().charAt(nth - 1) == '1';
                 default     -> true;
             };
+            String which = "nth".equals(pattern.saturdayRule())
+                ? ordinal(nth) + " Saturday"
+                : pattern.saturdayRule() + " rule";
             return new DayStatus(date, working,
-                working ? "Working Saturday (" + pattern.saturdayRule() + " rule)"
-                        : "Off Saturday (" + pattern.saturdayRule() + " rule)", null);
+                (working ? "Working Saturday (" : "Off Saturday (") + which + ")", null);
         }
         return new DayStatus(date, true, "School day", null);
     }

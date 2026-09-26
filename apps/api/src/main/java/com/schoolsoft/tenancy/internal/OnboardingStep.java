@@ -77,7 +77,9 @@ public enum OnboardingStep {
 
     WORKING_WEEK("working_week", "Working week", false, "pattern", "patterns",
         "Which days are taught is the denominator under every attendance percentage. Until "
-            + "it is set the school runs on the six-day default.",
+            + "it is set, every date falls back to a Monday-Friday week — so a school that "
+            + "teaches on Saturdays is marking attendance against the wrong denominator until "
+            + "it says so here.",
         "SELECT count(*) FROM working_day_pattern WHERE school_id = ?"),
 
     THEME("theme", "Theme", false, "theme", "themes",

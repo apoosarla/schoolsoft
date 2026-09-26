@@ -89,6 +89,8 @@ export default function CalendarPage() {
     effectiveTo: "",
     weekdays: [true, true, true, true, true, false, false],
     saturdayRule: "none",
+    /** 1st..5th Saturday of the month, for the `nth` rule. */
+    saturdayWeeks: [false, false, false, false, false],
     notes: "",
   });
   const [busy, setBusy] = useState(false);
@@ -616,7 +618,7 @@ export default function CalendarPage() {
                   {p.effectiveFrom} → {p.effectiveTo ?? "open"}
                 </td>
                 <td>{maskLabel(p.weekdayMask)}</td>
-                <td>{p.saturdayRule}</td>
+                <td>{saturdayLabel(p.saturdayRule, p.saturdayWeeks)}</td>
                 <td>{p.notes ?? "—"}</td>
               </tr>
             ))}
@@ -656,21 +658,50 @@ export default function CalendarPage() {
           >
             {SATURDAY_RULES.map((r) => (
               <option key={r} value={r}>
-                Saturdays: {r}
+                Saturdays: {r === "nth" ? "these ones…" : r}
               </option>
             ))}
           </select>
+          {/* The school whose Saturdays are a set rather than a rule: one a
+              month, the 2nd and 4th, whatever it actually does. */}
+          {patternForm.saturdayRule === "nth" &&
+            SATURDAY_ORDINALS.map((label, i) => (
+              <label key={label} className="check">
+                <input
+                  type="checkbox"
+                  checked={patternForm.saturdayWeeks[i]}
+                  onChange={(e) => {
+                    const next = [...patternForm.saturdayWeeks];
+                    next[i] = e.target.checked;
+                    setPatternForm({ ...patternForm, saturdayWeeks: next });
+                  }}
+                />
+                {label}
+              </label>
+            ))}
           <button
             type="button"
-            disabled={busy}
+            disabled={
+              busy ||
+              (patternForm.saturdayRule === "nth" && !patternForm.saturdayWeeks.some(Boolean))
+            }
             onClick={() =>
               run(async () => {
+                const nth = patternForm.saturdayRule === "nth";
                 await createWorkingDayPattern({
                   schoolId: session.schoolId,
                   effectiveFrom: patternForm.effectiveFrom,
                   effectiveTo: patternForm.effectiveTo || undefined,
-                  weekdayMask: patternForm.weekdays.map((d) => (d ? "1" : "0")).join(""),
+                  // A named Saturday is a taught Saturday, so the weekday mask
+                  // has to say Saturday is on — otherwise the mask refuses the
+                  // day before the rule is ever consulted.
+                  weekdayMask: patternForm.weekdays
+                    .map((d, i) => (d || (nth && i === 5) ? "1" : "0"))
+                    .join(""),
                   saturdayRule: patternForm.saturdayRule,
+                  saturdayWeeks: nth
+                    ? patternForm.saturdayWeeks.map((d) => (d ? "1" : "0")).join("")
+                    : undefined,
                   notes: patternForm.notes || undefined,
                 });
                 listWorkingDayPatterns(session.schoolId).then(setPatterns);
@@ -684,6 +715,15 @@ export default function CalendarPage() {
       </div>
     </main>
   );
+}
+
+const SATURDAY_ORDINALS = ["1st", "2nd", "3rd", "4th", "5th"];
+
+/** "2nd, 4th" reads as what the school does; "nth" reads as nothing. */
+function saturdayLabel(rule: string, weeks: string | null): string {
+  if (rule !== "nth") return rule;
+  const named = SATURDAY_ORDINALS.filter((_, i) => weeks?.[i] === "1");
+  return named.length ? named.join(", ") : "none named";
 }
 
 /** Monday-first offset, so the 1st lands under the right column. */

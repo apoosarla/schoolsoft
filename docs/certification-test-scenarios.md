@@ -106,6 +106,8 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | CAL-06 | Campus-specific holiday in a multi-campus school applies to one campus. `GAP-01`, `GAP-24` | P2 |
 | CAL-07 | Calendar visible in the parent app and on the public site; a mid-year calendar amendment reflects within the app's cache window. `GAP-01` | P2 |
 | CAL-08 | Events (sports day, annual day, PTM) published with RSVP; announcement reach and read counts reconcile with the recipient roster. | P2 |
+| CAL-09 | A school whose Saturdays are a set rather than a rule — the 2nd and 4th, or one a month — names them, and every date is classified against that set: a named Saturday is a working day, an unnamed one is not, and a month with five Saturdays asks the fifth position rather than wrapping. | P1 |
+| CAL-10 | A new working-day pattern supersedes the one before it: the earlier pattern's window is closed the day before the new one starts, dates before the change are still classified by the old week, and two patterns never both answer for the same day. | P1 |
 
 ## 6. Timetable (CERT-TT)
 
