@@ -42,6 +42,11 @@ npm run school:dev     # also platform:dev, teacher:dev, parent:dev, driver:dev,
 npm run dev:web        # school + platform + public together
 ```
 
+To run the API and apps detached, with pid files and logs under `.run/`, use
+the `local-env` skill: `.claude/skills/local-env/scripts/local.sh
+start|stop|status|logs [target...]`. It picks the API's port (8090 when 8080
+is taken), points the apps at it, and never kills a server it did not start.
+
 ### Infrastructure
 
 ```sh
