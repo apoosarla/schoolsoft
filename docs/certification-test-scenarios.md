@@ -56,6 +56,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | ACAD-08 | Curriculum tree (`curriculum_node` + `learning_outcome`) is authored and versioned; a mid-year curriculum edit does not retroactively invalidate lesson plans already delivered. | P2 |
 | ACAD-09 | Student elects optional/elective subjects (IGCSE option blocks, Class 11 stream): marks, timetable, and report card follow the student's subject set, not the section's. `GAP-05` | P1 |
 | ACAD-10 | School working-day pattern configured (5-day vs 6-day week, alternate-Saturday) and honoured everywhere attendance or fee due dates are computed. `GAP-01` | P1 |
+| ACAD-11 | A year created without being marked current is made current afterwards, from the school's own screen and with no rollover to flip it; the year that was current stops being so, and a closed year is refused. | P1 |
 
 ## 3. Leads & Admissions Funnel (CERT-ADM)
 

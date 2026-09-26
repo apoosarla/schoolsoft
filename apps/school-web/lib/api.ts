@@ -1349,6 +1349,21 @@ export function createAcademicYear(
   });
 }
 
+/**
+ * Makes a year the school's current one. Separate from its status: a year can
+ * be `active` without being the one every "this year" read points at, and a
+ * school in its first year has no rollover to flip it.
+ */
+export function activateAcademicYear(
+  academicYearId: string,
+  req?: { actingStaffId?: string }
+): Promise<AcademicYearDto> {
+  return apiFetch<AcademicYearDto>(`/v1/tenancy/academic-years/${academicYearId}/activate`, {
+    method: "POST",
+    body: JSON.stringify(req ?? {}),
+  });
+}
+
 /** Closing a year makes it read-only; reopening it needs a reason and is audited. */
 export function setAcademicYearStatus(
   academicYearId: string,

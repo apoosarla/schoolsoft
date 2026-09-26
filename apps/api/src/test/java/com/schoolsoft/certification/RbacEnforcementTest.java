@@ -293,6 +293,29 @@ class RbacEnforcementTest extends AbstractCertificationTest {
     }
 
     /**
+     * Making a year current is {@code academic_year.manage}, the same gate as
+     * closing one. It is deliberately not {@code structure.manage}: which year
+     * the school points at decides what every date-scoped read answers, and
+     * that is the year's own lifecycle rather than the shape of the school.
+     */
+    @Test
+    @DisplayName("making a year current is academic_year.manage, not structure.manage")
+    void activatingAYearIsAcademicYearManagement() {
+        assertThat(post("/v1/tenancy/academic-years/" + cbse().currentAy().id() + "/activate",
+            body(), teacherToken(cbse(), 1)).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // The head of the school holds it. Activating the year that is already
+        // current is the no-op case, so this asserts the gate without moving
+        // the fixture's notion of "this year" for the scenarios that follow.
+        assertThat(post("/v1/tenancy/academic-years/" + cbse().currentAy().id() + "/activate",
+            body(), principalToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(queryOne("SELECT is_current FROM academic_year WHERE id = ?", Boolean.class,
+            cbse().currentAy().id())).isTrue();
+    }
+
+    /**
      * Handing a chain over is the operator's, and only the operator's. A chain
      * admin appointing another chain admin would be a chain's HQ growing its
      * own membership, which is a real need with no endpoint yet; what it must

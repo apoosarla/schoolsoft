@@ -39,6 +39,54 @@ class AcademicStructureCertTest extends AbstractCertificationTest {
         }
     }
 
+    /**
+     * The flip on its own. Creating a year can mark it current in the same
+     * act, and the rollover wizard does it at the end of a roll — but a school
+     * in its first year that left the box unticked has neither: the year
+     * exists, so it cannot be created again, and there is no year to roll
+     * from. Its setup screen then showed a step it could not satisfy.
+     */
+    @Test @Tag("P1")
+    void cert_ACAD_11_aYearIsMadeCurrentAfterTheFactWithNoRollover() {
+        String token = principalToken(cie());
+        var created = post("/v1/tenancy/schools/" + cie().id() + "/academic-years",
+            Map.of("code", "2029-30", "startsOn", "2029-04-01", "endsOn", "2030-03-31", "isCurrent", false),
+            token);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID laterAy = UUID.fromString(created.getBody().get("id").asText());
+        assertThat(created.getBody().get("isCurrent").asBoolean()).isFalse();
+
+        try {
+            var activated = post("/v1/tenancy/academic-years/" + laterAy + "/activate", Map.of(), token);
+            assertThat(activated.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(activated.getBody().get("isCurrent").asBoolean()).isTrue();
+            assertThat(activated.getBody().get("status").asText()).isEqualTo("active");
+
+            // One current year per school, still.
+            assertThat(count("SELECT count(*) FROM academic_year WHERE school_id = ? AND is_current", cie().id()))
+                .isEqualTo(1);
+            assertThat(queryOne("SELECT is_current FROM academic_year WHERE id = ?", Boolean.class,
+                cie().currentAy().id())).isFalse();
+
+            // Written down: which year the school points at is worth an answer later.
+            assertThat(count("SELECT count(*) FROM audit_log WHERE action = 'academic_year.activated' "
+                + "AND target_id = ?", laterAy)).isEqualTo(1);
+
+            // A closed year is not a candidate — being current is what makes a
+            // year writable, and closure is what stopped it being.
+            post("/v1/tenancy/academic-years/" + laterAy + "/status",
+                Map.of("status", "closed", "reason", "certification: closing to test activation"), token);
+            var refused = post("/v1/tenancy/academic-years/" + laterAy + "/activate", Map.of(), token);
+            assertThat(refused.getStatusCode()).isIn(HttpStatus.CONFLICT, HttpStatus.BAD_REQUEST);
+        } finally {
+            // Restore the fixture's notion of "current" for the scenarios that follow.
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM academic_year WHERE id = ?", laterAy);
+                jdbc.update("UPDATE academic_year SET is_current = TRUE WHERE id = ?", cie().currentAy().id());
+            });
+        }
+    }
+
     @Test @Tag("P1")
     void cert_ACAD_02_termOutsideTheYearOrOverlappingTermsAreRejected() {
         String token = principalToken(cbse());

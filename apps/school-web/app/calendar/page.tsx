@@ -26,6 +26,7 @@ import {
   listWorkingDayPatterns,
   SATURDAY_RULES,
   Session,
+  activateAcademicYear,
   setAcademicYearStatus,
   TermDto,
   WorkingDayPatternDto,
@@ -200,7 +201,29 @@ export default function CalendarPage() {
                 <td>
                   <span className={"badge " + statusBadge(y.status)}>{y.status}</span>
                 </td>
-                <td>{y.isCurrent ? "Yes" : "—"}</td>
+                <td>
+                  {y.isCurrent ? (
+                    "Yes"
+                  ) : y.status === "closed" ? (
+                    "—"
+                  ) : (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        run(async () => {
+                          await activateAcademicYear(y.id, { actingStaffId: staffId || undefined });
+                          setNotice(`${y.code} is now the current year.`);
+                          refreshYears();
+                        });
+                      }}
+                    >
+                      Make current
+                    </button>
+                  )}
+                </td>
                 <td>
                   {y.status !== "closed" ? (
                     <button

@@ -19,10 +19,12 @@ public class SchoolController {
 
     private final SchoolRepository repo;
     private final AuditService audit;
+    private final AcademicYearLifecycle years;
 
-    public SchoolController(SchoolRepository repo, AuditService audit) {
+    public SchoolController(SchoolRepository repo, AuditService audit, AcademicYearLifecycle years) {
         this.repo = repo;
         this.audit = audit;
+        this.years = years;
     }
 
     @PreAuthorize("@perm.can('structure.view')")
@@ -140,6 +142,29 @@ public class SchoolController {
             java.util.Map.of("status", before.status()),
             java.util.Map.of("status", after.status(), "reason", req.reason() == null ? "" : req.reason()));
         return after;
+    }
+
+    public record ActivateAcademicYearRequest(UUID actingStaffId) {}
+
+    /**
+     * Makes this the school's current year — the flip every "this year" read
+     * asks about.
+     *
+     * <p>Creating a year can do it in the same act, and the rollover wizard
+     * does it at the end of the roll. Neither reaches a school in its first
+     * year that created one without ticking the box: there is no year to roll
+     * from, and the year already exists so creating it again is not available.
+     * That school could see the step it was failing and had no screen to fix
+     * it with, which is why this is its own door rather than a flag on the
+     * status endpoint — the status and the current year are separate
+     * questions, and {@code active} is not {@code current}.</p>
+     */
+    @PreAuthorize("@perm.can('academic_year.manage')")
+    @PostMapping("/academic-years/{academicYearId}/activate")
+    public AcademicYearDto activateAcademicYear(
+        @PathVariable UUID academicYearId, @RequestBody(required = false) ActivateAcademicYearRequest req
+    ) {
+        return years.activate(academicYearId, req == null ? null : req.actingStaffId());
     }
 
     // -------------------------- Term --------------------------
