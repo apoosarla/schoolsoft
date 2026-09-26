@@ -41,6 +41,7 @@ Persona key: `PA` parent · `ST` student · `TE` teacher · `HM` head/principal 
 | TEN-15 | A guardian cannot sign in to a school that has not opened yet, and is told why; the school's own staff can sign in while it is being set up, and the guardian can once it opens. | P1 |
 | TEN-16 | The chain appoints a newly opened school's first administrator — the one account that cannot be created from inside the school; the appointee signs in while the school is still `draft` and builds its structure, the school's first campus is created with them, and appointing a second is refused. | P1 |
 | TEN-17 | `PL` hands a freshly provisioned chain to its customer by appointing its HQ administrator — the one account nothing inside the chain could create; that admin signs in, opens a school and appoints its first keyholder with no operator involved, the handover is recorded in the chain's own audit log, and handing the same chain over twice is refused. | P1 |
+| TEN-18 | `HQ` adds a second HQ administrator from their own screen, who signs in and deactivates the first with a reason; the first can no longer sign in, deactivating the chain's last active HQ account is refused, and a school's staff cannot reach any of it even when a custom role names the permission. | P1 |
 
 ## 2. Academic Year & Structure Setup (CERT-ACAD)
 

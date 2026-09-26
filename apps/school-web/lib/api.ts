@@ -2988,6 +2988,43 @@ export function appointFirstAdmin(
   });
 }
 
+/**
+ * An account the chain's HQ signs in with. No name: a chain admin has no
+ * staff or guardian record, only the address they sign in with.
+ */
+export type ChainAdminDto = {
+  accountId: string;
+  email?: string;
+  phone?: string;
+  signsInWith: string;
+  active: boolean;
+  createdAt: string;
+};
+
+/** The chain's HQ accounts, active and deactivated. */
+export function listChainAdmins(): Promise<ChainAdminDto[]> {
+  return apiFetch<ChainAdminDto[]>("/v1/tenancy/chain/admins");
+}
+
+/** Adds another HQ account. 409 if the address already signs in to this chain. */
+export function addChainAdmin(req: { email?: string; phone?: string }): Promise<ChainAdminDto> {
+  return apiFetch<ChainAdminDto>("/v1/tenancy/chain/admins", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * Stops an HQ account signing in. Audited, so the reason is required; 409 if
+ * it is the chain's last active one.
+ */
+export function deactivateChainAdmin(accountId: string, reason: string): Promise<ChainAdminDto> {
+  return apiFetch<ChainAdminDto>(`/v1/tenancy/chain/admins/${accountId}/deactivate`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export type CampusDto = { id: string; schoolId: string; name: string; isPrimary: boolean };
 
 export function listCampuses(schoolId: string): Promise<CampusDto[]> {

@@ -97,12 +97,12 @@ public class PermissionChecker {
 
     /**
      * A chain (HQ) admin oversees every school in the chain: they read
-     * anything and change one thing. The read set is derived from
+     * anything and change very little. The read set is derived from
      * {@link Perm#isUnrestrictedRead()} so a permission added later lands on
      * the right side of that line without anybody remembering to come back
      * here.
      *
-     * <h2>The one write</h2>
+     * <h2>The writes</h2>
      * {@link Perm#SCHOOL_ONBOARD} is granted here and nowhere else for this
      * subject type, because a chain admin holds no {@code staff_role} row at
      * any school — they are school-less by construction, which is the same
@@ -115,6 +115,10 @@ public class PermissionChecker {
      * declaring its setup finished. It does not reach a child's record, a
      * mark, or a rupee — and if a later permission needs to be theirs too,
      * that is another deliberate line here, not a widening of this one.</p>
+     *
+     * <p>{@link Perm#CHAIN_ADMIN_MANAGE} is that second line: an HQ grows its
+     * own membership. Before it, a chain whose one HQ address stopped working
+     * needed Schoolsoft to run SQL.</p>
      *
      * <h2>The reads are not the whole gate</h2>
      * This set says a chain admin <em>may</em> read anything unrestricted. It
@@ -132,6 +136,7 @@ public class PermissionChecker {
         var perms = EnumSet.copyOf(
             java.util.Arrays.stream(Perm.values()).filter(Perm::isUnrestrictedRead).toList());
         perms.add(Perm.SCHOOL_ONBOARD);
+        perms.add(Perm.CHAIN_ADMIN_MANAGE);
         return java.util.Collections.unmodifiableSet(perms);
     }
 

@@ -551,6 +551,99 @@ class TenancyOnboardingCertTest extends AbstractCertificationTest {
         }
     }
 
+    /**
+     * What TEN-17's closed door left the customer to do themselves. A chain
+     * handed over to one address was a chain one departure away from needing
+     * Schoolsoft to run SQL; the HQ now grows and shrinks its own membership,
+     * and the one thing it cannot do is shrink it to nobody.
+     */
+    @Test @Tag("P1")
+    void cert_TEN_18_hqAddsASecondAdminAndCannotRemoveTheLast() {
+        dropProbeChain();
+        String operator = platformAdminToken();
+        var provisioned = post("/v1/platform-admin/chains",
+            Map.of("slug", PROBE_SLUG, "name", "Probe Chain", "planCode", "starter"), operator);
+        UUID chainId = UUID.fromString(provisioned.getBody().get("chainId").asText());
+        String firstEmail = "probe.hq@" + PROBE_SLUG + ".test";
+        String secondEmail = "probe.hq2@" + PROBE_SLUG + ".test";
+        try {
+            UUID firstId = UUID.fromString(post("/v1/platform-admin/chains/" + chainId + "/admins",
+                Map.of("email", firstEmail), operator).getBody().get("accountId").asText());
+            String first = signInTo(PROBE_SLUG, firstEmail).getBody().get("accessToken").asText();
+
+            // The HQ adds its own second account, with no operator involved.
+            var added = post("/v1/tenancy/chain/admins", Map.of("email", secondEmail), first);
+            assertThat(added.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(added.getBody().get("active").asBoolean()).isTrue();
+            assertThat(get("/v1/tenancy/chain/admins", first).getBody()).hasSize(2);
+
+            // An address already in the chain is refused, not given a second door.
+            assertThat(post("/v1/tenancy/chain/admins", Map.of("email", secondEmail), first).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+
+            // The newcomer signs in through the ordinary door and removes the
+            // first — the departure this exists for. The reason is required.
+            var signedIn = signInTo(PROBE_SLUG, secondEmail);
+            assertThat(signedIn.getStatusCode()).isEqualTo(HttpStatus.OK);
+            String second = signedIn.getBody().get("accessToken").asText();
+            UUID secondId = UUID.fromString(added.getBody().get("accountId").asText());
+
+            assertThat(post("/v1/tenancy/chain/admins/" + firstId + "/deactivate", Map.of(), second)
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            var removed = post("/v1/tenancy/chain/admins/" + firstId + "/deactivate",
+                Map.of("reason", "certification: left the company"), second);
+            assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(removed.getBody().get("active").asBoolean()).isFalse();
+
+            // A retry after a dropped response is not an error.
+            assertThat(post("/v1/tenancy/chain/admins/" + firstId + "/deactivate",
+                Map.of("reason", "certification: retry"), second).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            // Gone means gone: the first can no longer sign in.
+            assertThat(signInTo(PROBE_SLUG, firstEmail).getStatusCode()).isNotEqualTo(HttpStatus.OK);
+
+            // And the chain is never left with nobody.
+            var last = post("/v1/tenancy/chain/admins/" + secondId + "/deactivate",
+                Map.of("reason", "certification: trying to leave nobody"), second);
+            assertThat(last.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(this.<Integer>inProbeChain(jdbc -> jdbc.queryForObject(
+                "SELECT count(*) FROM user_account WHERE subject_type = 'chain_admin' AND is_active",
+                Integer.class))).isEqualTo(1);
+
+            // Both acts are in the customer's audit log, the removal with its reason.
+            assertThat(this.<Integer>inProbeChain(jdbc -> jdbc.queryForObject(
+                "SELECT count(*) FROM audit_log WHERE action = 'chain.admin_added' AND target_id = ?",
+                Integer.class, secondId))).isEqualTo(1);
+            assertThat(this.<java.util.List<String>>inProbeChain(jdbc -> jdbc.queryForList(
+                "SELECT reason FROM audit_log WHERE action = 'chain.admin_deactivated' AND target_id = ?",
+                String.class, firstId))).contains("certification: left the company");
+
+            // A school's staff cannot reach it, even when a custom role names
+            // the permission: an HQ account sees every school in the chain, so
+            // a school's employee must never be able to mint one.
+            var school = post("/v1/tenancy/schools",
+                Map.of("slug", "probe-hq", "name", "Probe HQ School", "boardCode", "CBSE"), second);
+            UUID schoolId = UUID.fromString(school.getBody().get("id").asText());
+            String headEmail = "probe.head@" + PROBE_SLUG + ".test";
+            assertThat(post("/v1/tenancy/schools/" + schoolId + "/first-admin", Map.of(
+                "firstName", "Probe", "lastName", "Head", "email", headEmail, "roleCode", "principal"),
+                second).getStatusCode()).isEqualTo(HttpStatus.OK);
+            inProbeChain(jdbc -> jdbc.update(
+                "INSERT INTO role_perm (role_code, perm_code) VALUES ('principal', 'chain.admin.manage')"));
+            String head = signInTo(PROBE_SLUG, headEmail).getBody().get("accessToken").asText();
+
+            assertThat(post("/v1/tenancy/chain/admins",
+                Map.of("email", "probe.hq3@" + PROBE_SLUG + ".test"), head).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(get("/v1/tenancy/chain/admins", head).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(this.<Integer>inProbeChain(jdbc -> jdbc.queryForObject(
+                "SELECT count(*) FROM user_account WHERE email = ?", Integer.class,
+                "probe.hq3@" + PROBE_SLUG + ".test"))).isZero();
+        } finally {
+            dropProbeChain();
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** Signs in against a chain other than the fixture's — a probe chain has its own slug. */

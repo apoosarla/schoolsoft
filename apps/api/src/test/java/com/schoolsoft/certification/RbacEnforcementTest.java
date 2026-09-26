@@ -347,6 +347,32 @@ class RbacEnforcementTest extends AbstractCertificationTest {
     }
 
     /**
+     * The chain's HQ accounts are the chain admin's to manage, and nobody
+     * else's. A school's head holds every permission inside their school and
+     * nothing above it; an operator hands a chain over once, through their own
+     * console, and has no business on the customer's screen afterwards.
+     */
+    @Test
+    @DisplayName("managing a chain's HQ accounts is chain.admin.manage, held by the chain admin alone")
+    void chainHqAccountsAreTheChainAdmins() {
+        assertThat(get("/v1/tenancy/chain/admins", chainAdminToken()).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+
+        String principal = principalToken(cbse());
+        assertThat(get("/v1/tenancy/chain/admins", principal).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/tenancy/chain/admins",
+            body("email", "should.not.exist.hq2@oakridge.test"), principal).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/tenancy/chain/admins",
+            body("email", "should.not.exist.hq2@oakridge.test"), teacherToken(cbse(), 1)).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        assertThat(count("SELECT count(*) FROM user_account WHERE email = ?",
+            "should.not.exist.hq2@oakridge.test")).isZero();
+    }
+
+    /**
      * The one that is not about permissions.
      *
      * <p>A chain admin's token carries no school, and V009's policy reads

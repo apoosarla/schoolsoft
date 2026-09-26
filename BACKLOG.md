@@ -1074,13 +1074,20 @@ are different claims:
   A blocking modal also cannot be styled, translated, or driven by a test,
   which is the other half of why these should go.
 
-- **A chain's HQ cannot add a second HQ account.** Opened by the fix above.
-  The vendor hands a chain over once, deliberately; growing the HQ afterwards
-  is the customer's own business and has no endpoint — a chain whose single
-  HQ address stops working needs Schoolsoft to run SQL, which is the shape of
-  problem the handover endpoint just removed one level up. The screen belongs
-  in school-web `/chain`, gated on something a chain admin holds, and it
-  should refuse the last one being removed.
+- ~~**A chain's HQ cannot add a second HQ account.**~~ Fixed 2026-09-26.
+  Opened by the fix above: the vendor hands a chain over once, and a chain
+  whose single HQ address stopped working needed Schoolsoft to run SQL.
+  `GET`/`POST /v1/tenancy/chain/admins` and `POST …/{id}/deactivate`
+  (audited, reason required), gated on `chain.admin.manage` — a new
+  permission in the chain admin's baseline and in no migration. A school's
+  custom role can still *name* it, so `ChainHqService` also insists the caller
+  is a `chain_admin`; without that a school's employee could mint an account
+  that sees every school in the chain. Deactivating the last active HQ account
+  is refused under a row lock on every active one, so two admins removing each
+  other at once cannot leave nobody. `/v1/tenancy/chain` joins
+  `CHAIN_ADMIN_PREFIXES` as a chain-wide path. The screen is the foot of
+  school-web `/chain`. Certified by `TEN-18`. Not built: reactivating a
+  deactivated account — its address stays taken, so re-adding it is a 409.
 
 ---
 

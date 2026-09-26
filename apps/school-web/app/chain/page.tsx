@@ -13,6 +13,7 @@ import {
   listMySchools,
 } from "@/lib/api";
 import SchoolsPanel from "./schools-panel";
+import AdminsPanel from "./admins-panel";
 
 /**
  * A chain's own HQ, inside the school's own app.
@@ -28,13 +29,15 @@ import SchoolsPanel from "./schools-panel";
  * they see is the one their token names; there is no chain id on this page
  * because there is no other chain they could ask about.
  *
- * They read every school in it and change one thing: they open a school. The
+ * They read every school in it and open new ones, and they decide who else
+ * signs in as HQ (the panel at the foot of the page). The
  * rest of a school's setup belongs to the school, and the checklist below
  * says how far along each one is without offering to do any of it.
  */
 export default function ChainPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [selfAccountId, setSelfAccountId] = useState("");
   const [schools, setSchools] = useState<SchoolDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,6 +68,7 @@ export default function ChainPage() {
       router.replace("/dashboard");
       return;
     }
+    setSelfAccountId(session.userAccountId);
     setReady(true);
   }, [router]);
 
@@ -101,6 +105,8 @@ export default function ChainPage() {
         loadReadiness={getSchoolReadiness}
         onAppointAdmin={appointFirstAdmin}
       />
+
+      <AdminsPanel selfAccountId={selfAccountId} />
     </main>
   );
 }

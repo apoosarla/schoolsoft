@@ -26,8 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
  * own schools and appoints each school's first keyholder, and the schools hire
  * everybody else. Which is why the door shuts here the same way it shuts
  * there — a chain gets one HQ account from the vendor, not an HQ staff list.
- * A second one is a customer's own business and has no endpoint yet; see
- * BACKLOG.md.</p>
+ * A second one is the customer's own business: {@link ChainHqService}.</p>
  */
 @Service
 public class ChainHandoverService {

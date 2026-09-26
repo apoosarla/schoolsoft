@@ -56,9 +56,13 @@ public class TenantResolverFilter extends OncePerRequestFilter {
      * school's ledger. Widening this list is a deliberate edit, and anything
      * added to it has to be a read that names its own school or is genuinely
      * chain-wide.</p>
+     *
+     * <p>{@code /v1/tenancy/chain} is the chain-wide one: the chain's own HQ
+     * accounts, which belong to no school and so cannot merge two schools'
+     * rows.</p>
      */
     private static final List<String> CHAIN_ADMIN_PREFIXES = List.of(
-        "/v1/tenancy/schools", "/v1/iam/me"
+        "/v1/tenancy/schools", "/v1/tenancy/chain", "/v1/iam/me"
     );
 
     private final JwtService jwt;
