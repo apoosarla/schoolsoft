@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ReasonField } from "@schoolsoft/ui";
 import {
   ApiError,
   AssessmentDto,
@@ -57,6 +58,8 @@ export default function ReportCardsPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The mark a re-check is being asked for; the reason is typed in its row. */
+  const [asking, setAsking] = useState<string | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -112,15 +115,14 @@ export default function ReportCardsPage() {
     })();
   }, [active]);
 
-  async function askForReevaluation(row: GradeRow) {
+  async function askForReevaluation(row: GradeRow, reason: string) {
     if (!active) return;
-    const reason = window.prompt(`Why should ${row.assessment.name} be looked at again?`)?.trim();
-    if (!reason) return;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       await requestReevaluation(row.markId, reason);
+      setAsking(null);
       setNotice("Request sent. The school will review the paper and you will see the outcome here.");
       setReevaluations(await reevaluationsForStudent(active.id));
     } catch (err) {
@@ -199,13 +201,21 @@ export default function ReportCardsPage() {
                           <span className="badge">under review</span>
                         ) : decided ? (
                           <span className="badge">{decided.status}</span>
+                        ) : asking === g.markId ? (
+                          <ReasonField
+                            placeholder={`Why should ${g.assessment.name} be looked at again?`}
+                            confirmLabel="Ask"
+                            busy={busy}
+                            onCancel={() => setAsking(null)}
+                            onConfirm={(reason) => askForReevaluation(g, reason)}
+                          />
                         ) : (
                           g.status === "entered" && (
                             <button
                               type="button"
                               className="chip-btn"
                               disabled={busy}
-                              onClick={() => askForReevaluation(g)}
+                              onClick={() => setAsking(g.markId)}
                             >
                               Ask for a re-check
                             </button>

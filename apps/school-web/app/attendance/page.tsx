@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ReasonField } from "@schoolsoft/ui";
 import {
   ApiError,
   assignCover,
@@ -68,6 +69,8 @@ export default function AttendancePage() {
   const [busy, setBusy] = useState(false);
 
   const [amendments, setAmendments] = useState<AttendanceAmendmentDto[] | null>(null);
+  /** The amendment being decided, and which way — its reason is asked in the row. */
+  const [deciding, setDeciding] = useState<{ id: string; status: "approved" | "rejected" } | null>(null);
   const [amendmentFilter, setAmendmentFilter] = useState("pending");
   const [amendForm, setAmendForm] = useState({ studentId: "", newStatus: "present", reason: "" });
 
@@ -305,39 +308,47 @@ export default function AttendancePage() {
                       <span className={"badge " + (a.status === "approved" ? "badge-active" : "")}>{a.status}</span>
                     </td>
                     <td>
-                      {a.status === "pending" && (
-                        <div className="form-row inline">
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() =>
-                              run(async () => {
-                                const reason = window.prompt("Why is this correction allowed?")?.trim();
-                                if (!reason) return;
-                                await decideAmendment(a.id, { status: "approved", reason });
+                      {a.status === "pending" && deciding?.id === a.id ? (
+                        <ReasonField
+                          placeholder={
+                            deciding.status === "approved"
+                              ? "Why is this correction allowed?"
+                              : "Why is this correction refused?"
+                          }
+                          confirmLabel={deciding.status === "approved" ? "Approve" : "Reject"}
+                          busy={busy}
+                          onCancel={() => setDeciding(null)}
+                          onConfirm={(reason) =>
+                            run(async () => {
+                              await decideAmendment(a.id, { status: deciding.status, reason });
+                              setDeciding(null);
+                              if (deciding.status === "approved") {
                                 setNotice("Amendment approved — the register now shows the corrected value.");
-                                refreshAmendments();
-                              })
-                            }
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={busy}
-                            onClick={() =>
-                              run(async () => {
-                                const reason = window.prompt("Why is this correction refused?")?.trim();
-                                if (!reason) return;
-                                await decideAmendment(a.id, { status: "rejected", reason });
-                                refreshAmendments();
-                              })
-                            }
-                          >
-                            Reject
-                          </button>
-                        </div>
+                              }
+                              refreshAmendments();
+                            })
+                          }
+                        />
+                      ) : (
+                        a.status === "pending" && (
+                          <div className="form-row inline">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => setDeciding({ id: a.id, status: "approved" })}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              disabled={busy}
+                              onClick={() => setDeciding({ id: a.id, status: "rejected" })}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )
                       )}
                     </td>
                   </tr>

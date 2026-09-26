@@ -1,0 +1,28 @@
+/* One line where there is room, wrapping under itself in a narrow table cell.
+   The colours are the host app's tokens — this package ships the behaviour
+   and the geometry, not a palette. */
+
+.field {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.cancel {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border-strong);
+  box-shadow: none;
+}
+
+.cancel:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}

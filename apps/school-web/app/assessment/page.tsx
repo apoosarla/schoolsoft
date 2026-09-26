@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ReasonField } from "@schoolsoft/ui";
 import {
   addAssessmentComponent,
   ApiError,
@@ -74,6 +75,8 @@ export default function AssessmentPage() {
   const [componentForm, setComponentForm] = useState(emptyComponentForm);
   const [creatingComponent, setCreatingComponent] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
+  /** A reopening asked for and waiting on its reason; the select keeps showing the status in force. */
+  const [reopeningTo, setReopeningTo] = useState<string | null>(null);
 
   const [validation, setValidation] = useState<AssessmentValidationDto | null>(null);
 
@@ -91,6 +94,8 @@ export default function AssessmentPage() {
   const [cards, setCards] = useState<ReportCardDto[] | null>(null);
   const [cardDetail, setCardDetail] = useState<ReportCardDetailDto | null>(null);
   const [cardsBusy, setCardsBusy] = useState(false);
+  /** The report card whose unlock reason is being typed. */
+  const [unlockingCard, setUnlockingCard] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -140,6 +145,7 @@ export default function AssessmentPage() {
     if (!sectionId) return;
     setSelectedAssessment(null);
     setSelectedComponent(null);
+    setReopeningTo(null);
     refreshAssessments(sectionId);
   }, [sectionId]);
 
@@ -173,6 +179,7 @@ export default function AssessmentPage() {
   async function selectAssessment(a: AssessmentDto) {
     setSelectedAssessment(a);
     setSelectedComponent(null);
+    setReopeningTo(null);
     setBulkResult(null);
     setError(null);
     try {
@@ -184,21 +191,22 @@ export default function AssessmentPage() {
     }
   }
 
-  async function onStatusChange(status: string) {
+  async function onStatusChange(status: string, reason?: string) {
     if (!selectedAssessment) return;
-    // Reopening marks a family has already seen is a decision somebody owns.
+    // Reopening marks a family has already seen is a decision somebody owns,
+    // so it waits for a reason before anything is sent.
     const reopening =
       ["locked", "published"].includes(selectedAssessment.status) &&
       !["locked", "published"].includes(status);
-    let reason: string | undefined;
-    if (reopening) {
-      reason = window.prompt("Why is this assessment being reopened?")?.trim();
-      if (!reason) return;
+    if (reopening && !reason) {
+      setReopeningTo(status);
+      return;
     }
     setStatusSaving(true);
     setError(null);
     try {
       const updated = await setAssessmentStatus(selectedAssessment.id, status, reason);
+      setReopeningTo(null);
       setSelectedAssessment(updated);
       refreshAssessments(sectionId);
     } catch (err) {
@@ -440,7 +448,7 @@ export default function AssessmentPage() {
               <select
                 value={selectedAssessment.status}
                 onChange={(e) => onStatusChange(e.target.value)}
-                disabled={statusSaving}
+                disabled={statusSaving || reopeningTo !== null}
               >
                 {ASSESSMENT_STATUSES.map((st) => (
                   <option key={st} value={st}>
@@ -453,6 +461,18 @@ export default function AssessmentPage() {
               </button>
             </div>
           </div>
+
+          {reopeningTo && (
+            <div className="form-row">
+              <ReasonField
+                placeholder={`Why is this assessment being reopened to ${reopeningTo}?`}
+                confirmLabel="Reopen"
+                busy={statusSaving}
+                onCancel={() => setReopeningTo(null)}
+                onConfirm={(reason) => onStatusChange(reopeningTo, reason)}
+              />
+            </div>
+          )}
 
           {showComponentForm && (
             <div className="form-row" style={{ flexWrap: "wrap" }}>
@@ -797,23 +817,31 @@ export default function AssessmentPage() {
                           Publish
                         </button>
                       )}
-                      {c.status !== "draft" && (
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={cardsBusy}
-                          onClick={() =>
-                            runCards(async () => {
-                              const reason = window.prompt("Why is this card being unlocked?")?.trim();
-                              if (!reason) return;
-                              await unlockReportCard(c.id, reason);
-                              await refreshCards();
-                            })
-                          }
-                        >
-                          Unlock
-                        </button>
-                      )}
+                      {c.status !== "draft" &&
+                        (unlockingCard === c.id ? (
+                          <ReasonField
+                            placeholder="Why is this card being unlocked?"
+                            confirmLabel="Unlock"
+                            busy={cardsBusy}
+                            onCancel={() => setUnlockingCard(null)}
+                            onConfirm={(reason) =>
+                              runCards(async () => {
+                                await unlockReportCard(c.id, reason);
+                                setUnlockingCard(null);
+                                await refreshCards();
+                              })
+                            }
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={cardsBusy}
+                            onClick={() => setUnlockingCard(c.id)}
+                          >
+                            Unlock
+                          </button>
+                        ))}
                     </div>
                   </td>
                 </tr>

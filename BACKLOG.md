@@ -1058,21 +1058,17 @@ are different claims:
   which appoints, signs the appointee in through the ordinary OTP door, and
   has them open a school and appoint its keyholder with no operator involved.
 
-- **An audited reason is still asked for with `window.prompt` in six places.**
-  Found 2026-09-22 walking a school's setup in the browser: the Setup screen's
-  Skip asked that way, and a driven browser answered the modal itself, so a
-  step was skipped with the reason `"not sure"` written into the audit log —
-  the one column an auditor actually reads, filled with something nobody
-  typed. Setup now asks inline, the way the calendar screen already asked for
-  a reopen reason. The other six are unchanged:
-  `school-web/app/attendance/page.tsx` (allow and refuse a correction),
-  `school-web/app/roles/page.tsx` (revoke a role),
-  `school-web/app/assessment/page.tsx` (reopen an assessment, unlock a report
-  card) and `parent-app/app/report-cards/page.tsx` (ask for a re-look). Each
-  sits in different surrounding markup — a table row, a grid cell — so it is
-  six small edits rather than one, and each wants its own look afterwards.
-  A blocking modal also cannot be styled, translated, or driven by a test,
-  which is the other half of why these should go.
+- ~~**An audited reason is still asked for with `window.prompt` in six places.**~~
+  Fixed 2026-09-26. Found 2026-09-22 walking a school's setup in the browser:
+  a driven browser answered the modal itself, so a step was skipped with the
+  reason `"not sure"` written into the audit log — the one column an auditor
+  reads, filled with something nobody typed. All six (attendance allow and
+  refuse, role revoke, assessment reopen, report-card unlock, the parent's
+  re-check request) now ask inline with `ReasonField` from `@schoolsoft/ui`,
+  in the row or cell the act was asked from; Enter confirms, Escape cancels,
+  and confirm stays disabled until something is typed. The Setup screen's
+  skip and the chain HQ panel's deactivate, which had hand-rolled copies of
+  the same field, use it too. parent-app now depends on `@schoolsoft/ui`.
 
 - ~~**A chain's HQ cannot add a second HQ account.**~~ Fixed 2026-09-26.
   Opened by the fix above: the vendor hands a chain over once, and a chain

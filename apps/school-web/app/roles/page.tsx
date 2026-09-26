@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ReasonField } from "@schoolsoft/ui";
 import {
   ApiError,
   assignStaffRole,
@@ -39,6 +40,8 @@ export default function RolesPage() {
   const [assignRoleCode, setAssignRoleCode] = useState<Record<string, string>>({});
   const [assignReason, setAssignReason] = useState<Record<string, string>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  /** The grant whose revocation reason is being typed, under that person's roles. */
+  const [revoking, setRevoking] = useState<{ staffId: string; roleCode: string } | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -157,14 +160,13 @@ export default function RolesPage() {
     }
   }
 
-  async function onUnassign(member: StaffWithRolesDto, roleCode: string) {
+  async function onUnassign(member: StaffWithRolesDto, roleCode: string, reason: string) {
     if (!session) return;
-    const reason = window.prompt("Why is this role being revoked?")?.trim();
-    if (!reason) return;
     setAssigningId(member.staffId);
     setError(null);
     try {
       await unassignStaffRole(member.staffId, session.schoolId, roleCode, reason);
+      setRevoking(null);
       refreshStaff(session.schoolId);
     } catch (err) {
       setError(describeError(err));
@@ -332,7 +334,8 @@ export default function RolesPage() {
                         {roleName(code)}{" "}
                         <button
                           type="button"
-                          onClick={() => onUnassign(m, code)}
+                          onClick={() => setRevoking({ staffId: m.staffId, roleCode: code })}
+                          aria-label={`Revoke ${roleName(code)}`}
                           disabled={assigningId === m.staffId}
                           style={{
                             background: "none",
@@ -348,6 +351,17 @@ export default function RolesPage() {
                         </button>
                       </span>
                     ))}
+                    {revoking?.staffId === m.staffId && (
+                      <div style={{ marginTop: 8 }}>
+                        <ReasonField
+                          placeholder={`Why is ${roleName(revoking.roleCode)} being revoked?`}
+                          confirmLabel="Revoke"
+                          busy={assigningId === m.staffId}
+                          onCancel={() => setRevoking(null)}
+                          onConfirm={(reason) => onUnassign(m, revoking.roleCode, reason)}
+                        />
+                      </div>
+                    )}
                   </td>
                   <td>
                     <div className="form-row" style={{ gap: 4 }}>

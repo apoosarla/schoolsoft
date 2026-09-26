@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ReasonField } from "@schoolsoft/ui";
 import {
   AcademicYearDto,
   ApiError,
@@ -44,12 +45,10 @@ export default function SetupPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  /** The step whose reason is being typed, and what has been typed so far.
-   *  Asked inline rather than in a modal: the reason is written to the audit
-   *  log and read months later by somebody asking why a school never set its
-   *  fees up, so it is worth as much room as any other field on this screen. */
+  /** The step whose skip reason is being typed. Asked inline rather than in a
+   *  modal: the reason is written to the audit log and read months later by
+   *  somebody asking why a school never set its fees up. */
   const [skipping, setSkipping] = useState<string | null>(null);
-  const [skipReason, setSkipReason] = useState("");
 
   const load = useCallback(async (schoolId: string) => {
     const [next, gradeList, yearList] = await Promise.all([
@@ -187,38 +186,19 @@ export default function SetupPage() {
                     Put back
                   </button>
                 ) : skipping === step.key ? (
-                  <>
-                    <input
-                      autoFocus
-                      placeholder="Why it will not be done"
-                      value={skipReason}
-                      onChange={(e) => setSkipReason(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && skipReason.trim()) skip(step);
-                        if (e.key === "Escape") cancelSkip();
-                      }}
-                      style={{ minWidth: 260 }}
-                    />
-                    <button
-                      type="button"
-                      disabled={busy || !skipReason.trim()}
-                      onClick={() => skip(step)}
-                    >
-                      Skip it
-                    </button>
-                    <button type="button" className="secondary" disabled={busy} onClick={cancelSkip}>
-                      Cancel
-                    </button>
-                  </>
+                  <ReasonField
+                    placeholder="Why it will not be done"
+                    confirmLabel="Skip it"
+                    busy={busy}
+                    onCancel={() => setSkipping(null)}
+                    onConfirm={(reason) => skip(step, reason)}
+                  />
                 ) : (
                   <button
                     type="button"
                     className="secondary"
                     disabled={busy || step.done}
-                    onClick={() => {
-                      setSkipReason("");
-                      setSkipping(step.key);
-                    }}
+                    onClick={() => setSkipping(step.key)}
                   >
                     Skip
                   </button>
@@ -259,20 +239,9 @@ export default function SetupPage() {
 
   // ------------------------------------------------------------------ actions
 
-  function skip(step: OnboardingStepDto) {
-    const reason = skipReason.trim();
-    if (!reason) {
-      setError("A skipped step needs a reason — it is what somebody reads three months later.");
-      return;
-    }
+  function skip(step: OnboardingStepDto, reason: string) {
     setSkipping(null);
-    setSkipReason("");
     run(`"${step.label}" will not be done.`, () => skipSetupStep(session!.schoolId, step.key, reason));
-  }
-
-  function cancelSkip() {
-    setSkipping(null);
-    setSkipReason("");
   }
 
   function unskip(step: OnboardingStepDto) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ReasonField } from "@schoolsoft/ui";
 import {
   ApiError,
   ChainAdminDto,
@@ -29,7 +30,6 @@ export default function AdminsPanel({ selfAccountId }: { selfAccountId: string }
 
   const [address, setAddress] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
-  const [reason, setReason] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -72,15 +72,9 @@ export default function AdminsPanel({ selfAccountId }: { selfAccountId: string }
     });
   }
 
-  function remove(admin: ChainAdminDto) {
-    const why = reason.trim();
-    if (!why) {
-      setError("Removing someone needs a reason — it is what the audit log will say.");
-      return;
-    }
+  function remove(admin: ChainAdminDto, reason: string) {
     setRemoving(null);
-    setReason("");
-    run(`${admin.signsInWith} can no longer sign in.`, () => deactivateChainAdmin(admin.accountId, why));
+    run(`${admin.signsInWith} can no longer sign in.`, () => deactivateChainAdmin(admin.accountId, reason));
   }
 
   return (
@@ -116,45 +110,19 @@ export default function AdminsPanel({ selfAccountId }: { selfAccountId: string }
                 <td>{a.active ? "Active" : "Deactivated"}</td>
                 <td>
                   {!a.active || activeCount <= 1 ? null : removing === a.accountId ? (
-                    <div className="form-row inline">
-                      <input
-                        autoFocus
-                        placeholder="Why they no longer need access"
-                        value={reason}
-                        onChange={(e) => setReason(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && reason.trim()) remove(a);
-                          if (e.key === "Escape") {
-                            setRemoving(null);
-                            setReason("");
-                          }
-                        }}
-                        style={{ minWidth: 240 }}
-                      />
-                      <button type="button" disabled={busy || !reason.trim()} onClick={() => remove(a)}>
-                        Deactivate
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={busy}
-                        onClick={() => {
-                          setRemoving(null);
-                          setReason("");
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                    <ReasonField
+                      placeholder="Why they no longer need access"
+                      confirmLabel="Deactivate"
+                      busy={busy}
+                      onCancel={() => setRemoving(null)}
+                      onConfirm={(reason) => remove(a, reason)}
+                    />
                   ) : (
                     <button
                       type="button"
                       className="secondary"
                       disabled={busy}
-                      onClick={() => {
-                        setReason("");
-                        setRemoving(a.accountId);
-                      }}
+                      onClick={() => setRemoving(a.accountId)}
                     >
                       {a.accountId === selfAccountId ? "Remove myself" : "Deactivate"}
                     </button>
