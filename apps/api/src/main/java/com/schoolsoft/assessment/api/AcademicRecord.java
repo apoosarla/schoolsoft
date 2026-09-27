@@ -1,6 +1,7 @@
 package com.schoolsoft.assessment.api;
 
 import java.time.LocalDate;
+import com.schoolsoft.platform.time.SchoolClock;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -25,8 +26,12 @@ import org.springframework.stereotype.Service;
 public class AcademicRecord {
 
     private final DataSource dataSource;
+    private final SchoolClock clock;
 
-    public AcademicRecord(DataSource dataSource) { this.dataSource = dataSource; }
+    public AcademicRecord(DataSource dataSource, SchoolClock clock) {
+        this.dataSource = dataSource;
+        this.clock = clock;
+    }
 
     /** One published card, flattened to what a certificate prints. */
     public record TermResult(
@@ -109,11 +114,11 @@ public class AcademicRecord {
     public java.util.Optional<LocalDate[]> attendanceWindow(UUID studentId) {
         var jdbc = new JdbcTemplate(dataSource);
         var rows = jdbc.query(
-            "SELECT min(starts_on) AS from_on, max(COALESCE(ends_on, CURRENT_DATE)) AS to_on " +
+            "SELECT min(starts_on) AS from_on, max(COALESCE(ends_on, ?)) AS to_on " +
             "FROM enrolment WHERE student_id = ?",
             (rs, i) -> rs.getDate("from_on") == null ? null
                 : new LocalDate[]{rs.getDate("from_on").toLocalDate(), rs.getDate("to_on").toLocalDate()},
-            studentId);
+            java.sql.Date.valueOf(clock.today()), studentId);
         return rows.isEmpty() || rows.get(0) == null
             ? java.util.Optional.empty() : java.util.Optional.of(rows.get(0));
     }

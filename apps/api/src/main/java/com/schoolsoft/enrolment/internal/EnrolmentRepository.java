@@ -1,6 +1,7 @@
 package com.schoolsoft.enrolment.internal;
 
 import com.schoolsoft.enrolment.api.EnrolmentActivity;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.enrolment.api.EnrolmentDto;
 import com.schoolsoft.enrolment.api.RollNumbers;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -18,13 +19,15 @@ import org.springframework.stereotype.Repository;
 public class EnrolmentRepository {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final SectionCapacity capacity;
     private final RollNumbers rollNumbers;
 
-    public EnrolmentRepository(JdbcTemplate jdbc, SectionCapacity capacity, RollNumbers rollNumbers) {
+    public EnrolmentRepository(JdbcTemplate jdbc, SectionCapacity capacity, RollNumbers rollNumbers, SchoolClock clock) {
         this.jdbc = jdbc;
         this.capacity = capacity;
         this.rollNumbers = rollNumbers;
+        this.clock = clock;
     }
 
     private String rollNumberFor(UUID schoolId, UUID sectionId, String supplied) {
@@ -70,7 +73,7 @@ public class EnrolmentRepository {
         if (!activeOnly) {
             return jdbc.query(SELECT + "WHERE e.section_id = ? ORDER BY e.roll_no", MAPPER, sectionId);
         }
-        LocalDate date = EnrolmentActivity.orToday(onDate);
+        LocalDate date = onDate == null ? clock.today() : onDate;
         return jdbc.query(
             SELECT + "WHERE e.section_id = ? AND " + EnrolmentActivity.activeOn("e") + " ORDER BY e.roll_no",
             MAPPER, sectionId, Date.valueOf(date), Date.valueOf(date));
@@ -87,7 +90,7 @@ public class EnrolmentRepository {
      * what it is there to prevent.</p>
      */
     public Optional<EnrolmentDto> findActiveByStudent(UUID studentId) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today();
         var rows = jdbc.query(
             SELECT + "WHERE e.student_id = ? AND " + EnrolmentActivity.activeOn("e")
                 + " ORDER BY (e.ends_on IS NULL) DESC, e.starts_on DESC",
@@ -120,7 +123,7 @@ public class EnrolmentRepository {
     public EnrolmentDto transfer(UUID enrolmentId, UUID newSectionId, String rollNo, String overCapacityReason) {
         var current = find(enrolmentId).orElseThrow(() -> new NotFoundException("Enrolment not found: " + enrolmentId));
         String override = capacity.reserveSeat(newSectionId, overCapacityReason);
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today(current.schoolId());
         // Closed the day before the new one opens. `ends_on` is the last day an
         // enrolment counts, so closing it at `today` while the replacement
         // starts at `today` put the child on two registers for a day — which the
@@ -166,7 +169,7 @@ public class EnrolmentRepository {
         // set that gets renumbered and the set that gets parked have to be the
         // same one — a mismatch leaves a stale number behind for the unique
         // index to trip over.
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today(schoolIds.get(0));
         List<UUID> ordered = jdbc.query(
             "SELECT e.id FROM enrolment e JOIN student s ON s.id = e.student_id " +
             "WHERE e.section_id = ? AND " + EnrolmentActivity.activeOn("e") + " ORDER BY s.admission_no",

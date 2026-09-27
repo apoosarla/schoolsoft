@@ -1,6 +1,7 @@
 package com.schoolsoft.tenancy.internal;
 
 import com.schoolsoft.iam.api.AccountProvisioning;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.iam.api.Authz;
 import com.schoolsoft.people.api.StaffDto;
 import com.schoolsoft.people.api.StaffOnboarding;
@@ -40,16 +41,18 @@ public class SchoolOnboardingService {
     private final JdbcTemplate jdbc;
     private final Authz authz;
     private final SchoolRepository schools;
+    private final SchoolClock clock;
     private final StaffOnboarding staff;
     private final AccountProvisioning accounts;
 
     public SchoolOnboardingService(JdbcTemplate jdbc, Authz authz, SchoolRepository schools,
-                                   StaffOnboarding staff, AccountProvisioning accounts) {
+                                   StaffOnboarding staff, AccountProvisioning accounts, SchoolClock clock) {
         this.jdbc = jdbc;
         this.authz = authz;
         this.schools = schools;
         this.staff = staff;
         this.accounts = accounts;
+        this.clock = clock;
     }
 
     // ----------------------------------------------------------- readiness
@@ -221,7 +224,7 @@ public class SchoolOnboardingService {
             schoolId, campusId,
             employeeNo == null || employeeNo.isBlank() ? "EMP-001" : employeeNo.trim(),
             firstName, lastName, blankToNull(email), blankToNull(phone),
-            "permanent", LocalDate.now()));
+            "permanent", clock.today(schoolId)));
 
         UUID accountId = accounts.createStaffAccount(schoolId, created.id(), email, phone);
         accounts.grantSchoolRole(created.id(), schoolId, role);

@@ -1,6 +1,7 @@
 package com.schoolsoft.iam.api;
 
 import com.schoolsoft.enrolment.api.EnrolmentActivity;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import java.sql.Date;
@@ -72,11 +73,13 @@ public class DirectoryScope {
     }
 
     private final DataSource dataSource;
+    private final SchoolClock clock;
     private final SelfScope selfScope;
 
-    public DirectoryScope(DataSource dataSource, SelfScope selfScope) {
+    public DirectoryScope(DataSource dataSource, SelfScope selfScope, SchoolClock clock) {
         this.dataSource = dataSource;
         this.selfScope = selfScope;
+        this.clock = clock;
     }
 
     public Visible ofCurrentUser() {
@@ -108,7 +111,7 @@ public class DirectoryScope {
         // whose sections that teacher may read. The two have to agree: a
         // parent who can message a teacher who cannot open their child's
         // record has been given a dead address.
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today();
         String enrolledToday = EnrolmentActivity.activeOnDateLiteral("e", today);
         String placeholders = String.join(",", Collections.nCopies(mine.size(), "?"));
         List<UUID> teachers = jdbc.query(

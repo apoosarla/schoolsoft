@@ -1,6 +1,7 @@
 package com.schoolsoft.enrolment.api;
 
 import com.schoolsoft.enrolment.internal.StudentSubjectRepository;
+import com.schoolsoft.platform.time.SchoolClock;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -24,12 +25,16 @@ import org.springframework.stereotype.Service;
 public class SubjectSetResolver {
 
     private final StudentSubjectRepository repo;
+    private final SchoolClock clock;
 
-    public SubjectSetResolver(StudentSubjectRepository repo) { this.repo = repo; }
+    public SubjectSetResolver(StudentSubjectRepository repo, SchoolClock clock) {
+        this.repo = repo;
+        this.clock = clock;
+    }
 
     /** Subjects for a specific enrolment, as of {@code onDate}. */
     public List<StudentSubjectDto> forEnrolment(UUID enrolmentId, LocalDate onDate) {
-        return repo.resolveForEnrolment(enrolmentId, onDate == null ? LocalDate.now() : onDate);
+        return repo.resolveForEnrolment(enrolmentId, onDate == null ? clock.today() : onDate);
     }
 
     /**
@@ -38,7 +43,7 @@ public class SubjectSetResolver {
      * taking then, not what they take now.
      */
     public List<StudentSubjectDto> forStudent(UUID studentId, LocalDate onDate) {
-        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        LocalDate date = onDate == null ? clock.today() : onDate;
         UUID enrolmentId = repo.enrolmentIdFor(studentId, date);
         return enrolmentId == null ? List.of() : repo.resolveForEnrolment(enrolmentId, date);
     }
@@ -53,7 +58,7 @@ public class SubjectSetResolver {
     ) {
         var byStudent = new java.util.LinkedHashMap<UUID, java.util.Set<UUID>>();
         for (StudentSubjectDto row : repo.resolveForGrade(gradeId, academicYearId,
-                onDate == null ? LocalDate.now() : onDate)) {
+                onDate == null ? clock.today() : onDate)) {
             byStudent.computeIfAbsent(row.studentId(), k -> new java.util.LinkedHashSet<>()).add(row.subjectId());
         }
         return byStudent;

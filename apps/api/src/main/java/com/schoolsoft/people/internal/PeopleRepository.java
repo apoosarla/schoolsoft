@@ -1,6 +1,7 @@
 package com.schoolsoft.people.internal;
 
 import com.schoolsoft.iam.api.CampusScope;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.iam.api.DirectoryScope;
 import com.schoolsoft.people.api.GuardianDto;
 import com.schoolsoft.people.api.PeopleController;
@@ -25,14 +26,16 @@ public class PeopleRepository {
     private final JdbcTemplate jdbc;
     private final CampusScope campusScope;
     private final DirectoryScope directoryScope;
+    private final SchoolClock clock;
     private final NumberSeries numbers;
 
     public PeopleRepository(JdbcTemplate jdbc, CampusScope campusScope, DirectoryScope directoryScope,
-                            NumberSeries numbers) {
+                            NumberSeries numbers, SchoolClock clock) {
         this.jdbc = jdbc;
         this.campusScope = campusScope;
         this.directoryScope = directoryScope;
         this.numbers = numbers;
+        this.clock = clock;
     }
 
     private static final RowMapper<StudentDto> STUDENT = (rs, i) -> new StudentDto(
@@ -59,9 +62,9 @@ public class PeopleRepository {
      * (XFER-03). {@link com.schoolsoft.enrolment.api.EnrolmentActivity} holds the
      * one copy of it.</p>
      */
-    private static String liveEnrolment() {
+    private String liveEnrolment() {
         return com.schoolsoft.enrolment.api.EnrolmentActivity
-            .activeOnDateLiteral("e", LocalDate.now());
+            .activeOnDateLiteral("e", clock.today());
     }
 
     public List<StudentDto> listStudents(UUID schoolId, UUID sectionId, String q, int limit) {

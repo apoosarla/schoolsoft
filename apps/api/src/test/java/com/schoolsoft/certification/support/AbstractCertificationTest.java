@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -42,6 +43,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * disabled list is the remaining work.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(CertClock.Config.class)
 @Tag("cert")
 public abstract class AbstractCertificationTest {
 
@@ -55,6 +57,7 @@ public abstract class AbstractCertificationTest {
     @Autowired protected JdbcTemplate platformJdbc;
     @Autowired protected ChainProvisioningService provisioning;
     @Autowired protected TenantHosts tenantHosts;
+    @Autowired protected CertClock clock;
 
     protected final ObjectMapper json = new ObjectMapper();
 

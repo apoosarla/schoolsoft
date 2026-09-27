@@ -1667,9 +1667,26 @@ several are security-relevant.
   (`DunningService`) already did.
 
 - **GAP-36 — Dates are derived in the JVM's zone, not the school's.**
-  `school.timezone` is stored and never read; `DeviceController` and
-  `EnrolmentRepository.transfer` call `LocalDate.now()`. On a UTC server a
-  23:55 IST event lands on the next day (NFR-08).
+  ✅ **Closed 2026-09-27.** `platform.time.SchoolClock` is the one place an
+  instant becomes a day: `today(schoolId)` applies `school.timezone`, `today()`
+  the caller's school, and a caller with no school gets the column's own
+  default (Asia/Kolkata). The instant comes from an injected `Clock` (UTC).
+  All ~70 `LocalDate.now()` and `CURRENT_DATE` sites now bind it, and
+  `TenantAwareDataSource` sets each connection's Postgres `TimeZone` to the
+  school's, so `DEFAULT CURRENT_DATE` and `timestamptz::date` (the collection
+  report's `captured_at::date`) agree with the Java side.
+  `ArchitectureTest.dates_are_taken_in_the_schools_zone` fails the build on a new
+  `LocalDate.now()` or `CURRENT_DATE`. NFR-08 pins the suite's `CertClock` to
+  00:30 IST (still the previous day in UTC) and checks the device event lands
+  on the school's date.
+  Original finding: `school.timezone` was stored and never read;
+  `DeviceController` and `EnrolmentRepository.transfer` called
+  `LocalDate.now()`, so on a UTC server an event between midnight and 05:30
+  IST landed on the previous day (NFR-08).
+
+  Not done: a school's zone is read once and kept for the life of the JVM,
+  since nothing edits `school.timezone`. A path that edits it must forget the
+  school in `SchoolZones`. The dunning cron still fires on the server's zone.
 
 - **GAP-37 — Assessment lifecycle and report-card locks are not enforced.**
   ✅ **Closed 2026-08-13 (Phase 5).** A sealed assessment refuses marks and

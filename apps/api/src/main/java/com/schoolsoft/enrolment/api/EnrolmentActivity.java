@@ -1,6 +1,7 @@
 package com.schoolsoft.enrolment.api;
 
 import java.sql.Date;
+import com.schoolsoft.platform.time.SchoolClock;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -49,8 +50,12 @@ import org.springframework.stereotype.Service;
 public class EnrolmentActivity {
 
     private final DataSource dataSource;
+    private final SchoolClock clock;
 
-    public EnrolmentActivity(DataSource dataSource) { this.dataSource = dataSource; }
+    public EnrolmentActivity(DataSource dataSource, SchoolClock clock) {
+        this.dataSource = dataSource;
+        this.clock = clock;
+    }
 
     /**
      * The predicate, for an enrolment table aliased {@code alias}. Takes two
@@ -75,8 +80,8 @@ public class EnrolmentActivity {
     }
 
     /** Today, for the callers that do not take a date from their caller. */
-    public static LocalDate orToday(LocalDate date) {
-        return date == null ? LocalDate.now() : date;
+    public LocalDate orToday(LocalDate date) {
+        return date == null ? clock.today() : date;
     }
 
     // ------------------------------------------------------------ the queries

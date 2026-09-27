@@ -1,6 +1,7 @@
 package com.schoolsoft.enrolment.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.enrolment.internal.EnrolmentRepository;
 import com.schoolsoft.iam.api.SelfScope;
@@ -21,17 +22,19 @@ public class EnrolmentController {
     private final EnrolmentRepository repo;
     private final StudentSubjectRepository subjects;
     private final SubjectSetResolver subjectSets;
+    private final SchoolClock clock;
     private final SelfScope selfScope;
     private final TeacherScope teacherScope;
 
     public EnrolmentController(EnrolmentRepository repo, StudentSubjectRepository subjects,
                                SubjectSetResolver subjectSets, SelfScope selfScope,
-                               TeacherScope teacherScope) {
+                               TeacherScope teacherScope, SchoolClock clock) {
         this.repo = repo;
         this.subjects = subjects;
         this.subjectSets = subjectSets;
         this.selfScope = selfScope;
         this.teacherScope = teacherScope;
+        this.clock = clock;
     }
 
     @PreAuthorize("@perm.canAnyOf('enrolment.view', 'enrolment.view.own')")
@@ -148,7 +151,7 @@ public class EnrolmentController {
     @PostMapping("/{id}/elections")
     public StudentSubjectDto elect(@PathVariable UUID id, @RequestBody ElectRequest req) {
         return subjects.elect(id, req.subjectId(), req.electiveGroupId(),
-            req.effectiveFrom() == null ? LocalDate.now() : req.effectiveFrom());
+            req.effectiveFrom() == null ? clock.today() : req.effectiveFrom());
     }
 
     public record DropElectionRequest(@NotNull UUID subjectId, LocalDate effectiveTo) {}
@@ -157,7 +160,7 @@ public class EnrolmentController {
     @PreAuthorize("@perm.can('election.manage')")
     @PostMapping("/{id}/elections/drop")
     public ResponseEntity<Void> dropElection(@PathVariable UUID id, @RequestBody DropElectionRequest req) {
-        subjects.drop(id, req.subjectId(), req.effectiveTo() == null ? LocalDate.now() : req.effectiveTo());
+        subjects.drop(id, req.subjectId(), req.effectiveTo() == null ? clock.today() : req.effectiveTo());
         return ResponseEntity.noContent().build();
     }
 }

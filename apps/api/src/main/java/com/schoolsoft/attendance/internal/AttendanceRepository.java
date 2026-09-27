@@ -1,6 +1,7 @@
 package com.schoolsoft.attendance.internal;
 
 import com.schoolsoft.attendance.api.AttendanceRecordDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.attendance.api.AttendanceSummaryDto;
 import com.schoolsoft.attendance.api.LeaveApplicationDto;
 import com.schoolsoft.platform.tenancy.TenantContext;
@@ -28,36 +29,23 @@ public class AttendanceRepository {
     private final AcademicYearGuard academicYears;
     private final AttendanceAmendmentService amendments;
     private final LeaveMaterialisationService leaveDays;
+    private final SchoolClock clock;
     private final LeaveAuthorizer leaveAuthorizer;
 
     public AttendanceRepository(JdbcTemplate jdbc, WorkingDayService workingDays,
                                 AcademicYearGuard academicYears, AttendanceAmendmentService amendments,
-                                LeaveMaterialisationService leaveDays, LeaveAuthorizer leaveAuthorizer) {
+                                LeaveMaterialisationService leaveDays, LeaveAuthorizer leaveAuthorizer, SchoolClock clock) {
         this.jdbc = jdbc;
         this.workingDays = workingDays;
         this.academicYears = academicYears;
         this.amendments = amendments;
         this.leaveDays = leaveDays;
         this.leaveAuthorizer = leaveAuthorizer;
+        this.clock = clock;
     }
 
     /** A section's cohort scope, which is what a calendar entry can be narrowed to. */
     private record SectionScope(UUID gradeId, UUID campusId) {}
-
-    /**
-     * "Today" as the school experiences it. A server in UTC and a school in
-     * IST disagree for five and a half hours every evening, which is long
-     * enough to make a legitimate late-evening mark look like a future date.
-     */
-    private LocalDate todayAt(UUID schoolId) {
-        var zones = jdbc.queryForList("SELECT timezone FROM school WHERE id = ?", String.class, schoolId);
-        String zone = zones.isEmpty() || zones.get(0) == null ? null : zones.get(0);
-        try {
-            return LocalDate.now(zone == null ? java.time.ZoneId.systemDefault() : java.time.ZoneId.of(zone));
-        } catch (java.time.DateTimeException e) {
-            return LocalDate.now();
-        }
-    }
 
     /** Refuses a mark for a date the student was not enrolled in that section on (ATT-12). */
     private void requireEnrolledOn(UUID studentId, UUID sectionId, LocalDate onDate) {
@@ -113,7 +101,7 @@ public class AttendanceRepository {
         // Attendance is a record of something that happened. A date the school
         // has not reached yet, or one outside the student's own enrolment
         // window, is a mis-keyed form rather than a fact (ATT-12).
-        LocalDate today = todayAt(schoolId);
+        LocalDate today = clock.today(schoolId);
         if (onDate.isAfter(today)) {
             throw new IllegalArgumentException(
                 "Attendance cannot be marked for a future date: " + onDate + " (today is " + today + ")");

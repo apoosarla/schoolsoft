@@ -1,6 +1,7 @@
 package com.schoolsoft.enrolment.api;
 
 import com.schoolsoft.tenancy.api.NumberSeries;
+import com.schoolsoft.platform.time.SchoolClock;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -18,11 +19,13 @@ import org.springframework.stereotype.Service;
 public class RollNumbers {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final NumberSeries numbers;
 
-    public RollNumbers(JdbcTemplate jdbc, NumberSeries numbers) {
+    public RollNumbers(JdbcTemplate jdbc, NumberSeries numbers, SchoolClock clock) {
         this.jdbc = jdbc;
         this.numbers = numbers;
+        this.clock = clock;
     }
 
     /**
@@ -38,7 +41,7 @@ public class RollNumbers {
         // Today's register on both counts: a child working out their notice
         // still holds their roll number, so it is neither free to reissue nor
         // safe to seed the series past.
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today(schoolId);
         Integer highest = jdbc.queryForObject(
             "SELECT COALESCE(max(NULLIF(regexp_replace(e.roll_no, '\\D', '', 'g'), '')::int), 0) " +
             "FROM enrolment e WHERE e.section_id = ? AND " + EnrolmentActivity.activeOn("e")

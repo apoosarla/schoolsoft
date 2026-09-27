@@ -1,6 +1,7 @@
 package com.schoolsoft.boardintegration.internal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.boardintegration.api.BoardExportJobDto;
 import com.schoolsoft.enrolment.api.StudentSubjectDto;
 import com.schoolsoft.enrolment.api.SubjectSetResolver;
@@ -19,13 +20,15 @@ import org.springframework.stereotype.Repository;
 public class BoardExportRepository {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final ObjectMapper json;
     private final SubjectSetResolver subjectSets;
 
-    public BoardExportRepository(JdbcTemplate jdbc, ObjectMapper json, SubjectSetResolver subjectSets) {
+    public BoardExportRepository(JdbcTemplate jdbc, ObjectMapper json, SubjectSetResolver subjectSets, SchoolClock clock) {
         this.jdbc = jdbc;
         this.json = json;
         this.subjectSets = subjectSets;
+        this.clock = clock;
     }
 
     private PGobject jsonb(Object value) {
@@ -141,7 +144,8 @@ public class BoardExportRepository {
 
     /** The children a board export declares: the register on the export date. */
     private List<Map<String, Object>> candidates(UUID sectionId, UUID studentId) {
-        java.sql.Date today = java.sql.Date.valueOf(java.time.LocalDate.now());
+        java.time.LocalDate day = clock.today();
+        java.sql.Date today = java.sql.Date.valueOf(day);
         String sql =
             "SELECT e.id AS enrolment_id, st.id AS student_id, st.admission_no, " +
             "       (st.first_name || ' ' || COALESCE(st.last_name, '')) AS full_name, st.dob, e.roll_no " +
@@ -158,7 +162,7 @@ public class BoardExportRepository {
             candidate.put("name", rs.getString("full_name").trim());
             candidate.put("dob", rs.getDate("dob") == null ? null : rs.getDate("dob").toString());
             candidate.put("rollNo", rs.getString("roll_no"));
-            candidate.put("subjects", subjectSets.forEnrolment(enrolmentId, java.time.LocalDate.now()).stream()
+            candidate.put("subjects", subjectSets.forEnrolment(enrolmentId, day).stream()
                 .map(StudentSubjectDto::subjectCode).toList());
             return candidate;
         }, today, today, sectionId != null ? sectionId : studentId);

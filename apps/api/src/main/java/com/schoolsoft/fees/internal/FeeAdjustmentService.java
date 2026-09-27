@@ -1,6 +1,7 @@
 package com.schoolsoft.fees.internal;
 
 import com.schoolsoft.audit.api.AuditService;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.fees.api.FeeAdjustmentDto;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -38,11 +39,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class FeeAdjustmentService {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final AuditService audit;
 
-    public FeeAdjustmentService(JdbcTemplate jdbc, AuditService audit) {
+    public FeeAdjustmentService(JdbcTemplate jdbc, AuditService audit, SchoolClock clock) {
         this.jdbc = jdbc;
         this.audit = audit;
+        this.clock = clock;
     }
 
     private static final RowMapper<FeeAdjustmentDto> MAPPER = (rs, i) -> new FeeAdjustmentDto(
@@ -245,9 +248,10 @@ public class FeeAdjustmentService {
      */
     public void recomputeStatus(UUID invoiceId, boolean refunded) {
         var invoice = jdbc.query(
-            "SELECT total, paid, due_on, status FROM fee_invoice WHERE id = ?",
+            "SELECT total, paid, due_on, status, school_id FROM fee_invoice WHERE id = ?",
             (rs, i) -> new Object[]{ rs.getDouble("total"), rs.getDouble("paid"),
-                                     rs.getDate("due_on").toLocalDate(), rs.getString("status") },
+                                     rs.getDate("due_on").toLocalDate(), rs.getString("status"),
+                                     UUID.fromString(rs.getString("school_id")) },
             invoiceId);
         if (invoice.isEmpty()) return;
         double total = (Double) invoice.get(0)[0];
@@ -263,7 +267,7 @@ public class FeeAdjustmentService {
             status = "paid";
         } else if (paid > 0.005) {
             status = "partial";
-        } else if (dueOn.isBefore(LocalDate.now())) {
+        } else if (dueOn.isBefore(clock.today((UUID) invoice.get(0)[4]))) {
             status = "overdue";
         } else {
             status = "open";

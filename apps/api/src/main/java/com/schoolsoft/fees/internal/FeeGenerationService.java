@@ -1,6 +1,7 @@
 package com.schoolsoft.fees.internal;
 
 import com.schoolsoft.platform.web.NotFoundException;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.tenancy.api.NumberSeries;
 import com.schoolsoft.enrolment.api.EnrolmentActivity;
@@ -39,13 +40,15 @@ import org.springframework.transaction.annotation.Transactional;
 public class FeeGenerationService {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final NumberSeries numbers;
     private final WorkingDayService workingDays;
 
-    public FeeGenerationService(JdbcTemplate jdbc, NumberSeries numbers, WorkingDayService workingDays) {
+    public FeeGenerationService(JdbcTemplate jdbc, NumberSeries numbers, WorkingDayService workingDays, SchoolClock clock) {
         this.jdbc = jdbc;
         this.numbers = numbers;
         this.workingDays = workingDays;
+        this.clock = clock;
     }
 
     public record RunResult(UUID runId, int invoicesCreated, int studentsSkipped, double totalBilled,
@@ -120,7 +123,7 @@ public class FeeGenerationService {
      * uninvoiced.
      */
     private List<Enrolled> enrolledStudents(UUID schoolId, UUID academicYearId, UUID gradeId) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today(schoolId);
         StringBuilder sql = new StringBuilder(
             "SELECT st.id AS student_id, sec.grade_id, st.family_id, e.starts_on " +
             "FROM enrolment e JOIN section sec ON sec.id = e.section_id " +
@@ -182,9 +185,9 @@ public class FeeGenerationService {
         jdbc.update(
             "INSERT INTO fee_invoice (id, school_id, student_id, academic_year_id, invoice_no, cycle_label, " +
             "  issued_on, due_on, subtotal, gst, total, status, fee_schedule_run_id, family_id) " +
-            "VALUES (?, ?, ?, ?, ?, ?, CURRENT_DATE, ?, ?, ?, ?, 'open', ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
             invoiceId, schoolId, student.studentId(), academicYearId, invoiceNo, cycleLabel,
-            Date.valueOf(dueOn), round(subtotal), round(gst), total, runId, student.familyId());
+            Date.valueOf(clock.today(schoolId)), Date.valueOf(dueOn), round(subtotal), round(gst), total, runId, student.familyId());
 
         jdbc.batchUpdate(
             "INSERT INTO fee_invoice_line (id, fee_invoice_id, fee_head_id, description, amount, discount, " +
@@ -258,7 +261,7 @@ public class FeeGenerationService {
             "  WHERE sib.family_id = ?) " +
             "SELECT rn FROM household WHERE id = ?",
             (rs, i) -> rs.getInt("rn"),
-            Date.valueOf(LocalDate.now()), Date.valueOf(LocalDate.now()),
+            Date.valueOf(clock.today(schoolId)), Date.valueOf(clock.today(schoolId)),
             academicYearId, student.familyId(), student.studentId());
         Integer rank = ranks.isEmpty() ? null : ranks.get(0);
         if (rank == null || rank < 2) return 0;
@@ -304,8 +307,8 @@ public class FeeGenerationService {
         jdbc.update(
             "INSERT INTO fee_invoice (id, school_id, student_id, family_id, invoice_no, cycle_label, " +
             "  issued_on, due_on, subtotal, gst, total, status) " +
-            "VALUES (?, ?, NULL, ?, ?, ?, CURRENT_DATE, ?, ?, 0, ?, 'open')",
-            invoiceId, schoolId, familyId, invoiceNo, cycleLabel, Date.valueOf(dueOn),
+            "VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, ?, 'open')",
+            invoiceId, schoolId, familyId, invoiceNo, cycleLabel, Date.valueOf(clock.today(schoolId)), Date.valueOf(dueOn),
             round(total), round(total));
         for (Object[] row : open) {
             jdbc.update(

@@ -1,6 +1,7 @@
 package com.schoolsoft.people.internal;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolsoft.enrolment.api.RollNumbers;
 import com.schoolsoft.iam.api.Authz;
@@ -64,16 +65,18 @@ public class StudentImportService {
     private final NumberSeries numbers;
     private final RollNumbers rollNumbers;
     private final SectionCapacity capacity;
+    private final SchoolClock clock;
     private final Authz authz;
 
     public StudentImportService(JdbcTemplate jdbc, ObjectMapper json, NumberSeries numbers,
-                                RollNumbers rollNumbers, SectionCapacity capacity, Authz authz) {
+                                RollNumbers rollNumbers, SectionCapacity capacity, Authz authz, SchoolClock clock) {
         this.jdbc = jdbc;
         this.json = json;
         this.numbers = numbers;
         this.rollNumbers = rollNumbers;
         this.capacity = capacity;
         this.authz = authz;
+        this.clock = clock;
     }
 
     // ------------------------------------------------------------- preview
@@ -157,7 +160,7 @@ public class StudentImportService {
                 "  starts_on, status, roll_no, over_capacity_reason) " +
                 "VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
                 UUID.randomUUID(), batch.schoolId(), studentId, row.sectionId(), row.academicYearId(),
-                Date.valueOf(LocalDate.now()),
+                Date.valueOf(clock.today(batch.schoolId())),
                 rollNumbers.nextFor(batch.schoolId(), row.sectionId(), row.rollNo()), override);
             enrolled++;
 

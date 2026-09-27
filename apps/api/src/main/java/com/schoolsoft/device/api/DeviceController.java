@@ -1,6 +1,7 @@
 package com.schoolsoft.device.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.device.internal.DeviceRepository;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -14,7 +15,12 @@ import org.springframework.web.bind.annotation.*;
 public class DeviceController {
 
     private final DeviceRepository repo;
-    public DeviceController(DeviceRepository repo) { this.repo = repo; }
+    private final SchoolClock clock;
+
+    public DeviceController(DeviceRepository repo, SchoolClock clock) {
+        this.repo = repo;
+        this.clock = clock;
+    }
 
     @PreAuthorize("@perm.can('device.view')")
     @GetMapping
@@ -48,7 +54,7 @@ public class DeviceController {
     public DeviceDto studentEvent(@PathVariable UUID deviceId, @RequestBody StudentEventRequest req) {
         return repo.ingestStudentEvent(
             deviceId, req.schoolId(), req.studentId(), req.sectionId(),
-            req.onDate() == null ? LocalDate.now() : req.onDate(), req.source()
+            req.onDate() == null ? clock.today(req.schoolId()) : req.onDate(), req.source()
         );
     }
 
@@ -58,7 +64,7 @@ public class DeviceController {
     @PostMapping("/{deviceId}/events/staff")
     public DeviceDto staffEvent(@PathVariable UUID deviceId, @RequestBody StaffEventRequest req) {
         return repo.ingestStaffEvent(
-            deviceId, req.schoolId(), req.staffId(), req.onDate() == null ? LocalDate.now() : req.onDate(), req.checkIn()
+            deviceId, req.schoolId(), req.staffId(), req.onDate() == null ? clock.today(req.schoolId()) : req.onDate(), req.checkIn()
         );
     }
 }

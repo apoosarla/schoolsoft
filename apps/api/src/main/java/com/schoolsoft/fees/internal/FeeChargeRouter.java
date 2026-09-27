@@ -1,6 +1,7 @@
 package com.schoolsoft.fees.internal;
 
 import com.schoolsoft.platform.web.NotFoundException;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.tenancy.api.NumberSeries;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -12,11 +13,13 @@ import org.springframework.stereotype.Service;
 public class FeeChargeRouter {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final NumberSeries numbers;
 
-    public FeeChargeRouter(JdbcTemplate jdbc, NumberSeries numbers) {
+    public FeeChargeRouter(JdbcTemplate jdbc, NumberSeries numbers, SchoolClock clock) {
         this.jdbc = jdbc;
         this.numbers = numbers;
+        this.clock = clock;
     }
 
     /**
@@ -35,15 +38,16 @@ public class FeeChargeRouter {
             "SELECT id FROM academic_year WHERE school_id = ? AND is_current LIMIT 1",
             (rs, i) -> UUID.fromString(rs.getString("id")), schoolId).stream().findFirst().orElse(null);
 
+        LocalDate today = clock.today(schoolId);
         UUID invoiceId = UUID.randomUUID();
         String invoiceNo = numbers.next(schoolId, NumberSeries.Kind.invoice, null, "INV{YY}{SEQ:5}", null);
         jdbc.update(
             "INSERT INTO fee_invoice (id, school_id, student_id, academic_year_id, invoice_no, cycle_label, " +
             "  issued_on, due_on, subtotal, gst, total, status) " +
-            "VALUES (?, ?, ?, ?, ?, ?, CURRENT_DATE, ?, 0, 0, 0, 'open')",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 'open')",
             invoiceId, schoolId, studentId, academicYearId, invoiceNo,
-            "Miscellaneous " + LocalDate.now().getYear(),
-            java.sql.Date.valueOf(LocalDate.now().plusDays(15)));
+            "Miscellaneous " + today.getYear(),
+            java.sql.Date.valueOf(today), java.sql.Date.valueOf(today.plusDays(15)));
         return invoiceId;
     }
 

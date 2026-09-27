@@ -1,6 +1,7 @@
 package com.schoolsoft.fees.internal;
 
 import com.schoolsoft.enrolment.api.EnrolmentActivity;
+import com.schoolsoft.platform.time.SchoolClock;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
@@ -24,7 +25,12 @@ public class FeeReportRepository {
 
     private final JdbcTemplate jdbc;
 
-    public FeeReportRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final SchoolClock clock;
+
+    public FeeReportRepository(JdbcTemplate jdbc, SchoolClock clock) {
+        this.jdbc = jdbc;
+        this.clock = clock;
+    }
 
     public Map<String, Object> dayBook(UUID schoolId, LocalDate from, LocalDate to) {
         List<Map<String, Object>> byMethod = jdbc.query(
@@ -89,7 +95,7 @@ public class FeeReportRepository {
         // a status, a family working out their notice fell out of their grade
         // the day the withdrawal was filed and their dues moved to
         // "(unassigned)".
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today(schoolId);
         List<Object> args = new java.util.ArrayList<>();
         args.add(Date.valueOf(today));
         args.add(Date.valueOf(today));

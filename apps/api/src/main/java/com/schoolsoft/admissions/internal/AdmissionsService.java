@@ -1,6 +1,7 @@
 package com.schoolsoft.admissions.internal;
 
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.admissions.api.AdmissionPolicyDto;
 import com.schoolsoft.admissions.api.PublicAdmissions;
 import com.schoolsoft.iam.api.PermissionChecker;
@@ -47,14 +48,16 @@ public class AdmissionsService implements PublicAdmissions {
     );
 
     private final AdmissionsRepository repo;
+    private final SchoolClock clock;
     private final NotificationService notifications;
     private final PermissionChecker permissions;
 
     public AdmissionsService(AdmissionsRepository repo, NotificationService notifications,
-                             PermissionChecker permissions) {
+                             PermissionChecker permissions, SchoolClock clock) {
         this.repo = repo;
         this.notifications = notifications;
         this.permissions = permissions;
+        this.clock = clock;
     }
 
     @Override
@@ -68,7 +71,8 @@ public class AdmissionsService implements PublicAdmissions {
         String firstName, String lastName, LocalDate dob, String gender,
         String guardianName, String guardianPhone, String guardianEmail, String source
     ) {
-        requireSaneApplication(academicYearId, gradeId, firstName, dob, guardianName, guardianPhone, guardianEmail);
+        requireSaneApplication(academicYearId, gradeId, firstName, dob, guardianName, guardianPhone, guardianEmail,
+            clock.today(schoolId));
         AdmissionApplicationDto created = repo.create(
             schoolId, academicYearId, gradeId, applicationNo, blankToNull(firstName), blankToNull(lastName), dob,
             blankToNull(gender), blankToNull(guardianName), guardianPhone.trim(), blankToNull(guardianEmail), source);
@@ -97,7 +101,8 @@ public class AdmissionsService implements PublicAdmissions {
      * NOT NULL constraint whose message named the table.
      */
     private static void requireSaneApplication(UUID academicYearId, UUID gradeId, String firstName, LocalDate dob,
-                                               String guardianName, String guardianPhone, String guardianEmail) {
+                                               String guardianName, String guardianPhone, String guardianEmail,
+                                               LocalDate today) {
         if (academicYearId == null || gradeId == null) {
             throw new IllegalArgumentException("Choose the year and the grade being applied for");
         }
@@ -112,7 +117,6 @@ public class AdmissionsService implements PublicAdmissions {
             throw new IllegalArgumentException("That email address does not look right");
         }
         if (dob != null) {
-            LocalDate today = LocalDate.now();
             if (!dob.isBefore(today)) throw new IllegalArgumentException("Date of birth has to be in the past");
             if (dob.isBefore(today.minusYears(25))) {
                 throw new IllegalArgumentException("Date of birth is more than 25 years ago — check the year");
@@ -167,7 +171,7 @@ public class AdmissionsService implements PublicAdmissions {
         LocalDate expiry = null;
         if ("offered".equals(toState)) {
             expiry = offerExpiresOn != null ? offerExpiresOn
-                : LocalDate.now().plusDays(policy.offerValidityDays());
+                : clock.today(current.schoolId()).plusDays(policy.offerValidityDays());
         }
 
         if (!repo.transitionFrom(id, current.state(), toState, actorUserId, expiry)) {

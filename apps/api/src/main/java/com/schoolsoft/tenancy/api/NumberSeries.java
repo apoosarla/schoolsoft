@@ -1,6 +1,7 @@
 package com.schoolsoft.tenancy.api;
 
 import java.time.LocalDate;
+import com.schoolsoft.platform.time.SchoolClock;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -32,8 +33,12 @@ public class NumberSeries {
     public enum Kind { admission, roll, invoice, receipt, certificate, application }
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
 
-    public NumberSeries(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public NumberSeries(JdbcTemplate jdbc, SchoolClock clock) {
+        this.jdbc = jdbc;
+        this.clock = clock;
+    }
 
     /**
      * Next number in the series, creating it from {@code defaultPattern} if the
@@ -87,14 +92,15 @@ public class NumberSeries {
             lastResetYear = (Integer) rows.get(0)[4];
         }
 
-        int year = LocalDate.now().getYear();
+        LocalDate today = clock.today(schoolId);
+        int year = today.getYear();
         if ("yearly".equals(resetPolicy) && (lastResetYear == null || lastResetYear != year)) {
             value = 1L;
             jdbc.update("UPDATE number_series SET last_reset_year = ? WHERE id = ?", year, seriesId);
         }
 
         jdbc.update("UPDATE number_series SET next_value = ? WHERE id = ?", value + 1, seriesId);
-        return render(pattern, value, vars);
+        return render(pattern, value, vars, today);
     }
 
     /** Peeks without consuming — for a UI that previews the next number. */
@@ -104,13 +110,13 @@ public class NumberSeries {
             "WHERE school_id = ? AND kind = ? AND scope_id IS NOT DISTINCT FROM ?",
             (rs, i) -> new Object[]{ rs.getString("pattern"), rs.getLong("next_value") },
             schoolId, kind.name(), scopeId);
-        if (rows.isEmpty()) return render(defaultPattern, 1L, vars);
-        return render((String) rows.get(0)[0], (Long) rows.get(0)[1], vars);
+        LocalDate today = clock.today(schoolId);
+        if (rows.isEmpty()) return render(defaultPattern, 1L, vars, today);
+        return render((String) rows.get(0)[0], (Long) rows.get(0)[1], vars, today);
     }
 
-    static String render(String pattern, long value, Map<String, String> vars) {
+    static String render(String pattern, long value, Map<String, String> vars, LocalDate today) {
         String out = pattern;
-        LocalDate today = LocalDate.now();
         out = out.replace("{YYYY}", String.valueOf(today.getYear()));
         out = out.replace("{YY}", String.format("%02d", today.getYear() % 100));
         if (vars != null) {

@@ -1,6 +1,7 @@
 package com.schoolsoft.rollover.internal;
 
 import com.schoolsoft.rollover.api.ReadinessReportDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.tenancy.api.AcademicYearDto;
 import com.schoolsoft.tenancy.api.AcademicYearLifecycle;
@@ -32,14 +33,16 @@ public class RolloverReadiness {
     private static final int ITEMS_PER_KIND = 25;
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final WorkingDayService workingDays;
     private final AcademicYearLifecycle academicYears;
 
     public RolloverReadiness(JdbcTemplate jdbc, WorkingDayService workingDays,
-                             AcademicYearLifecycle academicYears) {
+                             AcademicYearLifecycle academicYears, SchoolClock clock) {
         this.jdbc = jdbc;
         this.workingDays = workingDays;
         this.academicYears = academicYears;
+        this.clock = clock;
     }
 
     public ReadinessReportDto check(UUID schoolId, UUID academicYearId) {
@@ -124,7 +127,8 @@ public class RolloverReadiness {
      * (Phase 1), so a holiday or a declared closure never shows up here.
      */
     private List<UnmarkedDay> unmarkedDays(UUID schoolId, AcademicYearDto year) {
-        LocalDate to = year.endsOn().isBefore(LocalDate.now()) ? year.endsOn() : LocalDate.now();
+        LocalDate today = clock.today(schoolId);
+        LocalDate to = year.endsOn().isBefore(today) ? year.endsOn() : today;
         if (to.isBefore(year.startsOn())) return List.of();
         List<LocalDate> days = workingDays.workingDays(schoolId, year.startsOn(), to, null, null);
         if (days.isEmpty()) return List.of();

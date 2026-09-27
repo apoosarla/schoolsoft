@@ -1,6 +1,7 @@
 package com.schoolsoft.library.internal;
 
 import com.schoolsoft.fees.api.FeeCharges;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.library.api.LibraryCopyDto;
 import com.schoolsoft.library.api.LibraryIssueDto;
 import com.schoolsoft.library.api.LibraryTitleDto;
@@ -24,11 +25,13 @@ public class LibraryRepository {
     private static final double DEFAULT_FINE_PER_DAY = 2.0;
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final FeeCharges feeCharges;
 
-    public LibraryRepository(JdbcTemplate jdbc, FeeCharges feeCharges) {
+    public LibraryRepository(JdbcTemplate jdbc, FeeCharges feeCharges, SchoolClock clock) {
         this.jdbc = jdbc;
         this.feeCharges = feeCharges;
+        this.clock = clock;
     }
 
     private record ChargePolicy(double finePerDay, Double maxFine, double lostMultiplier, double damagedPct) {}
@@ -120,8 +123,9 @@ public class LibraryRepository {
     public LibraryIssueDto issue(UUID schoolId, UUID copyId, String memberType, UUID memberId, LocalDate dueOn) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-            "INSERT INTO library_issue (id, school_id, copy_id, member_type, member_id, due_on) VALUES (?, ?, ?, ?, ?, ?)",
-            id, schoolId, copyId, memberType, memberId, Date.valueOf(dueOn)
+            "INSERT INTO library_issue (id, school_id, copy_id, member_type, member_id, issued_on, due_on) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            id, schoolId, copyId, memberType, memberId, Date.valueOf(clock.today(schoolId)), Date.valueOf(dueOn)
         );
         jdbc.update("UPDATE library_copy SET status = 'issued' WHERE id = ?", copyId);
         return jdbc.queryForObject("SELECT " + ISSUE_COLS + " FROM library_issue WHERE id = ?", ISSUE_MAPPER, id);
@@ -141,7 +145,7 @@ public class LibraryRepository {
             UUID.class, issueId);
         ChargePolicy policy = policyFor(schoolId);
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today(schoolId);
         long lateDays = Math.max(0, ChronoUnit.DAYS.between(issue.dueOn(), today));
         double fine = lateDays * policy.finePerDay();
         if (policy.maxFine() != null) fine = Math.min(fine, policy.maxFine());
@@ -191,8 +195,8 @@ public class LibraryRepository {
         jdbc.update("UPDATE library_copy SET status = ? WHERE id = ?",
             "lost".equals(kind) ? "lost" : "damaged", issue.copyId());
         jdbc.update(
-            "UPDATE library_issue SET returned_on = COALESCE(returned_on, CURRENT_DATE), charge_kind = ? " +
-            "WHERE id = ?", kind, issueId);
+            "UPDATE library_issue SET returned_on = COALESCE(returned_on, ?), charge_kind = ? " +
+            "WHERE id = ?", Date.valueOf(clock.today(schoolId)), kind, issueId);
 
         if ("student".equals(issue.memberType())) {
             var adjustment = feeCharges.chargeStudent(schoolId, issue.memberId(), "LIBRARY", amount,

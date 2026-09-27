@@ -2,6 +2,7 @@ package com.schoolsoft.transport.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.iam.api.RouteScope;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.transport.internal.DriverService;
 import com.schoolsoft.transport.internal.RouteAssignmentService;
 import com.schoolsoft.transport.internal.TransportRepository;
@@ -24,14 +25,16 @@ public class TransportController {
     private final RouteScope routes;
     private final DriverService drivers;
     private final RouteAssignmentService rosters;
+    private final SchoolClock clock;
 
     public TransportController(TransportRepository repo, TripService trips, RouteScope routes,
-                               DriverService drivers, RouteAssignmentService rosters) {
+                               DriverService drivers, RouteAssignmentService rosters, SchoolClock clock) {
         this.repo = repo;
         this.trips = trips;
         this.routes = routes;
         this.drivers = drivers;
         this.rosters = rosters;
+        this.clock = clock;
     }
 
     // -------------------------- Vehicles --------------------------
@@ -129,7 +132,7 @@ public class TransportController {
     @PreAuthorize("@perm.can('transport.view')")
     @GetMapping("/route-assignments/gaps")
     public List<RouteGapDto> routeGaps(@RequestParam UUID schoolId) {
-        return rosters.gaps(schoolId, LocalDate.now());
+        return rosters.gaps(schoolId, clock.today(schoolId));
     }
 
     public record AssignRouteRequest(
@@ -144,7 +147,7 @@ public class TransportController {
     @PreAuthorize("@perm.can('transport.view')")
     @GetMapping("/route-assignments/clashes")
     public List<RouteClashDto> routeClashes(@RequestParam UUID schoolId) {
-        return rosters.clashes(schoolId, LocalDate.now());
+        return rosters.clashes(schoolId, clock.today(schoolId));
     }
 
     /** The clashes an assignment would make, asked before saving it. Changes nothing. */
@@ -152,7 +155,7 @@ public class TransportController {
     @PostMapping("/route-assignments/check")
     public List<RouteClashDto> checkRouteAssignment(@RequestBody AssignRouteRequest req) {
         return rosters.clashesFor(req.schoolId(), req.routeId(), req.vehicleId(), req.driverId(),
-            req.effectiveFrom(), LocalDate.now());
+            req.effectiveFrom(), clock.today(req.schoolId()));
     }
 
     /** Rosters a driver and vehicle to a route from a day, replacing whoever drove it then. */

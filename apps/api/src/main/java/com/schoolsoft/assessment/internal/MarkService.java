@@ -1,6 +1,7 @@
 package com.schoolsoft.assessment.internal;
 
 import com.schoolsoft.assessment.api.MarkDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.assessment.api.MarkReevaluationDto;
 import com.schoolsoft.assessment.api.MarkRevisionDto;
 import com.schoolsoft.enrolment.api.SubjectSetResolver;
@@ -56,16 +57,18 @@ public class MarkService {
     private final JdbcTemplate jdbc;
     private final AcademicYearGuard academicYears;
     private final SubjectSetResolver subjectSets;
+    private final SchoolClock clock;
     private final Authz authz;
     private final ReportCardService reportCards;
 
     public MarkService(JdbcTemplate jdbc, AcademicYearGuard academicYears, SubjectSetResolver subjectSets,
-                       Authz authz, ReportCardService reportCards) {
+                       Authz authz, ReportCardService reportCards, SchoolClock clock) {
         this.jdbc = jdbc;
         this.academicYears = academicYears;
         this.subjectSets = subjectSets;
         this.authz = authz;
         this.reportCards = reportCards;
+        this.clock = clock;
     }
 
     // ------------------------------------------------------------------ reads
@@ -354,7 +357,7 @@ public class MarkService {
     Component component(UUID componentId) {
         var rows = jdbc.query(
             "SELECT ac.id, ac.assessment_id, ac.max_marks, a.subject_id, a.section_id, a.status, " +
-            "       COALESCE(a.scheduled_on, CURRENT_DATE) AS on_date " +
+            "       COALESCE(a.scheduled_on, ?) AS on_date " +
             "FROM assessment_component ac JOIN assessment a ON a.id = ac.assessment_id WHERE ac.id = ?",
             (rs, i) -> new Component(
                 UUID.fromString(rs.getString("id")),
@@ -364,7 +367,7 @@ public class MarkService {
                 UUID.fromString(rs.getString("section_id")),
                 rs.getString("status"),
                 rs.getDate("on_date").toLocalDate()),
-            componentId);
+            java.sql.Date.valueOf(clock.today()), componentId);
         if (rows.isEmpty()) throw new NotFoundException("Assessment component not found: " + componentId);
         return rows.get(0);
     }

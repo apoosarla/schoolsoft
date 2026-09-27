@@ -1,6 +1,7 @@
 package com.schoolsoft.certificate.internal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.assessment.api.AcademicRecord;
 import com.schoolsoft.attendance.api.AttendanceSummaries;
 import com.schoolsoft.certificate.api.CertificateDto;
@@ -47,12 +48,13 @@ public class CertificateService {
     private final NumberSeries numbers;
     private final AttendanceSummaries attendance;
     private final AcademicRecord academics;
+    private final SchoolClock clock;
     private final Authz authz;
     private final ObjectMapper json;
 
     public CertificateService(CertificateRepository repo, DataSource dataSource, NumberSeries numbers,
                               AttendanceSummaries attendance, AcademicRecord academics, Authz authz,
-                              ObjectMapper json) {
+                              ObjectMapper json, SchoolClock clock) {
         this.repo = repo;
         this.dataSource = dataSource;
         this.numbers = numbers;
@@ -60,6 +62,7 @@ public class CertificateService {
         this.academics = academics;
         this.authz = authz;
         this.json = json;
+        this.clock = clock;
     }
 
     /** What the registrar supplies that no table holds: conduct, and any remarks. */
@@ -104,7 +107,7 @@ public class CertificateService {
                 + "enrolment. Revoke it before issuing a replacement.");
         }
 
-        LocalDate issuedOn = LocalDate.now();
+        LocalDate issuedOn = clock.today(student.schoolId());
         Map<String, Object> payload = buildPayload(student, exit, req, issuedOn);
         String serial = numbers.next(student.schoolId(), NumberSeries.Kind.certificate, null,
             serialPattern(req.kind()), Map.of("KIND", req.kind().toUpperCase()));
@@ -253,7 +256,7 @@ public class CertificateService {
                     "FROM enrolment e JOIN section sec ON sec.id = e.section_id " +
                     "JOIN grade g ON g.id = sec.grade_id " +
                     "WHERE e.student_id = ? AND " +
-                    com.schoolsoft.enrolment.api.EnrolmentActivity.activeOnDateLiteral("e", LocalDate.now()) +
+                    com.schoolsoft.enrolment.api.EnrolmentActivity.activeOnDateLiteral("e", clock.today()) +
                     " LIMIT 1",
                     (rs, i) -> new Exit(UUID.fromString(rs.getString("id")), null,
                         rs.getDate("starts_on").toLocalDate(), null, rs.getString("class_label"), null),

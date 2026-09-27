@@ -3,6 +3,8 @@ package com.schoolsoft.platform.tenancy;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.ZoneId;
+import com.schoolsoft.platform.time.SchoolZones;
 import javax.sql.DataSource;
 import org.springframework.jdbc.datasource.DelegatingDataSource;
 
@@ -52,6 +54,12 @@ public class TenantAwareDataSource extends DelegatingDataSource {
             } else {
                 st.execute("RESET app.school_id");
             }
+            // CURRENT_DATE, DEFAULT CURRENT_DATE and timestamptz::date follow the
+            // session's zone, so it is the school's — the same day SchoolClock says.
+            ZoneId zone = schoolId == null || schema.equals(defaultSchema)
+                ? SchoolZones.DEFAULT
+                : SchoolZones.of(raw, snap.schoolId());
+            st.execute("SET TIME ZONE '" + zone.getId() + "'");
         }
         return raw;
     }

@@ -302,6 +302,15 @@ Worth knowing before trusting a green build:
   question really is the status: the two writes, and rollover, which asks who is
   *continuing* rather than who is on the register — and counts seats in next
   year's sections, whose enrolments have not started yet.
+- **"Today" is the school's today.** A server on UTC and a school on IST
+  disagree about the date from midnight to 05:30. Take a date from
+  `SchoolClock.today(schoolId)` (or `today()` for the caller's own school),
+  never `LocalDate.now()`, and bind it into SQL rather than writing
+  `CURRENT_DATE`. `ArchitectureTest.dates_are_taken_in_the_schools_zone`
+  fails the build on either. The datasource also pins each connection's
+  `TimeZone` to the school's, so a column default or a `timestamptz::date`
+  agrees. In the suite, `CertClock` can pin the instant, and a scenario that
+  pins it releases it in a `finally`.
 - **"What is on the timetable?" is a question about a date.** A
   `timetable_slot` carries `effective_from`/`effective_to`, and every read
   applies the window — `TimetableRepository.IN_FORCE` is the one copy of the

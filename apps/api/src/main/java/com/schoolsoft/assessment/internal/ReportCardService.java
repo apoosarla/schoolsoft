@@ -1,6 +1,7 @@
 package com.schoolsoft.assessment.internal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.assessment.api.CurriculumStrategy;
 import com.schoolsoft.assessment.api.GradeScaleDto;
 import com.schoolsoft.assessment.api.ReportCardDetailDto;
@@ -79,12 +80,13 @@ public class ReportCardService {
     private final AssessmentPolicyRepository policies;
     private final FeeDues feeDues;
     private final AcademicYearGuard academicYears;
+    private final SchoolClock clock;
     private final Authz authz;
 
     public ReportCardService(JdbcTemplate jdbc, ObjectMapper json, SubjectSetResolver subjectSets,
                              AttendanceSummaries attendance, StrategyRegistry strategies,
                              GradeScaleRepository gradeScales, AssessmentPolicyRepository policies,
-                             FeeDues feeDues, AcademicYearGuard academicYears, Authz authz) {
+                             FeeDues feeDues, AcademicYearGuard academicYears, Authz authz, SchoolClock clock) {
         this.jdbc = jdbc;
         this.json = json;
         this.subjectSets = subjectSets;
@@ -95,6 +97,7 @@ public class ReportCardService {
         this.feeDues = feeDues;
         this.academicYears = academicYears;
         this.authz = authz;
+        this.clock = clock;
     }
 
     // ------------------------------------------------------------- generation
@@ -196,7 +199,7 @@ public class ReportCardService {
         // The section's register today, not its unclosed enrolments: a child
         // working out their notice still sits in the class and still gets a
         // card for the term they were there for.
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today(schoolId);
         List<UUID> students = jdbc.queryForList(
             "SELECT e.student_id FROM enrolment e WHERE e.section_id = ? AND "
                 + EnrolmentActivity.activeOn("e") + " ORDER BY e.roll_no",
@@ -411,7 +414,7 @@ public class ReportCardService {
             from = range.get(0)[0];
             to = range.get(0)[1];
         }
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today();
         LocalDate asOf = to.isAfter(today) ? today : to;
         LocalDate windowEnd = asOf.isBefore(from) ? from : asOf;
 

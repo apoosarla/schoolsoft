@@ -1,6 +1,7 @@
 package com.schoolsoft.transport.internal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -30,11 +31,13 @@ import org.springframework.stereotype.Repository;
 public class TransportRepository {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final ObjectMapper json;
 
-    public TransportRepository(JdbcTemplate jdbc, ObjectMapper json) {
+    public TransportRepository(JdbcTemplate jdbc, ObjectMapper json, SchoolClock clock) {
         this.jdbc = jdbc;
         this.json = json;
+        this.clock = clock;
     }
 
     private PGobject jsonb(Object value) {
@@ -213,7 +216,7 @@ public class TransportRepository {
      * about the newest row (TRN-06). Passing no date asks about today.
      */
     public List<RouteRiderDto> listStudentsOnRoute(UUID routeId, LocalDate onDate) {
-        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        LocalDate date = onDate == null ? clock.today() : onDate;
         return jdbc.query(
             "SELECT st.id, st.student_id, st.route_id, st.stop_id, st.starts_on, st.ends_on, " +
             "       s.admission_no, s.first_name, s.last_name, " +

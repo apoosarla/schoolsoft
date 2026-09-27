@@ -1,6 +1,7 @@
 package com.schoolsoft.admissions.internal;
 
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.admissions.api.AdmissionEventDto;
 import com.schoolsoft.admissions.api.AdmissionFunnelSummaryDto;
 import com.schoolsoft.admissions.api.AdmissionPolicyDto;
@@ -25,14 +26,16 @@ public class AdmissionsRepository {
     private final JdbcTemplate jdbc;
     private final SectionCapacity capacity;
     private final NumberSeries numbers;
+    private final SchoolClock clock;
     private final RollNumbers rollNumbers;
 
     public AdmissionsRepository(JdbcTemplate jdbc, SectionCapacity capacity, NumberSeries numbers,
-                                RollNumbers rollNumbers) {
+                                RollNumbers rollNumbers, SchoolClock clock) {
         this.jdbc = jdbc;
         this.capacity = capacity;
         this.numbers = numbers;
         this.rollNumbers = rollNumbers;
+        this.clock = clock;
     }
 
     private static final RowMapper<AdmissionApplicationDto> MAPPER = (rs, i) -> new AdmissionApplicationDto(
@@ -250,12 +253,12 @@ public class AdmissionsRepository {
 
         Long soon = jdbc.queryForObject(
             "SELECT count(*) FROM admission_application WHERE school_id = ? AND state = 'offered' "
-            + "AND offer_expires_on IS NOT NULL AND offer_expires_on BETWEEN CURRENT_DATE AND CURRENT_DATE + 7",
-            Long.class, schoolId);
+            + "AND offer_expires_on IS NOT NULL AND offer_expires_on BETWEEN ? AND ?",
+            Long.class, schoolId, Date.valueOf(clock.today(schoolId)), Date.valueOf(clock.today(schoolId).plusDays(7)));
         Long expired = jdbc.queryForObject(
             "SELECT count(*) FROM admission_application WHERE school_id = ? AND state = 'offered' "
-            + "AND offer_expires_on IS NOT NULL AND offer_expires_on < CURRENT_DATE",
-            Long.class, schoolId);
+            + "AND offer_expires_on IS NOT NULL AND offer_expires_on < ?",
+            Long.class, schoolId, Date.valueOf(clock.today(schoolId)));
 
         var byState = counted.entrySet().stream()
             .map(e -> new AdmissionFunnelSummaryDto.StateCount(e.getKey(), e.getValue()))
@@ -511,8 +514,9 @@ public class AdmissionsRepository {
         );
         jdbc.update(
             "INSERT INTO enrolment (id, school_id, student_id, section_id, academic_year_id, starts_on, status, " +
-            "  roll_no, over_capacity_reason) VALUES (?, ?, ?, ?, ?, CURRENT_DATE, 'active', ?, ?)",
-            UUID.randomUUID(), app.schoolId(), studentId, sectionId, app.academicYearId(), roll, override
+            "  roll_no, over_capacity_reason) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+            UUID.randomUUID(), app.schoolId(), studentId, sectionId, app.academicYearId(),
+            Date.valueOf(clock.today(app.schoolId())), roll, override
         );
         // The family that applied has to exist as a login and as a household, or
         // the guardian cannot see this child and no sibling rule can find them

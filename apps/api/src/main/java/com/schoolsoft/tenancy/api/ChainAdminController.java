@@ -1,6 +1,7 @@
 package com.schoolsoft.tenancy.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.tenancy.internal.ChainHandoverService;
 import com.schoolsoft.tenancy.internal.SchoolOnboardingService;
@@ -39,17 +40,19 @@ public class ChainAdminController {
     private final DataSource dataSource;
     private final SchoolRepository schools;
     private final SchoolOnboardingService onboarding;
+    private final SchoolClock clock;
     private final ChainHandoverService handover;
 
     public ChainAdminController(ChainProvisioningService provisioningService, JdbcTemplate platformJdbc,
                                 DataSource dataSource, SchoolRepository schools,
-                                SchoolOnboardingService onboarding, ChainHandoverService handover) {
+                                SchoolOnboardingService onboarding, ChainHandoverService handover, SchoolClock clock) {
         this.provisioningService = provisioningService;
         this.platformJdbc = platformJdbc;
         this.dataSource = dataSource;
         this.schools = schools;
         this.onboarding = onboarding;
         this.handover = handover;
+        this.clock = clock;
     }
 
     private void requirePlatformAdmin() {
@@ -118,7 +121,7 @@ public class ChainAdminController {
             // Children on a register today across the chain — the date
             // predicate, not the status, so a filed withdrawal does not drop
             // the headcount before the child has left.
-            java.sql.Date today = java.sql.Date.valueOf(java.time.LocalDate.now());
+            java.sql.Date today = java.sql.Date.valueOf(clock.today());
             long activeEnrolments = chainJdbc.queryForObject(
                 "SELECT count(*) FROM enrolment e WHERE "
                     + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e"),
@@ -140,7 +143,7 @@ public class ChainAdminController {
     @GetMapping("/{id}/schools")
     public List<ChainSchoolDto> schools(@PathVariable UUID id) {
         requirePlatformAdmin();
-        java.sql.Date today = java.sql.Date.valueOf(java.time.LocalDate.now());
+        java.sql.Date today = java.sql.Date.valueOf(clock.today());
         return inChain(id, chainJdbc -> chainJdbc.query(
             "SELECT s.id, s.slug, s.name, s.board_code, s.lifecycle, s.went_live_at, "
                 + "  (SELECT count(*) FROM enrolment e WHERE e.school_id = s.id AND "

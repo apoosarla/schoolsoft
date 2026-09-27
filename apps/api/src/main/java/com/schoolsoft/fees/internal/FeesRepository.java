@@ -1,6 +1,7 @@
 package com.schoolsoft.fees.internal;
 
 import com.schoolsoft.fees.api.DunningPolicyDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.fees.api.FeeHeadDto;
 import com.schoolsoft.fees.api.FeeInvoiceDto;
 import com.schoolsoft.fees.api.FeeInvoiceLineDto;
@@ -26,14 +27,16 @@ public class FeesRepository {
     private final JdbcTemplate jdbc;
     private final AcademicYearGuard academicYears;
     private final WorkingDayService workingDays;
+    private final SchoolClock clock;
     private final FeeAdjustmentService adjustments;
 
     public FeesRepository(JdbcTemplate jdbc, AcademicYearGuard academicYears, WorkingDayService workingDays,
-                          FeeAdjustmentService adjustments) {
+                          FeeAdjustmentService adjustments, SchoolClock clock) {
         this.jdbc = jdbc;
         this.academicYears = academicYears;
         this.workingDays = workingDays;
         this.adjustments = adjustments;
+        this.clock = clock;
     }
 
     /**
@@ -47,9 +50,9 @@ public class FeesRepository {
             (rs, i) -> UUID.fromString(rs.getString("id")), schoolId);
         if (!current.isEmpty()) return current.get(0);
         return jdbc.query(
-            "SELECT id FROM academic_year WHERE school_id = ? AND CURRENT_DATE BETWEEN starts_on AND ends_on "
+            "SELECT id FROM academic_year WHERE school_id = ? AND ? BETWEEN starts_on AND ends_on "
             + "LIMIT 1",
-            (rs, i) -> UUID.fromString(rs.getString("id")), schoolId).stream().findFirst().orElse(null);
+            (rs, i) -> UUID.fromString(rs.getString("id")), schoolId, java.sql.Date.valueOf(clock.today(schoolId))).stream().findFirst().orElse(null);
     }
 
     // -------------------------- Fee Head --------------------------
@@ -129,7 +132,7 @@ public class FeesRepository {
         UUID schoolId, UUID studentId, String invoiceNo, String cycleLabel, LocalDate dueOn, List<InvoiceLineInput> lines
     ) {
         // Billing into a closed year is the same mistake as editing its marks.
-        academicYears.requireOpenOn(schoolId, LocalDate.now());
+        academicYears.requireOpenOn(schoolId, clock.today(schoolId));
 
         // A due date on a holiday penalises a family for a day the school is
         // shut, so it moves to the next day the office is open (GAP-01). One

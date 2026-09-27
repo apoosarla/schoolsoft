@@ -1,6 +1,7 @@
 package com.schoolsoft.iam.api;
 
 import com.schoolsoft.platform.security.Perm;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ForbiddenException;
 import java.time.LocalDate;
@@ -76,11 +77,13 @@ public class RouteScope {
     }
 
     private final DataSource dataSource;
+    private final SchoolClock clock;
     private final PermissionChecker perms;
 
-    public RouteScope(DataSource dataSource, PermissionChecker perms) {
+    public RouteScope(DataSource dataSource, PermissionChecker perms, SchoolClock clock) {
         this.dataSource = dataSource;
         this.perms = perms;
+        this.clock = clock;
     }
 
     /** The routes the caller is confined to, or an unrestricted scope. */
@@ -154,7 +157,7 @@ public class RouteScope {
      */
     private List<UUID> routesDrivenBy(UUID staffId) {
         var jdbc = new JdbcTemplate(dataSource);
-        var today = java.sql.Date.valueOf(LocalDate.now());
+        var today = java.sql.Date.valueOf(clock.today());
         return jdbc.query(
             "SELECT DISTINCT ra.route_id FROM route_assignment ra " +
             "JOIN driver d ON d.id = ra.driver_id " +

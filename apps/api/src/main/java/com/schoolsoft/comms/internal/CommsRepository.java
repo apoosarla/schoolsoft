@@ -1,6 +1,7 @@
 package com.schoolsoft.comms.internal;
 
 import com.schoolsoft.comms.api.AnnouncementDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.comms.api.MessageDto;
 import com.schoolsoft.comms.api.MessageThreadDto;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -20,7 +21,12 @@ import org.springframework.stereotype.Repository;
 public class CommsRepository {
 
     private final JdbcTemplate jdbc;
-    public CommsRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final SchoolClock clock;
+
+    public CommsRepository(JdbcTemplate jdbc, SchoolClock clock) {
+        this.jdbc = jdbc;
+        this.clock = clock;
+    }
 
     private Array uuidArray(List<UUID> ids) {
         return jdbc.execute((ConnectionCallback<Array>) con -> con.createArrayOf("uuid", ids == null ? new UUID[0] : ids.toArray()));
@@ -121,7 +127,7 @@ public class CommsRepository {
     public List<UUID> audienceStudentIds(AnnouncementDto announcement) {
         List<UUID> scopeIds = announcement.scopeIds() == null ? List.of() : announcement.scopeIds();
         String live = com.schoolsoft.enrolment.api.EnrolmentActivity
-            .activeOnDateLiteral("e", java.time.LocalDate.now());
+            .activeOnDateLiteral("e", clock.today(announcement.schoolId()));
         return switch (announcement.scopeType()) {
             case "school" -> jdbc.query(
                 "SELECT DISTINCT e.student_id FROM enrolment e WHERE e.school_id = ? AND " + live,

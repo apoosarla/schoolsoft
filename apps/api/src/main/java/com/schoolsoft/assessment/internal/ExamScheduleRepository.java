@@ -1,6 +1,7 @@
 package com.schoolsoft.assessment.internal;
 
 import com.schoolsoft.assessment.api.ExamScheduleDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.assessment.api.ExamSessionDto;
 import com.schoolsoft.assessment.api.HallTicketDto;
 import com.schoolsoft.enrolment.api.SubjectSetResolver;
@@ -35,11 +36,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class ExamScheduleRepository {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final SubjectSetResolver subjectSets;
 
-    public ExamScheduleRepository(JdbcTemplate jdbc, SubjectSetResolver subjectSets) {
+    public ExamScheduleRepository(JdbcTemplate jdbc, SubjectSetResolver subjectSets, SchoolClock clock) {
         this.jdbc = jdbc;
         this.subjectSets = subjectSets;
+        this.clock = clock;
     }
 
     // -------------------------------------------------------------- schedules
@@ -304,8 +307,8 @@ public class ExamScheduleRepository {
                 "                  WHERE t.exam_schedule_id = ? AND t.student_id = e.student_id) " +
                 "ORDER BY e.roll_no",
                 UUID.class, gradeId, schedule.academicYearId(),
-                java.sql.Date.valueOf(java.time.LocalDate.now()),
-                java.sql.Date.valueOf(java.time.LocalDate.now()), scheduleId);
+                java.sql.Date.valueOf(clock.today()),
+                java.sql.Date.valueOf(clock.today()), scheduleId);
             for (UUID studentId : students) {
                 seq++;
                 jdbc.update(

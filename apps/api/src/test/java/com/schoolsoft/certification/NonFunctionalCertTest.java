@@ -4,9 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.schoolsoft.certification.support.AbstractCertificationTest;
 import com.schoolsoft.certification.support.CertificationFixture;
+import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 
 /**
  * CERT-NFR — non-functional.
@@ -80,12 +83,65 @@ class NonFunctionalCertTest extends AbstractCertificationTest {
             String.class, CertificationFixture.CHAIN_SLUG)).isNull();
     }
 
+    /**
+     * The clock is pinned to instants whose UTC date and IST date differ, on a
+     * day other than the real one — so neither the JVM's zone nor the wall
+     * clock can pass for the school's.
+     */
     @Test @Tag("P1")
-    @Disabled("Date derivation uses the JVM default zone, not the school's: DeviceController falls back to "
-        + "LocalDate.now() and EnrolmentRepository.transfer uses LocalDate.now(), while school.timezone is "
-        + "stored and never read. On a UTC server a 23:55 IST event lands on the next day. New gap found "
-        + "in Phase 0.")
     void cert_NFR_08_timezoneCorrectnessKeepsDateOnlyFieldsUnshifted() {
+        String token = principalToken(cie());
+        UUID sectionId = currentFocusSection(cie());
+        UUID studentId = studentsIn(sectionId).get(2);
+        UUID staffId = queryOne("SELECT subject_id FROM user_account WHERE id = ?", UUID.class,
+            cie().principalUserId());
+        var device = post("/v1/devices", body("schoolId", cie().id(), "kind", "biometric",
+            "vendor", "eSSL", "model", "K30", "serialNo", "CERT-NFR08-" + UUID.randomUUID().toString().substring(0, 6),
+            "location", "Main gate", "apiKey", "cert-device-key"), token);
+        assertThat(device.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID deviceId = UUID.fromString(device.getBody().get("id").asText());
+
+        try {
+            // 23:55 IST on 25 August: 18:25 UTC, the same date either way.
+            clock.pin(Instant.parse("2026-08-25T18:25:00Z"));
+            assertThat(post("/v1/devices/" + deviceId + "/events/student", body(
+                "schoolId", cie().id(), "studentId", studentId, "sectionId", sectionId, "source", "biometric"),
+                token).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? "
+                + "AND on_date = '2026-08-25' AND period_no IS NULL AND source = 'biometric'", studentId)).isEqualTo(1);
+
+            // 00:30 IST on 26 August is still the 25th in UTC. The school's day has turned.
+            clock.pin(Instant.parse("2026-08-25T19:00:00Z"));
+            assertThat(post("/v1/devices/" + deviceId + "/events/student", body(
+                "schoolId", cie().id(), "studentId", studentId, "sectionId", sectionId, "source", "biometric"),
+                token).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? "
+                + "AND on_date = '2026-08-26' AND period_no IS NULL AND source = 'biometric'", studentId)).isEqualTo(1);
+
+            assertThat(post("/v1/devices/" + deviceId + "/events/staff", body(
+                "schoolId", cie().id(), "staffId", staffId, "checkIn", true), token)
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(count("SELECT count(*) FROM staff_attendance WHERE staff_id = ? AND on_date = '2026-08-26'",
+                staffId)).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM staff_attendance WHERE staff_id = ? AND on_date = '2026-08-25'",
+                staffId)).isZero();
+        } finally {
+            clock.release();
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM attendance_record WHERE student_id = ? AND source = 'biometric' "
+                    + "AND on_date IN ('2026-08-25', '2026-08-26') AND period_no IS NULL", studentId);
+                jdbc.update("DELETE FROM staff_attendance WHERE staff_id = ? AND on_date IN ('2026-08-25', '2026-08-26') "
+                    + "AND source = 'biometric'", staffId);
+                jdbc.update("DELETE FROM device WHERE id = ?", deviceId);
+            });
+        }
+
+        // A date-only field reads back as the day that was written, whatever
+        // the server's zone: a date of birth is never an instant.
+        String dob = queryOne("SELECT dob::text FROM student WHERE id = ?", String.class, studentId);
+        var student = get("/v1/people/students/" + studentId, token);
+        assertThat(student.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(student.getBody().get("dob").asText()).isEqualTo(dob);
     }
 
     @Test @Tag("P2")

@@ -1,6 +1,7 @@
 package com.schoolsoft.fees.internal;
 
 import com.schoolsoft.jobs.api.TenantJobRunner;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.notification.api.NotificationService;
 import java.time.LocalDate;
 import java.util.List;
@@ -28,26 +29,28 @@ public class DunningService {
     private final JdbcTemplate jdbc;
     private final TenantJobRunner jobs;
     private final FeeAdjustmentService adjustments;
+    private final SchoolClock clock;
     private final NotificationService notifications;
 
     @Value("${schoolsoft.jobs.dunning.enabled:true}")
     private boolean enabled;
 
     public DunningService(JdbcTemplate jdbc, TenantJobRunner jobs, FeeAdjustmentService adjustments,
-                          NotificationService notifications) {
+                          NotificationService notifications, SchoolClock clock) {
         this.jdbc = jdbc;
         this.jobs = jobs;
         this.adjustments = adjustments;
         this.notifications = notifications;
+        this.clock = clock;
     }
 
     /** Once a day is enough: dunning is measured in days, not minutes. */
     @Scheduled(cron = "${schoolsoft.jobs.dunning.cron:0 30 6 * * *}")
     public void runDaily() {
         if (!enabled) return;
-        String runKey = "dunning:" + LocalDate.now();
+        String runKey = "dunning:" + clock.today();
         jobs.forEachSchool("fee.dunning", runKey, school -> {
-            Result result = runFor(school.schoolId(), LocalDate.now());
+            Result result = runFor(school.schoolId(), clock.today(school.schoolId()));
             return TenantJobRunner.Outcome.of(
                 "markedOverdue", result.markedOverdue(),
                 "remindersSent", result.remindersSent(),

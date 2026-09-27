@@ -1,6 +1,7 @@
 package com.schoolsoft.fees.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.audit.api.Audited;
 import com.schoolsoft.fees.internal.DunningService;
 import com.schoolsoft.iam.api.SelfScope;
@@ -28,12 +29,13 @@ public class FeesController {
     private final FeeGenerationService generation;
     private final FeeAdjustmentService adjustments;
     private final FeeReportRepository reports;
+    private final SchoolClock clock;
     private final DunningService dunning;
     private final SelfScope selfScope;
 
     public FeesController(FeesRepository repo, FeeStructureRepository structures,
                           FeeGenerationService generation, FeeAdjustmentService adjustments,
-                          FeeReportRepository reports, DunningService dunning, SelfScope selfScope) {
+                          FeeReportRepository reports, DunningService dunning, SelfScope selfScope, SchoolClock clock) {
         this.repo = repo;
         this.structures = structures;
         this.generation = generation;
@@ -41,6 +43,7 @@ public class FeesController {
         this.reports = reports;
         this.dunning = dunning;
         this.selfScope = selfScope;
+        this.clock = clock;
     }
 
     /**
@@ -273,7 +276,7 @@ public class FeesController {
     @PreAuthorize("@perm.can('dunning.manage')")
     @PostMapping("/dunning/run")
     public DunningService.Result runDunning(@RequestBody DunningRunRequest req) {
-        return dunning.runFor(req.schoolId(), req.asOf() == null ? LocalDate.now() : req.asOf());
+        return dunning.runFor(req.schoolId(), req.asOf() == null ? clock.today(req.schoolId()) : req.asOf());
     }
 
     // -------------------------- Reports (FEE-14/15) --------------------------

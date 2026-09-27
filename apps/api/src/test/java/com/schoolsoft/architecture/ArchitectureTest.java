@@ -202,6 +202,45 @@ class ArchitectureTest {
     }
 
     /**
+     * A date the API derives for itself is the school's date. The JVM's zone is
+     * the server's, and a server on UTC puts every IST mark made before 05:30
+     * on the day before (NFR-08). {@code SchoolClock} is the one place that
+     * turns the instant into a day.
+     */
+    @Test
+    @DisplayName("today is the school's today")
+    void dates_are_taken_in_the_schools_zone() throws IOException {
+        noClasses().that().resideOutsideOfPackage("com.schoolsoft.platform.time..")
+                .should().callMethodWhere(com.tngtech.archunit.base.DescribedPredicate.describe(
+                        "LocalDate/LocalDateTime/LocalTime.now",
+                        call -> call.getName().equals("now")
+                                && (call.getTargetOwner().isEquivalentTo(java.time.LocalDate.class)
+                                    || call.getTargetOwner().isEquivalentTo(java.time.LocalDateTime.class)
+                                    || call.getTargetOwner().isEquivalentTo(java.time.LocalTime.class))))
+                .as("today comes from SchoolClock.today(schoolId), not the JVM's zone")
+                .check(CLASSES);
+
+        // CURRENT_DATE in a statement follows the session zone, which the
+        // datasource does pin to the school's — but a test that pins Clock
+        // cannot move it, so the two would disagree. Bind SchoolClock's date.
+        Pattern currentDate = Pattern.compile("\\bCURRENT_DATE\\b");
+        var offenders = new TreeSet<String>();
+        try (var paths = Files.walk(Path.of("src/main/java"))) {
+            for (Path file : paths.filter(f -> f.toString().endsWith(".java")).toList()) {
+                List<String> lines = Files.readAllLines(file);
+                for (int i = 0; i < lines.size(); i++) {
+                    String code = lines.get(i).strip();
+                    if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) continue;
+                    if (currentDate.matcher(code).find()) {
+                        offenders.add(file.getFileName().toString().replace(".java", "") + ":" + (i + 1));
+                    }
+                }
+            }
+        }
+        assertThat(offenders).as("CURRENT_DATE in SQL — bind SchoolClock.today(schoolId) instead").isEmpty();
+    }
+
+    /**
      * A refusal is a decision, and a decision buried in a SQL helper is one
      * nobody reviewing "who may do this" will find — which is how the API came
      * to ship with no authorization at all. Role checks belong in something

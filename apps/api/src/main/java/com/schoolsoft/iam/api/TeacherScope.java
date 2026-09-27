@@ -1,6 +1,7 @@
 package com.schoolsoft.iam.api;
 
 import com.schoolsoft.platform.security.Perm;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ForbiddenException;
 import java.time.LocalDate;
@@ -83,11 +84,13 @@ public class TeacherScope {
     }
 
     private final DataSource dataSource;
+    private final SchoolClock clock;
     private final PermissionChecker perms;
 
-    public TeacherScope(DataSource dataSource, PermissionChecker perms) {
+    public TeacherScope(DataSource dataSource, PermissionChecker perms, SchoolClock clock) {
         this.dataSource = dataSource;
         this.perms = perms;
+        this.clock = clock;
     }
 
     /** The sections the caller is confined to, or an unrestricted scope. */
@@ -133,7 +136,7 @@ public class TeacherScope {
         UUID staffId = snap == null ? null : currentStaffId(snap);
         if (staffId == null) throw new ForbiddenException("You do not teach this subject in this section");
         var jdbc = new JdbcTemplate(dataSource);
-        var today = java.sql.Date.valueOf(LocalDate.now());
+        var today = java.sql.Date.valueOf(clock.today());
         Integer n = jdbc.queryForObject(
             "SELECT count(*) FROM (" +
             "  SELECT 1 FROM section_subject_teacher WHERE teacher_staff_id = ? AND section_id = ? AND subject_id = ? " +
@@ -167,7 +170,7 @@ public class TeacherScope {
 
         var jdbc = new JdbcTemplate(dataSource);
         String placeholders = String.join(",", Collections.nCopies(scope.sectionIds().size(), "?"));
-        java.sql.Date today = java.sql.Date.valueOf(LocalDate.now());
+        java.sql.Date today = java.sql.Date.valueOf(clock.today());
         Object[] args = new Object[scope.sectionIds().size() + 3];
         args[0] = studentId;
         args[1] = today;
@@ -226,7 +229,7 @@ public class TeacherScope {
      */
     private List<UUID> sectionsTaughtBy(UUID staffId) {
         var jdbc = new JdbcTemplate(dataSource);
-        var today = java.sql.Date.valueOf(LocalDate.now());
+        var today = java.sql.Date.valueOf(clock.today());
         return jdbc.query(
             "SELECT section_id FROM section_subject_teacher WHERE teacher_staff_id = ? " +
             "UNION " +

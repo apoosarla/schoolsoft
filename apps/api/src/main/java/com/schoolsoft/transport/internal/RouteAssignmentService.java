@@ -1,6 +1,7 @@
 package com.schoolsoft.transport.internal;
 
 import com.schoolsoft.audit.api.AuditService;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.transport.api.RouteAssignmentDto;
@@ -58,11 +59,13 @@ public class RouteAssignmentService {
         rs.getDate("effective_to") == null ? null : rs.getDate("effective_to").toLocalDate());
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
     private final AuditService audit;
 
-    public RouteAssignmentService(JdbcTemplate jdbc, AuditService audit) {
+    public RouteAssignmentService(JdbcTemplate jdbc, AuditService audit, SchoolClock clock) {
         this.jdbc = jdbc;
         this.audit = audit;
+        this.clock = clock;
     }
 
     /** Every assignment of the school's routes, current and past, newest window first per route. */
@@ -284,7 +287,7 @@ public class RouteAssignmentService {
     public void delete(UUID schoolId, UUID id) {
         RouteAssignmentDto current = get(schoolId, id);
         int removed = jdbc.update(
-            "DELETE FROM route_assignment WHERE id = ? AND effective_from > CURRENT_DATE", id);
+            "DELETE FROM route_assignment WHERE id = ? AND effective_from > ?", id, java.sql.Date.valueOf(clock.today(schoolId)));
         if (removed == 0) {
             throw new ConflictException("That assignment started on " + current.effectiveFrom()
                 + "; end it instead, so the days it ran still show who drove");

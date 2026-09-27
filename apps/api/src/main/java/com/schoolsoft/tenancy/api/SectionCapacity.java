@@ -1,6 +1,7 @@
 package com.schoolsoft.tenancy.api;
 
 import com.schoolsoft.platform.web.NotFoundException;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import java.sql.Date;
 import java.time.LocalDate;
@@ -21,8 +22,12 @@ import org.springframework.stereotype.Service;
 public class SectionCapacity {
 
     private final JdbcTemplate jdbc;
+    private final SchoolClock clock;
 
-    public SectionCapacity(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public SectionCapacity(JdbcTemplate jdbc, SchoolClock clock) {
+        this.jdbc = jdbc;
+        this.clock = clock;
+    }
 
     public record Occupancy(UUID sectionId, Integer capacity, int active, Integer seatsLeft) {}
 
@@ -30,7 +35,7 @@ public class SectionCapacity {
         // Seats taken today. A child whose withdrawal is filed for the end of
         // the month is still sitting in one of them, so the seat is not free to
         // offer until they have actually gone.
-        LocalDate today = LocalDate.now();
+        LocalDate today = clock.today();
         var rows = jdbc.query(
             "SELECT s.capacity, (SELECT count(*) FROM enrolment e " +
             "                    WHERE e.section_id = s.id AND " + EnrolmentActivity.activeOn("e")

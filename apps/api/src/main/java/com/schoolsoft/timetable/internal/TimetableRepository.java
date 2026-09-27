@@ -1,6 +1,7 @@
 package com.schoolsoft.timetable.internal;
 
 import com.schoolsoft.enrolment.api.StudentSubjectDto;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.enrolment.api.SubjectSetResolver;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -25,17 +26,19 @@ public class TimetableRepository {
     private final JdbcTemplate jdbc;
     private final WorkingDayService workingDays;
     private final SubjectSetResolver subjectSets;
+    private final SchoolClock clock;
     private final CoverRepository covers;
     private final com.schoolsoft.assessment.api.ExamSchedules exams;
 
     public TimetableRepository(JdbcTemplate jdbc, WorkingDayService workingDays,
                               SubjectSetResolver subjectSets, CoverRepository covers,
-                              com.schoolsoft.assessment.api.ExamSchedules exams) {
+                              com.schoolsoft.assessment.api.ExamSchedules exams, SchoolClock clock) {
         this.jdbc = jdbc;
         this.workingDays = workingDays;
         this.subjectSets = subjectSets;
         this.covers = covers;
         this.exams = exams;
+        this.clock = clock;
     }
 
     private static final RowMapper<TimetableSlotDto> MAPPER = (rs, i) -> new TimetableSlotDto(
@@ -69,7 +72,7 @@ public class TimetableRepository {
 
     /** The section's week as it stands on {@code onDate}, superseded slots excluded. */
     public List<TimetableSlotDto> forSection(UUID sectionId, LocalDate onDate) {
-        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        LocalDate date = onDate == null ? clock.today() : onDate;
         return jdbc.query(
             SELECT + "WHERE t.section_id = ? " + IN_FORCE + "ORDER BY t.day_of_week, t.period_no",
             MAPPER, sectionId, Date.valueOf(date), Date.valueOf(date));
@@ -77,7 +80,7 @@ public class TimetableRepository {
 
     /** The teacher's week as it stands on {@code onDate}. */
     public List<TimetableSlotDto> forTeacher(UUID teacherStaffId, LocalDate onDate) {
-        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        LocalDate date = onDate == null ? clock.today() : onDate;
         return jdbc.query(
             SELECT + "WHERE t.teacher_staff_id = ? " + IN_FORCE + "ORDER BY t.day_of_week, t.period_no",
             MAPPER, teacherStaffId, Date.valueOf(date), Date.valueOf(date));
@@ -89,7 +92,7 @@ public class TimetableRepository {
      * and any one student's timetable are different documents (ACAD-09).
      */
     public List<TimetableSlotDto> forStudent(UUID studentId, LocalDate onDate) {
-        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        LocalDate date = onDate == null ? clock.today() : onDate;
         var enrolments = jdbc.query(
             "SELECT e.section_id FROM enrolment e WHERE e.student_id = ? AND "
                 + com.schoolsoft.enrolment.api.EnrolmentActivity.activeOn("e") +
@@ -339,7 +342,7 @@ public class TimetableRepository {
      * do so knowing what is wrong with it.
      */
     public List<String> publishWarnings(UUID sectionId, LocalDate onDate) {
-        LocalDate date = onDate == null ? LocalDate.now() : onDate;
+        LocalDate date = onDate == null ? clock.today() : onDate;
         Date d = Date.valueOf(date);
         List<String> warnings = new java.util.ArrayList<>();
 
