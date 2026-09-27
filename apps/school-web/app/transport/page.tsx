@@ -5,16 +5,20 @@ import { useRouter } from "next/navigation";
 import {
   addTransportStop,
   ApiError,
+  assignRoute,
   assignStudentTransport,
   createDriver,
   createTransportRoute,
   createVehicle,
+  deleteRouteAssignment,
   DriverDto,
+  endRouteAssignment,
   geofenceStatus,
   GeofenceStatusDto,
   getSession,
   hasScreen,
   listDirectory,
+  listRouteAssignments,
   linkDriver,
   listDrivers,
   unlinkDriver,
@@ -23,6 +27,7 @@ import {
   listTransportStops,
   listTripsForSchool,
   listVehicles,
+  RouteAssignmentDto,
   RouteRiderDto,
   Session,
   StudentDto,
@@ -74,6 +79,13 @@ export default function TransportPage() {
   const [routeForm, setRouteForm] = useState({ code: "", name: "", direction: "pickup" });
   const [creatingRoute, setCreatingRoute] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState("");
+
+  const [rosters, setRosters] = useState<RouteAssignmentDto[] | null>(null);
+  const [rosterForm, setRosterForm] = useState({ routeId: "", vehicleId: "", driverId: "", effectiveFrom: todayIso() });
+  const [savingRoster, setSavingRoster] = useState(false);
+  // Ending or deleting an assignment takes a route away from somebody, so each asks twice.
+  const [rosterAction, setRosterAction] = useState<{ id: string; kind: "end" | "delete"; lastDay: string } | null>(null);
+  const [busyRosterId, setBusyRosterId] = useState<string | null>(null);
   const [stops, setStops] = useState<TransportStopDto[] | null>(null);
   const [stopForm, setStopForm] = useState({ name: "", lat: "", lng: "", fee: "" });
   const [addingStop, setAddingStop] = useState(false);
@@ -110,6 +122,7 @@ export default function TransportPage() {
   function refreshAll(schoolId: string) {
     listVehicles(schoolId).then(setVehicles).catch((err) => setError(describeError(err)));
     listDrivers(schoolId).then(setDrivers).catch((err) => setError(describeError(err)));
+    listRouteAssignments(schoolId).then(setRosters).catch((err) => setError(describeError(err)));
     listTransportRoutes(schoolId)
       .then((rs) => {
         setRoutes(rs);
@@ -214,6 +227,42 @@ export default function TransportPage() {
       setError(describeError(err));
     } finally {
       setBusyDriverId(null);
+    }
+  }
+
+  async function onAssignRoute() {
+    if (!session || !rosterForm.routeId || !rosterForm.vehicleId || !rosterForm.driverId || !rosterForm.effectiveFrom) {
+      return;
+    }
+    setSavingRoster(true);
+    setError(null);
+    try {
+      await assignRoute({ schoolId: session.schoolId, ...rosterForm });
+      setRosterForm((f) => ({ ...f, driverId: "" }));
+      setRosters(await listRouteAssignments(session.schoolId));
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setSavingRoster(false);
+    }
+  }
+
+  async function onConfirmRosterAction() {
+    if (!session || !rosterAction) return;
+    setBusyRosterId(rosterAction.id);
+    setError(null);
+    try {
+      if (rosterAction.kind === "end") {
+        await endRouteAssignment(session.schoolId, rosterAction.id, rosterAction.lastDay);
+      } else {
+        await deleteRouteAssignment(session.schoolId, rosterAction.id);
+      }
+      setRosterAction(null);
+      setRosters(await listRouteAssignments(session.schoolId));
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusyRosterId(null);
     }
   }
 
@@ -619,6 +668,142 @@ export default function TransportPage() {
               </table>
             )}
           </>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Who drives each route</h2>
+        <p className="hint">
+          A driver sees a route in the driver app only on the days they are assigned to it. Assigning a route from a
+          day replaces whoever drove it then; they stop the day before.
+        </p>
+        <div className="form-row">
+          <select value={rosterForm.routeId} onChange={(e) => setRosterForm((f) => ({ ...f, routeId: e.target.value }))}>
+            <option value="">Route…</option>
+            {routes?.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.code} · {r.name}
+              </option>
+            ))}
+          </select>
+          <select value={rosterForm.driverId} onChange={(e) => setRosterForm((f) => ({ ...f, driverId: e.target.value }))}>
+            <option value="">Driver…</option>
+            {drivers
+              ?.filter((d) => d.isActive)
+              .map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                  {d.staffId ? "" : " (not linked — no app access)"}
+                </option>
+              ))}
+          </select>
+          <select value={rosterForm.vehicleId} onChange={(e) => setRosterForm((f) => ({ ...f, vehicleId: e.target.value }))}>
+            <option value="">Vehicle…</option>
+            {vehicles?.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.registrationNo}
+              </option>
+            ))}
+          </select>
+          <label className="hint">
+            From{" "}
+            <input
+              type="date"
+              value={rosterForm.effectiveFrom}
+              onChange={(e) => setRosterForm((f) => ({ ...f, effectiveFrom: e.target.value }))}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={onAssignRoute}
+            disabled={savingRoster || !rosterForm.routeId || !rosterForm.driverId || !rosterForm.vehicleId || !rosterForm.effectiveFrom}
+          >
+            {savingRoster ? "Assigning…" : "Assign"}
+          </button>
+        </div>
+        {rosters && rosters.length === 0 && <p className="hint">No route has a driver yet.</p>}
+        {rosters && rosters.length > 0 && (
+          <table>
+            <thead>
+              <tr>
+                <th>Route</th>
+                <th>Driver</th>
+                <th>Vehicle</th>
+                <th>From</th>
+                <th>To</th>
+                <th></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rosters.map((a) => {
+                const today = todayIso();
+                const state =
+                  a.effectiveFrom > today ? "upcoming" : a.effectiveTo != null && a.effectiveTo < today ? "ended" : "current";
+                const acting = rosterAction?.id === a.id ? rosterAction : null;
+                return (
+                  <tr key={a.id}>
+                    <td>{a.routeCode}</td>
+                    <td>{a.driverName}</td>
+                    <td>{a.registrationNo}</td>
+                    <td>{a.effectiveFrom}</td>
+                    <td>{a.effectiveTo ?? "—"}</td>
+                    <td>
+                      <span className={`badge ${state === "current" ? "badge-active" : ""}`}>{state}</span>
+                    </td>
+                    <td>
+                      {!acting && state === "upcoming" && (
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => setRosterAction({ id: a.id, kind: "delete", lastDay: "" })}
+                        >
+                          Delete
+                        </button>
+                      )}
+                      {!acting && state === "current" && (
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => setRosterAction({ id: a.id, kind: "end", lastDay: a.effectiveTo ?? today })}
+                        >
+                          End…
+                        </button>
+                      )}
+                      {acting && (
+                        <div className="form-row">
+                          {acting.kind === "end" ? (
+                            <label className="hint">
+                              Last day{" "}
+                              <input
+                                type="date"
+                                min={a.effectiveFrom}
+                                max={a.effectiveTo ?? undefined}
+                                value={acting.lastDay}
+                                onChange={(e) => setRosterAction({ ...acting, lastDay: e.target.value })}
+                              />
+                            </label>
+                          ) : (
+                            <span className="hint">Remove this assignment?</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={onConfirmRosterAction}
+                            disabled={busyRosterId === a.id || (acting.kind === "end" && !acting.lastDay)}
+                          >
+                            {busyRosterId === a.id ? "Saving…" : acting.kind === "end" ? "Confirm end" : "Confirm delete"}
+                          </button>
+                          <button type="button" className="secondary" onClick={() => setRosterAction(null)}>
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
 

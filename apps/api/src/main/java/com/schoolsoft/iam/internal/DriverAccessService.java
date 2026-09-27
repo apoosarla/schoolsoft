@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 public class DriverAccessService implements DriverAccess {
 
     private static final String DRIVER = "driver";
+    private static final String VIA_LINK = "driver_link";
 
     private final RoleRepository roles;
 
@@ -18,11 +19,11 @@ public class DriverAccessService implements DriverAccess {
 
     @Override
     public void grantDriver(UUID staffId, UUID schoolId) {
-        roles.assignRole(staffId, schoolId, DRIVER, "school", schoolId);
+        roles.assignSchoolRoleVia(staffId, schoolId, DRIVER, VIA_LINK);
     }
 
     @Override
-    public void revokeDriver(UUID staffId, UUID schoolId) {
-        roles.unassignRole(staffId, schoolId, DRIVER, "school", schoolId);
+    public boolean revokeDriver(UUID staffId, UUID schoolId) {
+        return roles.unassignSchoolRoleVia(staffId, schoolId, DRIVER, VIA_LINK);
     }
 }

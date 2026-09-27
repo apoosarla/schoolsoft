@@ -452,20 +452,9 @@ class RbacEnforcementTest extends AbstractCertificationTest {
     @Test
     @DisplayName("linking a driver grants the driver role, unlinking takes it back, and neither touches another role")
     void linkingADriverGrantsTheDriverRole() {
-        UUID staffId = UUID.randomUUID();
-        UUID accountId = UUID.randomUUID();
-        String suffix = staffId.toString().substring(0, 8);
-        inChainDo(jdbc -> {
-            jdbc.update(
-                "INSERT INTO staff (id, school_id, employee_no, first_name, last_name, email, "
-                + "employment_type, joined_on) VALUES (?, ?, ?, 'New', 'Driver', ?, 'contract', current_date)",
-                staffId, cbse().id(), "EMP-DRV-" + suffix, "drv-" + suffix + "@cert.test");
-            jdbc.update(
-                "INSERT INTO user_account (id, school_id, subject_type, subject_id, email) "
-                + "VALUES (?, ?, 'staff', ?, ?)",
-                accountId, cbse().id(), staffId, "drv-" + suffix + "@cert.test");
-        });
-        String newDriver = tokenFor(cbse(), accountId, "staff");
+        StaffLogin fresh = newStaffLogin();
+        UUID staffId = fresh.staffId();
+        String newDriver = fresh.token();
         String roster = "/v1/transport/routes/" + cbse().routeId() + "/students";
 
         // Refused at the gate: no transport.drive.
@@ -524,6 +513,136 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             .isEqualTo(HttpStatus.OK);
         assertThat(count("SELECT count(*) FROM staff_role WHERE staff_id = ? AND role_code = 'driver' "
             + "AND revoked_at IS NULL", staffId)).isEqualTo(1);
+    }
+
+    /**
+     * A {@code driver} grant made on purpose on the Roles screen is not the
+     * link's, and unlinking the driver leaves it alone (V042). Before, the
+     * unlink could not tell the two apart and revoked both.
+     */
+    @Test
+    @DisplayName("unlinking a driver takes back only the role the link granted")
+    void unlinkingLeavesAHandMadeDriverGrant() {
+        String principal = principalToken(cbse());
+        StaffLogin handMade = newStaffLogin();
+        assertThat(post("/v1/iam/staff-roles/assign", body("staffId", handMade.staffId(), "schoolId", cbse().id(),
+            "roleCode", "driver", "reason", "drives the late bus"), principal).getStatusCode())
+            .isEqualTo(HttpStatus.NO_CONTENT);
+        UUID driverId = UUID.fromString(post("/v1/transport/drivers?schoolId=" + cbse().id(),
+            body("name", "Hand Made", "staffId", handMade.staffId()), principal).getBody().get("id").asText());
+        post("/v1/transport/drivers/" + driverId + "/unlink?schoolId=" + cbse().id(), body(), principal);
+        assertThat(count("SELECT count(*) FROM staff_role WHERE staff_id = ? AND role_code = 'driver' "
+            + "AND revoked_at IS NULL", handMade.staffId())).isEqualTo(1);
+
+        // The link's own grant does go, and a later hand grant over a link's claims it.
+        StaffLogin linked = newStaffLogin();
+        UUID linkedDriver = UUID.fromString(post("/v1/transport/drivers?schoolId=" + cbse().id(),
+            body("name", "Linked", "staffId", linked.staffId()), principal).getBody().get("id").asText());
+        post("/v1/iam/staff-roles/assign", body("staffId", linked.staffId(), "schoolId", cbse().id(),
+            "roleCode", "driver", "reason", "keeps driving after the link"), principal);
+        post("/v1/transport/drivers/" + linkedDriver + "/unlink?schoolId=" + cbse().id(), body(), principal);
+        assertThat(count("SELECT count(*) FROM staff_role WHERE staff_id = ? AND role_code = 'driver' "
+            + "AND revoked_at IS NULL", linked.staffId())).isEqualTo(1);
+    }
+
+    // ===================== who drives which route, and from when =====================
+
+    /**
+     * {@code route_assignment} is what {@code RouteScope} reads. Assigning a
+     * route from a day replaces whoever drove it then; the old window closes
+     * the day before and is kept. Windows shorten, never lengthen; only an
+     * assignment that has not started may be deleted. The route and vehicle
+     * are the test's own, so R1's roster stays the fixture's.
+     */
+    @Test
+    @DisplayName("a route assignment decides whose bus, and replaces rather than deletes")
+    void routeAssignmentDecidesWhoseBus() {
+        String principal = principalToken(cbse());
+        String sfx = UUID.randomUUID().toString().substring(0, 6);
+        UUID routeId = UUID.fromString(post("/v1/transport/routes?schoolId=" + cbse().id(),
+            body("code", "RA" + sfx, "name", "Assignment " + sfx, "direction", "pickup"), principal)
+            .getBody().get("id").asText());
+        UUID vehicleId = UUID.fromString(post("/v1/transport/vehicles?schoolId=" + cbse().id(),
+            body("registrationNo", "TS-RA-" + sfx, "capacity", 30), principal).getBody().get("id").asText());
+        StaffLogin first = newStaffLogin();
+        StaffLogin second = newStaffLogin();
+        UUID firstDriver = UUID.fromString(post("/v1/transport/drivers?schoolId=" + cbse().id(),
+            body("name", "First " + sfx, "staffId", first.staffId()), principal).getBody().get("id").asText());
+        UUID secondDriver = UUID.fromString(post("/v1/transport/drivers?schoolId=" + cbse().id(),
+            body("name", "Second " + sfx, "staffId", second.staffId()), principal).getBody().get("id").asText());
+        String roster = "/v1/transport/routes/" + routeId + "/students";
+        java.time.LocalDate today = java.time.LocalDate.now();
+
+        // Only the office rosters.
+        assertThat(post("/v1/transport/route-assignments", body("schoolId", cbse().id(), "routeId", routeId,
+            "vehicleId", vehicleId, "driverId", firstDriver, "effectiveFrom", today.toString()),
+            teacherToken(cbse(), 0)).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        // Another school's route is not this school's to roster.
+        assertThat(post("/v1/transport/route-assignments", body("schoolId", cbse().id(), "routeId", cie().routeId(),
+            "vehicleId", vehicleId, "driverId", firstDriver, "effectiveFrom", today.toString()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        var assigned = post("/v1/transport/route-assignments", body("schoolId", cbse().id(), "routeId", routeId,
+            "vehicleId", vehicleId, "driverId", firstDriver, "effectiveFrom", today.toString()), principal);
+        assertThat(assigned.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID firstWindow = UUID.fromString(assigned.getBody().get("id").asText());
+        assertThat(get(roster, first.token()).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(get(roster, second.token()).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Tomorrow somebody else drives it: today's window closes today, and today is still first's.
+        var replaced = post("/v1/transport/route-assignments", body("schoolId", cbse().id(), "routeId", routeId,
+            "vehicleId", vehicleId, "driverId", secondDriver, "effectiveFrom", today.plusDays(1).toString()),
+            principal);
+        assertThat(replaced.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID secondWindow = UUID.fromString(replaced.getBody().get("id").asText());
+        var windows = get("/v1/transport/route-assignments?schoolId=" + cbse().id() + "&routeId=" + routeId,
+            principal).getBody();
+        assertThat(windows).hasSize(2);
+        for (var w : windows) {
+            if (w.get("id").asText().equals(firstWindow.toString())) {
+                assertThat(w.get("effectiveTo").asText()).isEqualTo(today.toString());
+            }
+        }
+        assertThat(get(roster, first.token()).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // A second replacement from the same day overlaps the one already there.
+        assertThat(post("/v1/transport/route-assignments", body("schoolId", cbse().id(), "routeId", routeId,
+            "vehicleId", vehicleId, "driverId", firstDriver, "effectiveFrom", today.plusDays(1).toString()),
+            principal).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+        // Not started: deletable. Started: ended instead.
+        assertThat(delete("/v1/transport/route-assignments/" + secondWindow + "?schoolId=" + cbse().id(),
+            principal).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(delete("/v1/transport/route-assignments/" + firstWindow + "?schoolId=" + cbse().id(),
+            principal).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+        String end = "/v1/transport/route-assignments/" + firstWindow + "/end";
+        assertThat(post(end, body("schoolId", cbse().id(), "lastDay", today.minusDays(1).toString()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(post(end, body("schoolId", cbse().id(), "lastDay", today.toString()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(post(end, body("schoolId", cbse().id(), "lastDay", today.plusDays(5).toString()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    private record StaffLogin(UUID staffId, UUID accountId, String token) {}
+
+    /** A staff member of CBSE with a sign-in and no role, the test's own. */
+    private StaffLogin newStaffLogin() {
+        UUID staffId = UUID.randomUUID();
+        UUID accountId = UUID.randomUUID();
+        String suffix = staffId.toString().substring(0, 8);
+        inChainDo(jdbc -> {
+            jdbc.update(
+                "INSERT INTO staff (id, school_id, employee_no, first_name, last_name, email, "
+                + "employment_type, joined_on) VALUES (?, ?, ?, 'New', 'Driver', ?, 'contract', current_date)",
+                staffId, cbse().id(), "EMP-DRV-" + suffix, "drv-" + suffix + "@cert.test");
+            jdbc.update(
+                "INSERT INTO user_account (id, school_id, subject_type, subject_id, email) "
+                + "VALUES (?, ?, 'staff', ?, ?)",
+                accountId, cbse().id(), staffId, "drv-" + suffix + "@cert.test");
+        });
+        return new StaffLogin(staffId, accountId, tokenFor(cbse(), accountId, "staff"));
     }
 
     // ===================== the driver's bus, and only the driver's bus =====================

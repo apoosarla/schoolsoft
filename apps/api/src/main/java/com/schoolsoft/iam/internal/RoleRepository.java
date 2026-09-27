@@ -154,12 +154,46 @@ public class RoleRepository {
         int granted = jdbc.update(
             "INSERT INTO staff_role (id, staff_id, role_code, scope_type, scope_id) " +
             "SELECT gen_random_uuid(), s.id, ?, ?, ? FROM staff s WHERE s.id = ? AND s.school_id = ? " +
-            "ON CONFLICT (staff_id, role_code, scope_type, scope_id) DO UPDATE SET revoked_at = NULL",
+            // A grant made on purpose claims one a driver link made (V042):
+            // unlinking the driver must not then take it away.
+            "ON CONFLICT (staff_id, role_code, scope_type, scope_id) DO UPDATE SET revoked_at = NULL, " +
+            "  granted_via = NULL",
             roleCode, scope, target, staffId, schoolId
         );
         if (granted == 0) {
             throw new NotFoundException("Staff " + staffId + " is not in school " + schoolId);
         }
+    }
+
+    /**
+     * A school-wide grant made by something other than a person on the Roles
+     * screen — {@code via} names it (V042). A grant already active and made on
+     * purpose stays the person's; a revoked one comes back as {@code via}'s.
+     */
+    void assignSchoolRoleVia(UUID staffId, UUID schoolId, String roleCode, String via) {
+        int granted = jdbc.update(
+            "INSERT INTO staff_role (id, staff_id, role_code, scope_type, scope_id, granted_via) " +
+            "SELECT gen_random_uuid(), s.id, ?, 'school', ?, ? FROM staff s WHERE s.id = ? AND s.school_id = ? " +
+            "ON CONFLICT (staff_id, role_code, scope_type, scope_id) DO UPDATE SET " +
+            "  granted_via = CASE WHEN staff_role.revoked_at IS NULL THEN staff_role.granted_via " +
+            "                     ELSE EXCLUDED.granted_via END, " +
+            "  revoked_at = NULL",
+            roleCode, schoolId, via, staffId, schoolId
+        );
+        if (granted == 0) {
+            throw new NotFoundException("Staff " + staffId + " is not in school " + schoolId);
+        }
+    }
+
+    /** Revokes the school-wide grant only if {@code via} made it. True when one was revoked. */
+    boolean unassignSchoolRoleVia(UUID staffId, UUID schoolId, String roleCode, String via) {
+        return jdbc.update(
+            "UPDATE staff_role sr SET revoked_at = now() FROM staff s " +
+            "WHERE s.id = sr.staff_id AND s.school_id = ? " +
+            "  AND sr.staff_id = ? AND sr.role_code = ? AND sr.scope_type = 'school' AND sr.scope_id = ? " +
+            "  AND sr.granted_via = ? AND sr.revoked_at IS NULL",
+            schoolId, staffId, roleCode, schoolId, via
+        ) > 0;
     }
 
     public void unassignRole(UUID staffId, UUID schoolId, String roleCode, String scopeType, UUID scopeId) {

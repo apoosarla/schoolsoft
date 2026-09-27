@@ -3,6 +3,7 @@ package com.schoolsoft.transport.api;
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.iam.api.RouteScope;
 import com.schoolsoft.transport.internal.DriverService;
+import com.schoolsoft.transport.internal.RouteAssignmentService;
 import com.schoolsoft.transport.internal.TransportRepository;
 import com.schoolsoft.transport.internal.TripService;
 import jakarta.validation.constraints.NotBlank;
@@ -22,13 +23,15 @@ public class TransportController {
     private final TripService trips;
     private final RouteScope routes;
     private final DriverService drivers;
+    private final RouteAssignmentService rosters;
 
     public TransportController(TransportRepository repo, TripService trips, RouteScope routes,
-                               DriverService drivers) {
+                               DriverService drivers, RouteAssignmentService rosters) {
         this.repo = repo;
         this.trips = trips;
         this.routes = routes;
         this.drivers = drivers;
+        this.rosters = rosters;
     }
 
     // -------------------------- Vehicles --------------------------
@@ -108,6 +111,44 @@ public class TransportController {
     @PostMapping("/routes/{routeId}/stops")
     public TransportStopDto addStop(@PathVariable UUID routeId, @RequestBody AddStopRequest req) {
         return repo.addStop(routeId, req.name(), req.sortOrder(), req.lat(), req.lng(), req.fee());
+    }
+
+    // -------------------------- Driver and vehicle on a route --------------------------
+
+    @PreAuthorize("@perm.can('transport.view')")
+    @GetMapping("/route-assignments")
+    public List<RouteAssignmentDto> routeAssignments(@RequestParam UUID schoolId,
+                                                     @RequestParam(required = false) UUID routeId) {
+        return rosters.list(schoolId, routeId);
+    }
+
+    public record AssignRouteRequest(
+        @NotNull UUID schoolId, @NotNull UUID routeId, @NotNull UUID vehicleId, @NotNull UUID driverId,
+        @NotNull LocalDate effectiveFrom
+    ) {}
+
+    /** Rosters a driver and vehicle to a route from a day, replacing whoever drove it then. */
+    @PreAuthorize("@perm.can('transport.manage')")
+    @PostMapping("/route-assignments")
+    public RouteAssignmentDto assignRoute(@RequestBody AssignRouteRequest req) {
+        return rosters.assign(req.schoolId(), req.routeId(), req.vehicleId(), req.driverId(), req.effectiveFrom());
+    }
+
+    public record EndRouteAssignmentRequest(@NotNull UUID schoolId, @NotNull LocalDate lastDay) {}
+
+    /** Sets the last day an assignment counts; shortens, never lengthens. */
+    @PreAuthorize("@perm.can('transport.manage')")
+    @PostMapping("/route-assignments/{id}/end")
+    public RouteAssignmentDto endRouteAssignment(@PathVariable UUID id, @RequestBody EndRouteAssignmentRequest req) {
+        return rosters.end(req.schoolId(), id, req.lastDay());
+    }
+
+    /** Removes an assignment made by mistake, before its first day. */
+    @PreAuthorize("@perm.can('transport.manage')")
+    @DeleteMapping("/route-assignments/{id}")
+    public ResponseEntity<Void> deleteRouteAssignment(@PathVariable UUID id, @RequestParam UUID schoolId) {
+        rosters.delete(schoolId, id);
+        return ResponseEntity.noContent().build();
     }
 
     // -------------------------- Student assignment --------------------------

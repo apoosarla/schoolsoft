@@ -75,8 +75,9 @@ public class DriverService {
     }
 
     /**
-     * Unlinks the driver and takes the {@code driver} role back from the
-     * staff member, unless another driver row still links them. The driver
+     * Unlinks the driver and takes back the {@code driver} role the link
+     * granted, unless another driver row still links them. A {@code driver}
+     * grant made by hand on the Roles screen is not the link's and stays. The driver
      * row stays — its trips and route history still resolve — and so do its
      * route assignments, which stop reaching anybody's login until the driver
      * is linked again.
@@ -94,8 +95,7 @@ public class DriverService {
 
         Integer stillLinked = jdbc.queryForObject(
             "SELECT count(*) FROM driver WHERE school_id = ? AND staff_id = ?", Integer.class, schoolId, staffId);
-        boolean revoked = stillLinked == null || stillLinked == 0;
-        if (revoked) access.revokeDriver(staffId, schoolId);
+        boolean revoked = (stillLinked == null || stillLinked == 0) && access.revokeDriver(staffId, schoolId);
 
         audit.record("transport.driver.unlink", "driver", driverId,
             Map.of("staffId", staffId.toString()), Map.of("roleRevoked", revoked));

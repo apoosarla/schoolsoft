@@ -13,9 +13,16 @@ import java.util.UUID;
  */
 public interface DriverAccess {
 
-    /** Grants {@code driver} over the whole school. Re-granting a revoked grant restores it. */
+    /**
+     * Grants {@code driver} over the whole school, marked as the link's. A
+     * {@code driver} grant somebody already made by hand stays theirs.
+     */
     void grantDriver(UUID staffId, UUID schoolId);
 
-    /** Revokes the school-wide {@code driver} grant. A staff member without one is left as they are. */
-    void revokeDriver(UUID staffId, UUID schoolId);
+    /**
+     * Revokes the {@code driver} grant the link made, and only that one: a
+     * grant made by hand on the Roles screen outlives the link. True when a
+     * grant was revoked.
+     */
+    boolean revokeDriver(UUID staffId, UUID schoolId);
 }

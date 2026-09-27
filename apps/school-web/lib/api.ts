@@ -1883,6 +1883,51 @@ export function createDriver(
   });
 }
 
+/** Who drives a route, in which vehicle, over which days. effectiveTo is the last day, or null while it runs on. */
+export type RouteAssignmentDto = {
+  id: string;
+  routeId: string;
+  routeCode: string;
+  routeName: string;
+  vehicleId: string;
+  registrationNo: string;
+  driverId: string;
+  driverName: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+export function listRouteAssignments(schoolId: string): Promise<RouteAssignmentDto[]> {
+  return apiFetch<RouteAssignmentDto[]>(`/v1/transport/route-assignments?schoolId=${schoolId}`);
+}
+
+/** Rosters a driver and vehicle to a route from a day; whoever drove it then stops the day before. */
+export function assignRoute(req: {
+  schoolId: string;
+  routeId: string;
+  vehicleId: string;
+  driverId: string;
+  effectiveFrom: string;
+}): Promise<RouteAssignmentDto> {
+  return apiFetch<RouteAssignmentDto>(`/v1/transport/route-assignments`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Sets the last day an assignment counts. Shortens only. */
+export function endRouteAssignment(schoolId: string, id: string, lastDay: string): Promise<RouteAssignmentDto> {
+  return apiFetch<RouteAssignmentDto>(`/v1/transport/route-assignments/${id}/end`, {
+    method: "POST",
+    body: JSON.stringify({ schoolId, lastDay }),
+  });
+}
+
+/** Removes an assignment made by mistake, before its first day. */
+export function deleteRouteAssignment(schoolId: string, id: string): Promise<void> {
+  return apiFetch<void>(`/v1/transport/route-assignments/${id}?schoolId=${schoolId}`, { method: "DELETE" });
+}
+
 export type TransportRouteDto = {
   id: string;
   schoolId: string;
