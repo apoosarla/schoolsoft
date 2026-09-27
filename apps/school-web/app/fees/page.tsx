@@ -126,6 +126,10 @@ export default function FeesPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("cash");
   const [payingId, setPayingId] = useState<string | null>(null);
+  // The invoice detail sits well below the page-top banners, so what happens to
+  // a payment or an adjustment is said beside the control that did it.
+  const [payError, setPayError] = useState<string | null>(null);
+  const [adjustResult, setAdjustResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [adjustForm, setAdjustForm] = useState({
     kind: "credit_note",
     amount: "",
@@ -318,6 +322,8 @@ export default function FeesPage() {
     setExpandedId(inv.id);
     setPayAmount("");
     setAdjustForm({ kind: "credit_note", amount: "", reason: "", paymentId: "", feeHeadId: "" });
+    setPayError(null);
+    setAdjustResult(null);
     setError(null);
     try {
       await loadInvoiceDetail(inv.id);
@@ -654,7 +660,7 @@ export default function FeesPage() {
                                     onClick={async () => {
                                       const amount = Number(payAmount);
                                       if (!amount || amount <= 0) {
-                                        setError("Enter a valid payment amount.");
+                                        setPayError("Enter a valid payment amount.");
                                         return;
                                       }
                                       // More than is owed is held as credit, which is
@@ -668,7 +674,7 @@ export default function FeesPage() {
                                       }
                                       setOverpayConfirm(null);
                                       setPayingId(inv.id);
-                                      setError(null);
+                                      setPayError(null);
                                       try {
                                         await recordPayment({
                                           schoolId: session.schoolId,
@@ -682,7 +688,7 @@ export default function FeesPage() {
                                         await loadInvoiceDetail(inv.id);
                                         refreshStudent(student.id);
                                       } catch (err) {
-                                        setError(describeError(err));
+                                        setPayError(describeError(err));
                                       } finally {
                                         setPayingId(null);
                                       }
@@ -703,6 +709,7 @@ export default function FeesPage() {
                                   )}
                                 </div>
                               )}
+                              {payError && <div className="error-banner">{payError}</div>}
 
                               <strong>Adjustments</strong>
                               <p className="hint">
@@ -787,8 +794,10 @@ export default function FeesPage() {
                                 <button
                                   type="button"
                                   disabled={busy || !adjustForm.amount || !adjustForm.reason.trim()}
-                                  onClick={() =>
-                                    run(async () => {
+                                  onClick={async () => {
+                                    setBusy(true);
+                                    setAdjustResult(null);
+                                    try {
                                       await postAdjustment(inv.id, {
                                         schoolId: session.schoolId,
                                         kind: adjustForm.kind,
@@ -807,14 +816,23 @@ export default function FeesPage() {
                                       });
                                       await loadInvoiceDetail(inv.id);
                                       refreshStudent(student.id);
-                                      setNotice("Adjustment posted, with its ledger pair.");
-                                    })
-                                  }
+                                      setAdjustResult({ ok: true, text: "Adjustment posted, with its ledger pair." });
+                                    } catch (err) {
+                                      setAdjustResult({ ok: false, text: describeError(err) });
+                                    } finally {
+                                      setBusy(false);
+                                    }
+                                  }}
                                 >
                                   Post adjustment
                                 </button>
                                 <span className="hint">{FEE_ADJUSTMENT_EFFECT[adjustForm.kind]}</span>
                               </div>
+                              {adjustResult && (
+                                <div className={adjustResult.ok ? "notice-banner" : "error-banner"}>
+                                  {adjustResult.text}
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
