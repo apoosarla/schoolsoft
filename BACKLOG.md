@@ -11,11 +11,12 @@ A comparison against the sibling HMS codebase (same architecture, further
 along) surfaced these. Four of what it found are closed — see the first four
 entries under **Done** below.
 
-- **No unit tests.** Everything runs through HTTP against a real database, so
-  pure logic — fee generation, grading bands, rollover date maths, sibling
-  policy — cannot be exercised without Postgres and has no fast test. HMS runs
-  domain tests as plain JUnit with no Spring context; the equivalent here is
-  extracting that logic from the repositories first.
+- **Unit tests, beyond a first piece.** Invoice pricing is extracted and tested
+  (`fees/internal/InvoicePricing`, tag `unit`, in the CI gate since
+  2026-09-27). Still only reachable through Postgres: grading bands, rollover
+  date maths, dunning, sibling birth order (which is SQL today). HMS runs
+  domain tests as plain JUnit with no Spring context; the pattern is the same —
+  the SQL gathers the inputs, a pure class computes.
 
 - **The six frontends have zero tests.** HMS's `lims-web` is 385 source files
   to 187 test files. Vitest + React Testing Library is the shape.

@@ -29,7 +29,7 @@ jobs:
       # command works locally.
       - name: Run P1 certification scenarios
         working-directory: apps/api
-        run: ./mvnw --batch-mode test -Dgroups=P1,harness
+        run: ./mvnw --batch-mode test -Dgroups=P1,harness,unit
 
       - name: Publish certification status
         if: always()

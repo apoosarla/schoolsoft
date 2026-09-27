@@ -159,41 +159,39 @@ public class FeeGenerationService {
         List<Charge> charges = new ArrayList<>(structureLines);
         transportCharge(schoolId, student.studentId(), dueOn).ifPresent(charges::add);
 
-        double subtotal = 0;
-        double gst = 0;
-        List<Object[]> lineRows = new ArrayList<>();
-        UUID invoiceId = UUID.randomUUID();
-
+        List<InvoicePricing.PricedLine> priced = new ArrayList<>();
         for (Charge charge : charges) {
-            double discount = concessionFor(schoolId, student.studentId(), academicYearId,
-                charge.feeHeadId(), charge.amount())
-                + siblingConcessionFor(schoolId, student, academicYearId, charge.feeHeadId(), charge.amount());
-            discount = Math.min(discount, charge.amount());
-            double net = charge.amount() - discount;
-            double lineGst = round(net * charge.gstRatePct() / 100.0);
+            priced.add(InvoicePricing.line(charge.amount(), charge.gstRatePct(),
+                concessionFor(schoolId, student.studentId(), academicYearId, charge.feeHeadId(), charge.amount()),
+                siblingConcessionFor(schoolId, student, academicYearId, charge.feeHeadId(), charge.amount())));
+        }
+        InvoicePricing.Priced invoice = InvoicePricing.invoice(priced);
 
-            subtotal += net;
-            gst += lineGst;
+        UUID invoiceId = UUID.randomUUID();
+        List<Object[]> lineRows = new ArrayList<>();
+        for (int i = 0; i < charges.size(); i++) {
+            Charge charge = charges.get(i);
+            InvoicePricing.PricedLine line = priced.get(i);
             lineRows.add(new Object[]{
                 UUID.randomUUID(), invoiceId, charge.feeHeadId(), charge.description(),
-                charge.amount(), discount, lineGst, charge.source(), student.studentId()
+                line.amount(), line.discount(), line.gst(), charge.source(), student.studentId()
             });
         }
 
-        double total = round(subtotal + gst);
         String invoiceNo = numbers.next(schoolId, NumberSeries.Kind.invoice, null, "INV{YY}{SEQ:5}", null);
         jdbc.update(
             "INSERT INTO fee_invoice (id, school_id, student_id, academic_year_id, invoice_no, cycle_label, " +
             "  issued_on, due_on, subtotal, gst, total, status, fee_schedule_run_id, family_id) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
             invoiceId, schoolId, student.studentId(), academicYearId, invoiceNo, cycleLabel,
-            Date.valueOf(clock.today(schoolId)), Date.valueOf(dueOn), round(subtotal), round(gst), total, runId, student.familyId());
+            Date.valueOf(clock.today(schoolId)), Date.valueOf(dueOn),
+            invoice.subtotal(), invoice.gst(), invoice.total(), runId, student.familyId());
 
         jdbc.batchUpdate(
             "INSERT INTO fee_invoice_line (id, fee_invoice_id, fee_head_id, description, amount, discount, " +
             "  gst, source, student_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             lineRows);
-        return total;
+        return invoice.total();
     }
 
     private record Charge(UUID feeHeadId, String code, String name, double amount, double gstRatePct,
@@ -228,12 +226,15 @@ public class FeeGenerationService {
     /** A student's own concessions for this head, as an amount off (FEE-03). */
     private double concessionFor(UUID schoolId, UUID studentId, UUID academicYearId, UUID feeHeadId,
                                  double amount) {
-        Double discount = jdbc.queryForObject(
-            "SELECT COALESCE(sum(COALESCE(c.flat_amount, 0) + COALESCE(c.pct, 0) * ? / 100.0), 0) " +
+        var concessions = jdbc.query(
+            "SELECT c.flat_amount, c.pct " +
             "FROM fee_concession c WHERE c.school_id = ? AND c.student_id = ? AND c.academic_year_id = ? " +
             "  AND (c.applies_to_head_id IS NULL OR c.applies_to_head_id = ?) AND c.kind <> 'sibling'",
-            Double.class, amount, schoolId, studentId, academicYearId, feeHeadId);
-        return round(discount == null ? 0 : discount);
+            (rs, i) -> new InvoicePricing.Concession(
+                rs.getObject("flat_amount") == null ? null : rs.getDouble("flat_amount"),
+                rs.getObject("pct") == null ? null : rs.getDouble("pct")),
+            schoolId, studentId, academicYearId, feeHeadId);
+        return InvoicePricing.concessionOff(amount, concessions);
     }
 
     /**
@@ -271,7 +272,7 @@ public class FeeGenerationService {
             "WHERE school_id = ? AND academic_year_id = ? AND nth_child <= ? " +
             "  AND (applies_to_head_id IS NULL OR applies_to_head_id = ?)",
             Double.class, schoolId, academicYearId, rank, feeHeadId);
-        return pct == null || pct == 0 ? 0 : round(amount * pct / 100.0);
+        return InvoicePricing.siblingOff(amount, pct == null ? 0 : pct);
     }
 
     /**
@@ -366,6 +367,6 @@ public class FeeGenerationService {
     }
 
     static double round(double value) {
-        return Math.round(value * 100.0) / 100.0;
+        return InvoicePricing.round(value);
     }
 }

@@ -163,7 +163,7 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <!-- The CI gate runs `-Dgroups=P1`; P2/P3 are report-only. Without
+          <!-- The CI gate runs `-Dgroups=P1,harness,unit`; P2/P3 are report-only. Without
                this, a run that selects a tag no class carries would fail the
                build rather than report zero tests. -->
           <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>

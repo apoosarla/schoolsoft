@@ -11,10 +11,11 @@ cd apps/api
 
 ./mvnw spring-boot:run                    # boot the API on :8080
 ./mvnw -DskipTests package                # build
-./mvnw test -Dgroups=P1,harness           # the blocking gate — what CI runs on a PR
+./mvnw test -Dgroups=P1,harness,unit      # the blocking gate — what CI runs on a PR
 ./mvnw test -Dgroups=P2,P3                # report-only scenarios
 ./mvnw test -Dtest=FeesCertTest           # one scenario class
 ./mvnw test -Dtest='*ArchitectureTest'    # the structural rules alone, no database
+./mvnw test -Dgroups=unit                  # plain JUnit, no Spring, no database
 ```
 
 From the repo root: `npm run api:dev`, `npm run api:build`, `npm run db:seed`.
@@ -67,7 +68,7 @@ isn't one, point it at the local Postgres instead:
 cd apps/api
 SCHOOLSOFT_TEST_DB_URL=jdbc:postgresql://localhost:5432/schoolsoft_cert \
 SCHOOLSOFT_TEST_DB_USER=schoolsoft SCHOOLSOFT_TEST_DB_PASSWORD=schoolsoft \
-./mvnw --batch-mode test -Dgroups=P1,harness
+./mvnw --batch-mode test -Dgroups=P1,harness,unit
 ```
 
 The suite owns that database — it drops and rebuilds its chain on every run —
@@ -227,7 +228,7 @@ means a regression, not unfinished work** — the unfinished work is the disable
 list, published as `target/certification-status.md`.
 
 Groups: `P1` blocks the merge; `P2`/`P3` report only; `harness` is the
-structural tests and runs with P1.
+structural tests and `unit` the plain-JUnit ones, and both run with P1.
 
 Scenarios share one Spring context and one seeded fixture per JVM. A scenario
 that mutates shared rows makes its own row rather than editing a neighbour's —
@@ -245,13 +246,22 @@ known offenders (repositories that declare their own `@Transactional`). **That
 list only shrinks.** Adding to it takes a deliberate edit and should be argued
 for in review.
 
+### Unit tests
+
+Plain JUnit tagged `unit`, beside the class they test (same package, so a
+package-private class is reachable). No Spring context, no database. The logic
+has to be pulled out of the repository or service first — the SQL gathers the
+inputs, a pure class computes. `fees/internal/InvoicePricing` is the worked
+example: `FeeGenerationService` reads charges and concessions, `InvoicePricing`
+prices the invoice, and `InvoicePricingTest` runs in milliseconds.
+
 ### What is not tested
 
 Worth knowing before trusting a green build:
 
-- There are no unit tests. Everything runs through HTTP against a real
-  database, so pure logic (fee generation, grading bands, rollover date maths)
-  has no fast test and cannot be exercised without Postgres.
+- Unit tests cover invoice pricing only. Everything else runs through HTTP
+  against a real database, so pure logic (grading bands, rollover date maths,
+  dunning) has no fast test and cannot be exercised without Postgres.
 - The six frontends have **zero** tests.
 
 ## Conventions
@@ -347,8 +357,8 @@ Worth knowing before trusting a green build:
 
 `BACKLOG.md` is the live list. Two structural ones worth knowing up front:
 
-- **No unit tests, and no frontend tests.** See above — everything runs through
-  HTTP against a real database.
+- **Almost no unit tests, and no frontend tests.** See above — beyond invoice
+  pricing, everything runs through HTTP against a real database.
 - **`mark` is unversioned.** Concurrent mark entry is last-write-wins, but every
   change writes a `mark_revision` row, so an overwrite is recorded and
   recoverable rather than silent. Versioning it would mean a version on every
