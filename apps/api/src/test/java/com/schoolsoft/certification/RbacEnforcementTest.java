@@ -440,6 +440,65 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             .isEqualTo(HttpStatus.OK);
     }
 
+    // ===================== linking a driver is what lets them drive =====================
+
+    /**
+     * BUG-18. A driver linked to a staff record used to be "linked" and still
+     * refused by the driver app: the link granted nothing. Linking now grants
+     * the {@code driver} role in the same transaction, and refuses a staff
+     * member who already holds another role — the dev data had a driver linked
+     * to the principal, which with the grant would hand her a second role.
+     */
+    @Test
+    @DisplayName("linking a driver grants the driver role, and never to somebody who holds another")
+    void linkingADriverGrantsTheDriverRole() {
+        UUID staffId = UUID.randomUUID();
+        UUID accountId = UUID.randomUUID();
+        String suffix = staffId.toString().substring(0, 8);
+        inChainDo(jdbc -> {
+            jdbc.update(
+                "INSERT INTO staff (id, school_id, employee_no, first_name, last_name, email, "
+                + "employment_type, joined_on) VALUES (?, ?, ?, 'New', 'Driver', ?, 'contract', current_date)",
+                staffId, cbse().id(), "EMP-DRV-" + suffix, "drv-" + suffix + "@cert.test");
+            jdbc.update(
+                "INSERT INTO user_account (id, school_id, subject_type, subject_id, email) "
+                + "VALUES (?, ?, 'staff', ?, ?)",
+                accountId, cbse().id(), staffId, "drv-" + suffix + "@cert.test");
+        });
+        String newDriver = tokenFor(cbse(), accountId, "staff");
+        String roster = "/v1/transport/routes/" + cbse().routeId() + "/students";
+
+        // Refused at the gate: no transport.drive.
+        var beforeLink = get(roster, newDriver);
+        assertThat(beforeLink.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(beforeLink.getBody().get("message").asText()).doesNotContain("do not drive this route");
+
+        var linked = post("/v1/transport/drivers?schoolId=" + cbse().id(),
+            body("name", "New Driver", "staffId", staffId), principalToken(cbse()));
+        assertThat(linked.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(count("SELECT count(*) FROM staff_role WHERE staff_id = ? AND role_code = 'driver' "
+            + "AND revoked_at IS NULL", staffId)).isEqualTo(1);
+
+        // Through the gate now; RouteScope is what says no, because nobody has
+        // rostered them to R1 yet. That is the office's next step, not a gap.
+        var afterLink = get(roster, newDriver);
+        assertThat(afterLink.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(afterLink.getBody().get("message").asText()).contains("do not drive this route");
+
+        // One staff record, one driver.
+        assertThat(post("/v1/transport/drivers?schoolId=" + cbse().id(),
+            body("name", "New Driver again", "staffId", staffId), principalToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.CONFLICT);
+
+        // The principal is not a driver, and linking one to her grants nothing.
+        var wrongPerson = post("/v1/transport/drivers?schoolId=" + cbse().id(),
+            body("name", "Suresh Babu", "staffId", cbse().principalStaffId()), principalToken(cbse()));
+        assertThat(wrongPerson.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(count("SELECT count(*) FROM staff_role WHERE staff_id = ? AND role_code = 'driver'",
+            cbse().principalStaffId())).isZero();
+        assertThat(count("SELECT count(*) FROM driver WHERE staff_id = ?", cbse().principalStaffId())).isZero();
+    }
+
     // ===================== the driver's bus, and only the driver's bus =====================
 
     /**

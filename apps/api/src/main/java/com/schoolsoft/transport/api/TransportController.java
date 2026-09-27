@@ -2,6 +2,7 @@ package com.schoolsoft.transport.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.iam.api.RouteScope;
+import com.schoolsoft.transport.internal.DriverService;
 import com.schoolsoft.transport.internal.TransportRepository;
 import com.schoolsoft.transport.internal.TripService;
 import jakarta.validation.constraints.NotBlank;
@@ -20,11 +21,14 @@ public class TransportController {
     private final TransportRepository repo;
     private final TripService trips;
     private final RouteScope routes;
+    private final DriverService drivers;
 
-    public TransportController(TransportRepository repo, TripService trips, RouteScope routes) {
+    public TransportController(TransportRepository repo, TripService trips, RouteScope routes,
+                               DriverService drivers) {
         this.repo = repo;
         this.trips = trips;
         this.routes = routes;
+        this.drivers = drivers;
     }
 
     // -------------------------- Vehicles --------------------------
@@ -56,7 +60,7 @@ public class TransportController {
     @PreAuthorize("@perm.can('transport.manage')")
     @PostMapping("/drivers")
     public DriverDto createDriver(@RequestParam UUID schoolId, @RequestBody CreateDriverRequest req) {
-        return repo.createDriver(schoolId, req.staffId(), req.name(), req.phone(), req.licenseNo());
+        return drivers.createDriver(schoolId, req.staffId(), req.name(), req.phone(), req.licenseNo());
     }
 
     // -------------------------- Routes + Stops --------------------------
