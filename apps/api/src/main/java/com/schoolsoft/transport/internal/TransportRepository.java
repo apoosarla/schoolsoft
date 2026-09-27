@@ -2,6 +2,7 @@ package com.schoolsoft.transport.internal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolsoft.enrolment.api.EnrolmentActivity;
+import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.transport.api.DriverDto;
 import com.schoolsoft.transport.api.GeofenceStatusDto;
@@ -72,6 +73,20 @@ public class TransportRepository {
     }
 
     public VehicleDto createVehicle(UUID schoolId, String registrationNo, String model, Integer capacity) {
+        // A registration plate is one vehicle however it is typed: "ts07 xy 9988"
+        // and "TS07XY9988" were two rows. Seats are a positive count.
+        if (registrationNo == null || registrationNo.isBlank()) {
+            throw new IllegalArgumentException("A vehicle needs its registration number");
+        }
+        registrationNo = registrationNo.replaceAll("[\\s-]", "").toUpperCase();
+        if (capacity != null && capacity <= 0) throw new IllegalArgumentException("Capacity has to be at least 1");
+        Integer same = jdbc.queryForObject(
+            "SELECT count(*) FROM vehicle WHERE school_id = ? " +
+            "AND upper(regexp_replace(registration_no, '[\\s-]', '', 'g')) = ?",
+            Integer.class, schoolId, registrationNo);
+        if (same != null && same > 0) {
+            throw new ConflictException("Vehicle " + registrationNo + " is already registered");
+        }
         UUID id = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO vehicle (id, school_id, registration_no, model, capacity) VALUES (?, ?, ?, ?, ?)",

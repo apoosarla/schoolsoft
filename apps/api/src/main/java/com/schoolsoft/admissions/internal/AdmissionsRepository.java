@@ -93,8 +93,11 @@ public class AdmissionsRepository {
         }
         // created_at alone is not a total order -- two applications lodged in
         // the same millisecond would swap places between pages and one of them
-        // would never be read. id breaks the tie.
-        sql.append(" ORDER BY created_at DESC, id DESC");
+        // would never be read. id breaks the tie. Offers are read to chase the
+        // ones running out, so they come soonest-expiry first.
+        sql.append("offered".equals(state)
+            ? " ORDER BY offer_expires_on ASC NULLS LAST, created_at DESC, id DESC"
+            : " ORDER BY created_at DESC, id DESC");
         if (limit != null) {
             sql.append(" LIMIT ? OFFSET ?");
             args.add(limit);

@@ -328,6 +328,24 @@ public class AttendanceRepository {
         UUID approver = leaveAuthorizer.requireApprover(subjectType, subjectId, approverStaffId);
         var snap = TenantContext.get();
 
+        // Two approved leaves over the same day would each claim it, and
+        // withdrawing either would take the day away from the other. The
+        // second approval is refused instead; the office withdraws or narrows
+        // the first.
+        if ("approved".equals(status) && !"approved".equals(previous)) {
+            var overlapping = jdbc.query(
+                "SELECT o.from_date, o.to_date FROM leave_application o, leave_application l " +
+                "WHERE l.id = ? AND o.id <> l.id AND o.status = 'approved' " +
+                "  AND o.subject_type = l.subject_type AND o.subject_id = l.subject_id " +
+                "  AND o.from_date <= l.to_date AND o.to_date >= l.from_date LIMIT 1",
+                (rs, i) -> rs.getDate("from_date").toLocalDate() + " to " + rs.getDate("to_date").toLocalDate(),
+                id);
+            if (!overlapping.isEmpty()) {
+                throw new ConflictException(
+                    "An approved leave already covers " + overlapping.get(0) + "; withdraw or change it first");
+            }
+        }
+
         jdbc.update(
             "UPDATE leave_application SET status = ?, approver_staff_id = ?, decided_by_user_id = ?, " +
             "  decided_at = now() WHERE id = ?",

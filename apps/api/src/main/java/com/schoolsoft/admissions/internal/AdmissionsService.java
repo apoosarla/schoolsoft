@@ -68,9 +68,10 @@ public class AdmissionsService implements PublicAdmissions {
         String firstName, String lastName, LocalDate dob, String gender,
         String guardianName, String guardianPhone, String guardianEmail, String source
     ) {
+        requireSaneApplication(academicYearId, gradeId, firstName, dob, guardianName, guardianPhone, guardianEmail);
         AdmissionApplicationDto created = repo.create(
-            schoolId, academicYearId, gradeId, applicationNo, firstName, lastName, dob, gender,
-            guardianName, guardianPhone, guardianEmail, source);
+            schoolId, academicYearId, gradeId, applicationNo, blankToNull(firstName), blankToNull(lastName), dob,
+            blankToNull(gender), blankToNull(guardianName), guardianPhone.trim(), blankToNull(guardianEmail), source);
 
         notifications.notify(
             Notice.of(schoolId, "admission_received", Map.of(
@@ -83,6 +84,44 @@ public class AdmissionsService implements PublicAdmissions {
             "applicant", created.id());
 
         return created;
+    }
+
+    private static final java.util.regex.Pattern EMAIL =
+        java.util.regex.Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
+
+    /**
+     * An application is the family's first record at the school, and the phone
+     * on it is what the family tracks it by. Both the office form and the
+     * anonymous public form come through here, and both used to accept a child
+     * born in 2031 and a phone number of "abc" — and an empty request died on a
+     * NOT NULL constraint whose message named the table.
+     */
+    private static void requireSaneApplication(UUID academicYearId, UUID gradeId, String firstName, LocalDate dob,
+                                               String guardianName, String guardianPhone, String guardianEmail) {
+        if (academicYearId == null || gradeId == null) {
+            throw new IllegalArgumentException("Choose the year and the grade being applied for");
+        }
+        if (firstName == null || firstName.isBlank()) throw new IllegalArgumentException("The child's first name is required");
+        if (guardianName == null || guardianName.isBlank()) throw new IllegalArgumentException("A parent or guardian name is required");
+        if (guardianPhone == null || guardianPhone.isBlank()) throw new IllegalArgumentException("A phone number is required");
+        String digits = guardianPhone.replaceAll("[\\s()+-]", "");
+        if (!digits.matches("\\d{10,15}")) {
+            throw new IllegalArgumentException("That phone number does not look right — use 10 to 15 digits");
+        }
+        if (guardianEmail != null && !guardianEmail.isBlank() && !EMAIL.matcher(guardianEmail.trim()).matches()) {
+            throw new IllegalArgumentException("That email address does not look right");
+        }
+        if (dob != null) {
+            LocalDate today = LocalDate.now();
+            if (!dob.isBefore(today)) throw new IllegalArgumentException("Date of birth has to be in the past");
+            if (dob.isBefore(today.minusYears(25))) {
+                throw new IllegalArgumentException("Date of birth is more than 25 years ago — check the year");
+            }
+        }
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     /**

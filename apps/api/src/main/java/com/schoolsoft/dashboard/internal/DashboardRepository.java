@@ -30,7 +30,15 @@ public class DashboardRepository {
             "  AND period_no IS NULL AND status = 'present'",
             Long.class, schoolId
         );
-        Double attendanceTodayPct = activeEnrolments == 0 ? null : (presentToday * 100.0 / activeEnrolments);
+        // Nothing marked yet is not 0% attendance — it is no answer yet, and a
+        // head reading "0%" at 8 a.m. (or on a Saturday) reads an emergency.
+        long markedToday = jdbc.queryForObject(
+            "SELECT count(*) FROM attendance_record WHERE school_id = ? AND on_date = CURRENT_DATE " +
+            "  AND period_no IS NULL AND voided_at IS NULL",
+            Long.class, schoolId
+        );
+        Double attendanceTodayPct = activeEnrolments == 0 || markedToday == 0
+            ? null : (presentToday * 100.0 / activeEnrolments);
 
         double feeInvoicedMtd = jdbc.queryForObject(
             "SELECT COALESCE(sum(total), 0) FROM fee_invoice WHERE school_id = ? " +

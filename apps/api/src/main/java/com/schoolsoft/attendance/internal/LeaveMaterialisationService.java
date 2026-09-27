@@ -116,11 +116,12 @@ public class LeaveMaterialisationService {
 
     /** One day: a fresh row, or an amendment over what the teacher had marked. */
     private int writeStudentDay(Leave leave, UUID schoolId, UUID sectionId, LocalDate date) {
-        record Existing(UUID id, String status) {}
+        record Existing(UUID id, String status, String leaveId) {}
         var existing = jdbc.query(
-            "SELECT id, status FROM attendance_record WHERE student_id = ? AND on_date = ? " +
+            "SELECT id, status, leave_application_id FROM attendance_record WHERE student_id = ? AND on_date = ? " +
             "  AND period_no IS NULL AND voided_at IS NULL",
-            (rs, i) -> new Existing(UUID.fromString(rs.getString("id")), rs.getString("status")),
+            (rs, i) -> new Existing(UUID.fromString(rs.getString("id")), rs.getString("status"),
+                rs.getString("leave_application_id")),
             leave.subjectId(), Date.valueOf(date));
 
         if (existing.isEmpty()) {
@@ -135,6 +136,10 @@ public class LeaveMaterialisationService {
 
         Existing record = existing.get(0);
         if ("leave".equals(record.status())) {
+            // Already leave. If another approved leave wrote it, the day stays
+            // that leave's: taking it over would let withdrawing this one
+            // delete a day the other still covers.
+            if (record.leaveId() != null) return 0;
             jdbc.update("UPDATE attendance_record SET leave_application_id = ? WHERE id = ?",
                 leave.id(), record.id());
             return 1;
@@ -165,16 +170,17 @@ public class LeaveMaterialisationService {
         int written = 0;
         for (LocalDate date : workingDays.workingDays(
                 leave.schoolId(), leave.fromDate(), leave.toDate(), null, campusId)) {
-            jdbc.update(
+            written += jdbc.update(
                 "INSERT INTO staff_attendance (id, school_id, staff_id, on_date, status, source, " +
                 "  leave_application_id, notes) " +
                 "VALUES (?, ?, ?, ?, 'leave', 'auto', ?, ?) " +
                 "ON CONFLICT (staff_id, on_date) DO UPDATE SET status = 'leave', source = 'auto', " +
                 "  leave_application_id = EXCLUDED.leave_application_id, marked_at = now(), " +
-                "  notes = EXCLUDED.notes",
+                "  notes = EXCLUDED.notes " +
+                // A day another leave already owns stays with it (see writeStudentDay).
+                "WHERE staff_attendance.leave_application_id IS NULL",
                 UUID.randomUUID(), leave.schoolId(), leave.subjectId(), Date.valueOf(date), leave.id(),
                 "Approved leave" + (leave.reason() == null ? "" : ": " + leave.reason()));
-            written++;
         }
         return written;
     }

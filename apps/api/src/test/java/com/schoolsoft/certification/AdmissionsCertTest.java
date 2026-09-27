@@ -34,7 +34,13 @@ class AdmissionsCertTest extends AbstractCertificationTest {
         assertThat(tracked.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(tracked.getBody().get("state").asText()).isEqualTo("lead");
         assertThat(tracked.getBody().get("source").asText()).isEqualTo("website");
-        UUID applicationId = UUID.fromString(tracked.getBody().get("id").asText());
+        // Tracking answers with the status, not the record — no internal ids.
+        assertThat(tracked.getBody().has("id")).isFalse();
+        assertThat(tracked.getBody().has("guardianPhone")).isFalse();
+        assertThat(tracked.getBody().has("applicantDob")).isFalse();
+        UUID applicationId = queryOne(
+            "SELECT id FROM admission_application WHERE application_no = ? AND school_id = ?",
+            UUID.class, applicationNo, cbse().id());
 
         // The acknowledgement is addressed to the applicant, not to a guardian:
         // the family has no guardian row and no login until conversion, so the

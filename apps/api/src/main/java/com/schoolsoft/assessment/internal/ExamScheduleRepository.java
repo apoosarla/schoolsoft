@@ -64,6 +64,20 @@ public class ExamScheduleRepository {
 
     public ExamScheduleDto createSchedule(UUID schoolId, UUID academicYearId, UUID termId, String code,
                                           String name, LocalDate startsOn, LocalDate endsOn) {
+        if (startsOn == null || endsOn == null) throw new IllegalArgumentException("An exam week needs a first and last day");
+        if (endsOn.isBefore(startsOn)) throw new IllegalArgumentException("The exam week ends before it starts");
+        // Terms are held to their year; an exam week was not, and one dated
+        // two years out was filed under this year's schedule.
+        var year = jdbc.query("SELECT code, starts_on, ends_on FROM academic_year WHERE id = ?",
+            (rs, i) -> new Object[]{ rs.getString(1), rs.getDate(2).toLocalDate(), rs.getDate(3).toLocalDate() },
+            academicYearId);
+        if (year.isEmpty()) throw new NotFoundException("Academic year not found: " + academicYearId);
+        LocalDate yearStart = (LocalDate) year.get(0)[1];
+        LocalDate yearEnd = (LocalDate) year.get(0)[2];
+        if (startsOn.isBefore(yearStart) || endsOn.isAfter(yearEnd)) {
+            throw new IllegalArgumentException("The exam week (" + startsOn + " to " + endsOn + ") falls outside "
+                + year.get(0)[0] + " (" + yearStart + " to " + yearEnd + ")");
+        }
         UUID id = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO exam_schedule (id, school_id, academic_year_id, term_id, code, name, starts_on, ends_on) " +

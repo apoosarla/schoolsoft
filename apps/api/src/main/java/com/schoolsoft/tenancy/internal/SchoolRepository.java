@@ -87,6 +87,15 @@ public class SchoolRepository {
      * than leaning on the default.
      */
     public SchoolDto create(String slug, String name, String boardCode, String gstin, String stateCode) {
+        // The slug becomes the school's web address, so it is held to what an
+        // address can carry — the chain slug already was, the school's was not.
+        if (slug == null || !slug.matches("[a-z0-9]+(-[a-z0-9]+)*") || slug.length() < 3 || slug.length() > 40) {
+            throw new IllegalArgumentException(
+                "School slug must be 3-40 lowercase letters, digits and single hyphens (e.g. oakridge-blr)");
+        }
+        if (name == null || name.isBlank()) throw new IllegalArgumentException("A school needs a name");
+        Integer taken = jdbc.queryForObject("SELECT count(*) FROM school WHERE slug = ?", Integer.class, slug);
+        if (taken != null && taken > 0) throw new ConflictException("The slug " + slug + " is already in use");
         UUID id = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO school (id, slug, name, board_code, gstin, state_code, lifecycle) " +
@@ -568,7 +577,7 @@ public class SchoolRepository {
         int minPicks, int maxPicks, List<UUID> subjectIds
     ) {
         if (maxPicks < minPicks) {
-            throw new IllegalArgumentException("maxPicks must be at least minPicks");
+            throw new IllegalArgumentException("The most a student may pick has to be at least the fewest");
         }
         if (subjectIds.size() < maxPicks) {
             throw new IllegalArgumentException(

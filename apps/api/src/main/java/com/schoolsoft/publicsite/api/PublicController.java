@@ -4,6 +4,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.publicsite.internal.PublicLookupRepository;
+import com.schoolsoft.publicsite.internal.PublicRateLimiter;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import com.schoolsoft.tenancy.api.GradeDto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -23,7 +26,12 @@ import org.springframework.web.bind.annotation.*;
 public class PublicController {
 
     private final PublicLookupRepository repo;
-    public PublicController(PublicLookupRepository repo) { this.repo = repo; }
+    private final PublicRateLimiter limiter;
+
+    public PublicController(PublicLookupRepository repo, PublicRateLimiter limiter) {
+        this.repo = repo;
+        this.limiter = limiter;
+    }
 
     @PreAuthorize("permitAll()")
     @GetMapping
@@ -64,8 +72,10 @@ public class PublicController {
     @PreAuthorize("permitAll()")
     @PostMapping("/admissions/apply")
     public Map<String, String> apply(
-        @PathVariable String chainSlug, @PathVariable String schoolSlug, @RequestBody ApplyRequest req
+        @PathVariable String chainSlug, @PathVariable String schoolSlug, @Valid @RequestBody ApplyRequest req,
+        HttpServletRequest http
     ) {
+        limiter.check("apply:" + http.getRemoteAddr(), 20);
         AdmissionApplicationDto created = repo.apply(chainSlug, schoolSlug, new PublicLookupRepository.ApplyRequest(
             req.applicantFirstName(), req.applicantLastName(), req.applicantDob(), req.applicantGender(),
             req.gradeId(), req.guardianName(), req.guardianPhone(), req.guardianEmail()
@@ -75,11 +85,17 @@ public class PublicController {
 
     @PreAuthorize("permitAll()")
     @GetMapping("/admissions/track")
-    public AdmissionApplicationDto track(
+    public PublicApplicationStatusDto track(
         @PathVariable String chainSlug, @PathVariable String schoolSlug,
-        @RequestParam String applicationNo, @RequestParam String guardianPhone
+        @RequestParam String applicationNo, @RequestParam String guardianPhone, HttpServletRequest http
     ) {
-        return repo.track(chainSlug, applicationNo, guardianPhone)
+        // Per caller, and per application number: the second is what stops
+        // many addresses guessing one family's phone.
+        limiter.check("track:ip:" + http.getRemoteAddr(), 30);
+        limiter.check("track:no:" + chainSlug + ":" + applicationNo.trim().toUpperCase(), 10);
+        AdmissionApplicationDto a = repo.track(chainSlug, applicationNo.trim(), guardianPhone.trim())
             .orElseThrow(() -> new NotFoundException("No application found for that number and phone"));
+        return new PublicApplicationStatusDto(a.applicationNo(), a.applicantFirstName(), a.applicantLastName(),
+            a.state(), a.source(), a.testScore(), a.offerExpiresOn(), a.createdAt());
     }
 }

@@ -216,6 +216,9 @@ public class TimetableRepository {
             throw new IllegalArgumentException("Slot ends at or before it starts");
         }
 
+        if (dayOfWeek < 1 || dayOfWeek > 7) throw new IllegalArgumentException("dayOfWeek must be 1 (Monday) to 7");
+        requireTaughtWeekday(sectionId, dayOfWeek, effectiveFrom, effectiveTo);
+        requireNoSectionClash(sectionId, subjectId, dayOfWeek, from, to, effectiveFrom, effectiveTo);
         requireNoTeacherClash(teacherStaffId, dayOfWeek, from, to, effectiveFrom, effectiveTo, null);
         requireNoRoomClash(room, dayOfWeek, from, to, effectiveFrom, effectiveTo, null);
 
@@ -231,6 +234,68 @@ public class TimetableRepository {
         return jdbc.queryForObject(SELECT + "WHERE t.id = ?", MAPPER, id);
     }
 
+    private static String dayName(int dayOfWeek) {
+        return java.time.DayOfWeek.of(dayOfWeek).getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH);
+    }
+
+    /**
+     * A slot recurs weekly, so the question is whether the section is taught on
+     * that weekday at all — not whether one date is a holiday. Eight weeks from
+     * the slot's first day is long enough to see past a holiday week and to
+     * catch an alternate-Saturday school, and short enough to stay one query.
+     * Without this a Sunday lesson was accepted and simply never happened.
+     */
+    private void requireTaughtWeekday(UUID sectionId, int dayOfWeek, LocalDate effectiveFrom, LocalDate effectiveTo) {
+        var where = jdbc.query(
+            "SELECT sec.school_id, sec.grade_id, sec.campus_id FROM section sec WHERE sec.id = ?",
+            (rs, i) -> new UUID[]{
+                UUID.fromString(rs.getString("school_id")),
+                UUID.fromString(rs.getString("grade_id")),
+                rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id"))
+            },
+            sectionId);
+        if (where.isEmpty()) throw new NotFoundException("Section not found: " + sectionId);
+        LocalDate until = effectiveFrom.plusWeeks(8);
+        if (effectiveTo != null && effectiveTo.isBefore(until)) until = effectiveTo;
+        boolean taught = workingDays.workingDays(where.get(0)[0], effectiveFrom, until, where.get(0)[1], where.get(0)[2])
+            .stream().anyMatch(d -> d.getDayOfWeek().getValue() == dayOfWeek);
+        if (!taught) {
+            throw new IllegalArgumentException(
+                "The school does not teach this section on " + dayName(dayOfWeek) + "s from " + effectiveFrom);
+        }
+    }
+
+    /**
+     * One section, one lesson at a time — except electives, which run side by
+     * side because each student is in only one of them. Two slots clash unless
+     * both subjects are electives of the section. The teacher and room checks
+     * never caught this: two teachers in two rooms is exactly how a class ends
+     * up timetabled for Maths and English in the same period.
+     */
+    private void requireNoSectionClash(UUID sectionId, UUID subjectId, int dayOfWeek, LocalTime from, LocalTime to,
+                                       LocalDate effectiveFrom, LocalDate effectiveTo) {
+        var occupant = jdbc.query(
+            "SELECT sub.name FROM timetable_slot t JOIN subject sub ON sub.id = t.subject_id " +
+            "WHERE t.section_id = ? AND t.day_of_week = ? AND t.starts_at < ? AND t.ends_at > ? " +
+            "  AND t.effective_from <= COALESCE(?, 'infinity'::date) " +
+            "  AND COALESCE(t.effective_to, 'infinity'::date) >= ? " +
+            "  AND NOT (" + ELECTIVE_IN_SECTION.formatted("t.subject_id") + " AND " +
+                         ELECTIVE_IN_SECTION.formatted("?") + ") LIMIT 1",
+            (rs, i) -> rs.getString("name"),
+            sectionId, dayOfWeek, Time.valueOf(to), Time.valueOf(from),
+            effectiveTo == null ? null : Date.valueOf(effectiveTo), Date.valueOf(effectiveFrom),
+            sectionId, subjectId, sectionId);
+        if (!occupant.isEmpty()) {
+            throw new IllegalArgumentException(
+                "This section already has " + occupant.get(0) + " at that time on " + dayName(dayOfWeek));
+        }
+    }
+
+    /** Takes the subject expression, then binds the section id after it. */
+    private static final String ELECTIVE_IN_SECTION =
+        "EXISTS (SELECT 1 FROM section_subject_teacher e WHERE e.subject_id = %s::uuid AND e.section_id = ?::uuid " +
+        "AND e.is_elective)";
+
     private void requireNoTeacherClash(UUID teacherStaffId, int dayOfWeek, LocalTime from, LocalTime to,
                                        LocalDate effectiveFrom, LocalDate effectiveTo, UUID ignoreSlotId) {
         Integer clashes = jdbc.queryForObject(
@@ -243,7 +308,7 @@ public class TimetableRepository {
             effectiveTo == null ? null : Date.valueOf(effectiveTo), Date.valueOf(effectiveFrom),
             ignoreSlotId, ignoreSlotId);
         if (clashes != null && clashes > 0) {
-            throw new IllegalArgumentException("Teacher already has an overlapping timetable slot on day " + dayOfWeek);
+            throw new IllegalArgumentException("Teacher already has an overlapping timetable slot on " + dayName(dayOfWeek));
         }
     }
 
@@ -263,7 +328,7 @@ public class TimetableRepository {
             ignoreSlotId, ignoreSlotId);
         if (!occupant.isEmpty()) {
             throw new IllegalArgumentException(
-                "Room " + room + " is already booked on day " + dayOfWeek + " by " + occupant.get(0));
+                "Room " + room + " is already booked on " + dayName(dayOfWeek) + " by " + occupant.get(0));
         }
     }
 

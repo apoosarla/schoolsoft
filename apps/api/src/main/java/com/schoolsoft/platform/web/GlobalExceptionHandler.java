@@ -6,9 +6,15 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -23,8 +29,59 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> validation(MethodArgumentNotValidException ex) {
+        String detail = ex.getBindingResult().getFieldErrors().stream()
+            .map(e -> e.getField() + " " + e.getDefaultMessage())
+            .reduce((a, b) -> a + "; " + b)
+            .orElse("The request is not valid");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-            .body(ApiError.of("validation_failed", ex.getMessage()));
+            .body(ApiError.of("validation_failed", detail));
+    }
+
+    /*
+     * The request never reached a handler that could judge it: a parameter
+     * missing or empty, one that does not parse as its type, a body that is not
+     * JSON. Each is the caller's mistake, and without these the catch-all
+     * below answered 500 — "the server is broken" — for a typo in a query
+     * string, and logged a stack trace for it.
+     */
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiError> missingParameter(MissingServletRequestParameterException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(ApiError.of("bad_request", "Missing required parameter '" + ex.getParameterName() + "'"));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiError> typeMismatch(MethodArgumentTypeMismatchException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(ApiError.of("bad_request", "Parameter '" + ex.getName() + "' is not valid"));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> unreadable(HttpMessageNotReadableException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(ApiError.of("bad_request", "The request body could not be read"));
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> methodNotAllowed(HttpRequestMethodNotSupportedException ex) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+            .body(ApiError.of("method_not_allowed", ex.getMessage()));
+    }
+
+    /** A status a handler chose on purpose — a rate limit's 429, say — with its own reason. */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ApiError> status(ResponseStatusException ex) {
+        String code = ex.getStatusCode().value() == 429 ? "rate_limited" : "error";
+        return ResponseEntity.status(ex.getStatusCode())
+            .body(ApiError.of(code, ex.getReason() == null ? "Request refused" : ex.getReason()));
+    }
+
+    /** A path no controller maps. Spring reports it as a missing static resource. */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiError> noSuchPath(NoResourceFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ApiError.of("not_found", "No such endpoint"));
     }
 
     @ExceptionHandler(NotFoundException.class)

@@ -29,11 +29,13 @@ class TimetableCertTest extends AbstractCertificationTest {
             "effectiveFrom", cie().currentAy().startsOn().toString(),
             "gradeIds", List.of(gradeId),
             "periods", List.of(
-                Map.of("periodNo", 1, "label", "Period 1", "startsAt", "08:00:00", "endsAt", "08:45:00",
+                // Before the fixture's own 09:00 start, so period 2 does not
+                // land on a lesson the section already has.
+                Map.of("periodNo", 1, "label", "Period 1", "startsAt", "07:00:00", "endsAt", "07:45:00",
                        "isBreak", false),
-                Map.of("periodNo", 2, "label", "Period 2", "startsAt", "08:45:00", "endsAt", "09:30:00",
+                Map.of("periodNo", 2, "label", "Period 2", "startsAt", "07:45:00", "endsAt", "08:30:00",
                        "isBreak", false),
-                Map.of("periodNo", 3, "label", "Short break", "startsAt", "09:30:00", "endsAt", "09:50:00",
+                Map.of("periodNo", 3, "label", "Short break", "startsAt", "08:30:00", "endsAt", "08:50:00",
                        "isBreak", true))), token);
         assertThat(schedule.getStatusCode()).isEqualTo(HttpStatus.OK);
         UUID scheduleId = UUID.fromString(schedule.getBody().get("id").asText());
@@ -56,8 +58,8 @@ class TimetableCertTest extends AbstractCertificationTest {
                 "effectiveFrom", cie().currentAy().startsOn().toString()), token);
             assertThat(slot.getStatusCode()).isEqualTo(HttpStatus.OK);
             slotId = UUID.fromString(slot.getBody().get("id").asText());
-            assertThat(slot.getBody().get("startsAt").asText()).startsWith("08:45");
-            assertThat(slot.getBody().get("endsAt").asText()).startsWith("09:30");
+            assertThat(slot.getBody().get("startsAt").asText()).startsWith("07:45");
+            assertThat(slot.getBody().get("endsAt").asText()).startsWith("08:30");
             assertThat(slot.getBody().get("periodNo").asInt()).isEqualTo(2);
 
             // Nothing can be timetabled into a break.
@@ -113,6 +115,25 @@ class TimetableCertTest extends AbstractCertificationTest {
                 "room", "R202", "effectiveFrom", "2026-04-01"), token);
             assertThat(clash.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             assertThat(clash.getBody().get("message").asText()).contains("overlapping");
+
+            // Same section, another teacher in another room: still one class in
+            // two lessons at once. Neither the teacher nor the room check saw it.
+            var sectionClash = post("/v1/timetable/slots", body(
+                "sectionId", sectionB, "subjectId", subjectOf(cbse(), "ENG"),
+                "teacherStaffId", cbse().teacherStaffIds().get(4),
+                "dayOfWeek", 3, "periodNo", 7, "startsAt", "15:15:00", "endsAt", "16:00:00",
+                "room", "R203", "effectiveFrom", "2026-04-01"), token);
+            assertThat(sectionClash.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(sectionClash.getBody().get("message").asText()).contains("already has");
+
+            // A day the school does not teach is refused rather than stored as a
+            // lesson that never happens.
+            var sunday = post("/v1/timetable/slots", body(
+                "sectionId", sectionB, "subjectId", subjectOf(cbse(), "MATH"), "teacherStaffId", teacher,
+                "dayOfWeek", 7, "periodNo", 1, "startsAt", "09:00:00", "endsAt", "09:45:00",
+                "room", "R201", "effectiveFrom", "2026-04-01"), token);
+            assertThat(sunday.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(sunday.getBody().get("message").asText()).contains("does not teach");
         } finally {
             delete("/v1/timetable/slots/" + slotId, token);
         }
@@ -127,7 +148,7 @@ class TimetableCertTest extends AbstractCertificationTest {
 
         var first = post("/v1/timetable/slots", body(
             "sectionId", sectionA, "subjectId", subjectOf(cbse(), cbse().subjectCodes().get(0)),
-            "teacherStaffId", cbse().teacherStaffIds().get(2), "dayOfWeek", 6, "periodNo", 8,
+            "teacherStaffId", cbse().teacherStaffIds().get(2), "dayOfWeek", 4, "periodNo", 8,
             "startsAt", "15:00:00", "endsAt", "15:45:00", "room", room,
             "effectiveFrom", cbse().currentAy().startsOn().toString()), token);
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -136,7 +157,7 @@ class TimetableCertTest extends AbstractCertificationTest {
             // Different section, different teacher, same room and time.
             var clash = post("/v1/timetable/slots", body(
                 "sectionId", sectionB, "subjectId", subjectOf(cbse(), cbse().subjectCodes().get(1)),
-                "teacherStaffId", cbse().teacherStaffIds().get(3), "dayOfWeek", 6, "periodNo", 8,
+                "teacherStaffId", cbse().teacherStaffIds().get(3), "dayOfWeek", 4, "periodNo", 8,
                 "startsAt", "15:15:00", "endsAt", "16:00:00", "room", room,
                 "effectiveFrom", cbse().currentAy().startsOn().toString()), token);
             assertThat(clash.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -145,7 +166,7 @@ class TimetableCertTest extends AbstractCertificationTest {
             // A different room at the same time is fine.
             var elsewhere = post("/v1/timetable/slots", body(
                 "sectionId", sectionB, "subjectId", subjectOf(cbse(), cbse().subjectCodes().get(1)),
-                "teacherStaffId", cbse().teacherStaffIds().get(3), "dayOfWeek", 6, "periodNo", 8,
+                "teacherStaffId", cbse().teacherStaffIds().get(3), "dayOfWeek", 4, "periodNo", 8,
                 "startsAt", "15:15:00", "endsAt", "16:00:00", "room", room + "-2",
                 "effectiveFrom", cbse().currentAy().startsOn().toString()), token);
             assertThat(elsewhere.getStatusCode()).isEqualTo(HttpStatus.OK);

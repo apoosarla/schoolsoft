@@ -278,16 +278,17 @@ class AcademicStructureCertTest extends AbstractCertificationTest {
             assertThat(subjectIdsOf(setA)).contains(subjectOf(cie(), cie().subjectCodes().get(0)).toString());
 
             // The timetable follows the same rule: an option period appears only
-            // for the student who takes it.
+            // for the student who takes it. The two options share a period —
+            // electives may — after the fixture's own day has ended.
             post("/v1/timetable/slots", body(
                 "sectionId", block.sectionId(), "subjectId", block.subjectA(),
                 "teacherStaffId", cie().teacherStaffIds().get(0), "dayOfWeek", 4, "periodNo", 7,
-                "startsAt", "14:00:00", "endsAt", "14:45:00", "room", "ACAD09-A",
+                "startsAt", "15:00:00", "endsAt", "15:45:00", "room", "ACAD09-A",
                 "effectiveFrom", cie().currentAy().startsOn().toString()), token);
             post("/v1/timetable/slots", body(
                 "sectionId", block.sectionId(), "subjectId", block.subjectB(),
                 "teacherStaffId", cie().teacherStaffIds().get(1), "dayOfWeek", 4, "periodNo", 7,
-                "startsAt", "14:00:00", "endsAt", "14:45:00", "room", "ACAD09-B",
+                "startsAt", "15:00:00", "endsAt", "15:45:00", "room", "ACAD09-B",
                 "effectiveFrom", cie().currentAy().startsOn().toString()), token);
 
             var weekA = get("/v1/timetable/students/" + block.studentA(), token).getBody();
