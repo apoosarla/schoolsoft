@@ -728,7 +728,7 @@ public class CertificationFixture {
                 // land in today's column.
                 var capturedAt = ay.startsOn().plusMonths(1).atStartOfDay()
                     .atZone(java.time.ZoneId.of("Asia/Kolkata")).toOffsetDateTime();
-                ledger.add(new Object[]{id("ledger:" + invoiceId + ":dr"), schoolId, journalId, "BANK",
+                ledger.add(new Object[]{id("ledger:" + invoiceId + ":dr"), schoolId, journalId, "CASH",
                     30000, 0, "Fee receipt " + invoiceNo, "payment", paymentId, capturedAt});
                 ledger.add(new Object[]{id("ledger:" + invoiceId + ":cr"), schoolId, journalId, "FEE_RECEIVABLE",
                     0, 30000, "Fee receipt " + invoiceNo, "payment", paymentId, capturedAt});

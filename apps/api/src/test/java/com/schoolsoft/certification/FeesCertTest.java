@@ -262,6 +262,9 @@ class FeesCertTest extends AbstractCertificationTest {
             credits += leg.get("credit").asDouble();
         }
         assertThat(debits).isEqualTo(credits);
+        // Money through a gateway lands in the bank.
+        assertThat(count("SELECT count(*) FROM ledger_entry WHERE source_id = ? AND account_code = 'BANK' " +
+            "AND debit > 0", UUID.fromString(first.getBody().get("id").asText()))).isEqualTo(1);
     }
 
     @Test @Tag("P1")
@@ -284,6 +287,12 @@ class FeesCertTest extends AbstractCertificationTest {
         var afterSecond = get("/v1/fees/invoices/" + invoiceId, token).getBody();
         assertThat(afterSecond.get("status").asText()).isEqualTo("paid");
         assertThat(afterSecond.get("paid").asDouble()).isEqualTo(12000.0);
+
+        // Cash at the counter is cash in hand, not a bank balance (BUG-41).
+        assertThat(count("SELECT count(*) FROM ledger_entry l JOIN payment p ON p.id = l.source_id " +
+            "WHERE p.fee_invoice_id = ? AND l.account_code = 'CASH' AND l.debit > 0", invoiceId)).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM ledger_entry l JOIN payment p ON p.id = l.source_id " +
+            "WHERE p.fee_invoice_id = ? AND l.account_code = 'BANK'", invoiceId)).isZero();
 
         // What the parent app reads is the same record.
         UUID studentId = queryOne("SELECT student_id FROM fee_invoice WHERE id = ?", UUID.class, invoiceId);

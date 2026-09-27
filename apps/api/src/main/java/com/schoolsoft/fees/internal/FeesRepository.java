@@ -212,8 +212,8 @@ public class FeesRepository {
         "id, school_id, fee_invoice_id, amount, gateway, method, status, idempotency_key, captured_at";
 
     /**
-     * Records a payment and posts balanced ledger entries (Bank DR / Fee
-     * Receivable CR). Idempotent on {@code idempotencyKey} — a retried gateway
+     * Records a payment and posts balanced ledger entries (Bank or Cash DR /
+     * Fee Receivable CR). Idempotent on {@code idempotencyKey} — a retried gateway
      * webhook returns the already-recorded payment rather than double-posting.
      *
      * Two parents paying at once used to lose an update: the old code read
@@ -263,7 +263,8 @@ public class FeesRepository {
         );
 
         UUID journalId = UUID.randomUUID();
-        postLeg(schoolId, journalId, "BANK", amount, 0, "Payment for " + invoiceNo, paymentId);
+        postLeg(schoolId, journalId, receivingAccount(gateway, method), amount, 0,
+            "Payment for " + invoiceNo, paymentId);
         if (applied > 0) {
             postLeg(schoolId, journalId, "FEE_RECEIVABLE", 0, applied, "Payment for " + invoiceNo, paymentId);
         }
@@ -279,6 +280,17 @@ public class FeesRepository {
         adjustments.recomputeStatus(feeInvoiceId, false);
 
         return jdbc.queryForObject("SELECT " + PAYMENT_COLS + " FROM payment WHERE id = ?", PAYMENT_MAPPER, paymentId);
+    }
+
+    /**
+     * Where the money landed. Cash taken at the counter sits in the cash box
+     * until someone deposits it, so it is not yet a bank balance (BUG-41).
+     * {@code method} wins over {@code gateway}, the same way the day-book
+     * groups them.
+     */
+    static String receivingAccount(String gateway, String method) {
+        String how = method != null ? method : gateway;
+        return "cash".equalsIgnoreCase(how) ? "CASH" : "BANK";
     }
 
     private void postLeg(UUID schoolId, UUID journalId, String account, double debit, double credit,

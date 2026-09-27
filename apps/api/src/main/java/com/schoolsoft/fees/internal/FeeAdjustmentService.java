@@ -25,12 +25,14 @@ import org.springframework.transaction.annotation.Transactional;
  *   charge / late_fee  raises the amount owed   FEE_RECEIVABLE DR / income CR
  *   credit_note        lowers the amount owed   income DR / FEE_RECEIVABLE CR
  *   waiver             lowers the amount owed   FEE_WAIVER DR / FEE_RECEIVABLE CR
- *   reversal           un-does a payment        FEE_RECEIVABLE (+ ADVANCE) DR / BANK CR
+ *   reversal           un-does a payment        FEE_RECEIVABLE (+ ADVANCE) DR / BANK or CASH CR
  *   refund             pays money back out      FEE_RECEIVABLE (+ ADVANCE) DR / REFUND CR
  * </pre>
  *
  * A bounced cheque is a {@code reversal}, never a deleted payment: the school
- * has to be able to show that the money arrived and went away again.
+ * has to be able to show that the money arrived and went away again. A
+ * reversal credits whichever account the payment debited, so reversing a
+ * cash receipt takes it out of the cash box rather than the bank.
  */
 @Service
 public class FeeAdjustmentService {
@@ -133,7 +135,7 @@ public class FeeAdjustmentService {
                     post(schoolId, id, "FEE_RECEIVABLE", unwind.receivable(), 0, reason, invoiceNo);
                 }
                 if (unwind.advance() > 0) post(schoolId, id, "ADVANCE", unwind.advance(), 0, reason, invoiceNo);
-                post(schoolId, id, "refund".equals(kind) ? "REFUND" : "BANK", 0, amount, reason, invoiceNo);
+                post(schoolId, id, "refund".equals(kind) ? "REFUND" : unwind.account(), 0, amount, reason, invoiceNo);
                 // Only a payment that has gone back in full changes state; a
                 // part-refund leaves the rest of it captured.
                 if (unwind.whole()) {
@@ -152,8 +154,11 @@ public class FeeAdjustmentService {
         return jdbc.queryForObject("SELECT " + COLS + " FROM fee_adjustment WHERE id = ?", MAPPER, id);
     }
 
-    /** How much of a reversal comes out of the advance and how much out of the dues it paid. */
-    private record PaymentUnwind(double advance, double receivable, boolean whole) {}
+    /**
+     * How much of a reversal comes out of the advance and how much out of the
+     * dues it paid, and which account the payment's money went into.
+     */
+    private record PaymentUnwind(double advance, double receivable, boolean whole, String account) {}
 
     /**
      * A reversal or refund names the payment it un-does and is bounded by what
@@ -195,7 +200,10 @@ public class FeeAdjustmentService {
             "WHERE l.account_code = 'ADVANCE' AND l.source_type = 'adjustment' AND a.payment_id = ?",
             Double.class, paymentId);
         double advance = round(Math.min(amount, Math.min(advanceHeld, Math.max(0, paymentAdvance - advanceReturned))));
-        return new PaymentUnwind(advance, round(amount - advance), amount + 0.005 >= remaining);
+        String account = jdbc.query(
+            "SELECT account_code FROM ledger_entry WHERE source_type = 'payment' AND source_id = ? AND debit > 0",
+            (rs, i) -> rs.getString(1), paymentId).stream().findFirst().orElse("BANK");
+        return new PaymentUnwind(advance, round(amount - advance), amount + 0.005 >= remaining, account);
     }
 
     private static double round(double value) {

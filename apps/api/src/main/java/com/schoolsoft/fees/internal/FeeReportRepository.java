@@ -46,11 +46,11 @@ public class FeeReportRepository {
             "  AND captured_at::date BETWEEN ? AND ?",
             Double.class, schoolId, Date.valueOf(from), Date.valueOf(to));
 
-        // The same money, seen from the ledger: bank debits less bank credits
-        // (a reversal or refund puts money back out).
+        // The same money, seen from the ledger: bank and cash debits less their
+        // credits (a reversal or refund puts money back out).
         Double ledgerNet = jdbc.queryForObject(
             "SELECT COALESCE(sum(debit) - sum(credit), 0) FROM ledger_entry " +
-            "WHERE school_id = ? AND account_code = 'BANK' AND posted_at::date BETWEEN ? AND ?",
+            "WHERE school_id = ? AND account_code IN ('BANK', 'CASH') AND posted_at::date BETWEEN ? AND ?",
             Double.class, schoolId, Date.valueOf(from), Date.valueOf(to));
 
         Double refunded = jdbc.queryForObject(
