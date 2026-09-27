@@ -317,6 +317,14 @@ class FeesCertTest extends AbstractCertificationTest {
         assertThat(queryOne("SELECT status FROM payment WHERE id = ?", String.class, paymentId))
             .isEqualTo("failed");
 
+        // A payment goes back once. The second attempt used to succeed for as
+        // long as the invoice had anything paid on it.
+        var again = post("/v1/fees/invoices/" + invoiceId + "/adjustments", body(
+            "schoolId", cbse().id(), "kind", "reversal", "amount", 9000.0,
+            "reason", "Cheque 004521 returned unpaid", "paymentId", paymentId,
+            "approvedByStaffId", cbse().accountantStaffId()), token);
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
         // Balanced legs for the reversal.
         assertThat(journalBalances("adjustment",
             queryOne("SELECT id FROM fee_adjustment WHERE fee_invoice_id = ? AND kind = 'reversal'",
@@ -727,6 +735,24 @@ class FeesCertTest extends AbstractCertificationTest {
         // Money held but not earned sits in a liability account, not income.
         assertThat(count("SELECT count(*) FROM ledger_entry WHERE account_code = 'ADVANCE' " +
             "AND source_id IN (SELECT id FROM payment WHERE fee_invoice_id = ?)", invoiceId)).isEqualTo(1);
+        // The office and the family can see the credit, not only the ledger.
+        assertThat(invoice.get("advanceAmount").asDouble()).isEqualTo(10000.0);
+
+        // The payment that became the advance can be reversed in full. It used
+        // to be refused — "only 10000 was paid" — because an overpayment never
+        // raises paid past the total.
+        UUID advancePayment = queryOne(
+            "SELECT source_id FROM ledger_entry WHERE account_code = 'ADVANCE' AND source_type = 'payment' " +
+            "AND source_id IN (SELECT id FROM payment WHERE fee_invoice_id = ?)", UUID.class, invoiceId);
+        var reversal = post("/v1/fees/invoices/" + invoiceId + "/adjustments", body(
+            "schoolId", cbse().id(), "kind", "reversal", "amount", 10000.0,
+            "reason", "Duplicate UPI capture returned", "paymentId", advancePayment), token);
+        assertThat(reversal.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var after = get("/v1/fees/invoices/" + invoiceId, token).getBody();
+        assertThat(after.get("paid").asDouble()).isEqualTo(10000.0);
+        assertThat(after.get("advanceAmount").asDouble()).isEqualTo(0.0);
+        assertThat(after.get("status").asText()).isEqualTo("paid");
+        assertThat(journalBalances("adjustment", UUID.fromString(reversal.getBody().get("id").asText()))).isTrue();
     }
 
     // ---------------------------------------------------------------- helpers

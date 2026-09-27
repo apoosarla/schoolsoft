@@ -15,5 +15,7 @@ public record FeeInvoiceDto(
     double gst,
     double total,
     double paid,
-    String status
+    String status,
+    /** Paid beyond the total and held for the family — a liability, not income. */
+    double advanceAmount
 ) {}

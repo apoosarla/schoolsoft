@@ -152,7 +152,12 @@ public class FeeReportRepository {
             "WHERE student_id = ? AND status IN ('open','partial','overdue')",
             Double.class, studentId);
         double value = balance == null ? 0 : balance;
-        return Map.of("studentId", studentId, "balance", round(value), "hasDues", value > 0.005);
+        // Money the family paid ahead and the school still holds for them.
+        Double advance = jdbc.queryForObject(
+            "SELECT COALESCE(sum(advance_amount), 0) FROM fee_invoice WHERE student_id = ?",
+            Double.class, studentId);
+        return Map.of("studentId", studentId, "balance", round(value), "hasDues", value > 0.005,
+            "credit", round(advance == null ? 0 : advance));
     }
 
     private static double round(double value) {

@@ -98,11 +98,13 @@ public class FeesRepository {
         rs.getDouble("gst"),
         rs.getDouble("total"),
         rs.getDouble("paid"),
-        rs.getString("status")
+        rs.getString("status"),
+        rs.getDouble("advance_amount")
     );
 
     private static final String INVOICE_COLS =
-        "id, school_id, student_id, invoice_no, cycle_label, issued_on, due_on, subtotal, gst, total, paid, status";
+        "id, school_id, student_id, invoice_no, cycle_label, issued_on, due_on, subtotal, gst, total, paid, status, " +
+        "advance_amount";
 
     public List<FeeInvoiceDto> listInvoicesByStudent(UUID studentId) {
         return jdbc.query(
@@ -171,8 +173,13 @@ public class FeesRepository {
             // Joined to the invoice, which carries school_id and therefore an
             // RLS policy; fee_invoice_line carries neither, so keyed by
             // invoice id alone this read crosses the school boundary.
-            "SELECT l.id, l.fee_invoice_id, l.fee_head_id, l.description, l.amount, l.discount, l.gst " +
+            // A line typed without a description reads as its fee head — a
+            // blank row on a bill tells a parent nothing.
+            "SELECT l.id, l.fee_invoice_id, l.fee_head_id, " +
+            "       COALESCE(NULLIF(trim(l.description), ''), h.name) AS description, " +
+            "       l.amount, l.discount, l.gst " +
             "FROM fee_invoice_line l JOIN fee_invoice i ON i.id = l.fee_invoice_id " +
+            "LEFT JOIN fee_head h ON h.id = l.fee_head_id " +
             "WHERE l.fee_invoice_id = ?",
             (rs, i) -> new FeeInvoiceLineDto(
                 UUID.fromString(rs.getString("id")),
