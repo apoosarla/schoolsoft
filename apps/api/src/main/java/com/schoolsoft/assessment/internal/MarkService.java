@@ -372,8 +372,8 @@ public class MarkService {
     private void requireWritable(Component component) {
         if (SEALED.contains(component.assessmentStatus())) {
             throw new ConflictException(
-                "Assessment " + component.assessmentId() + " is " + component.assessmentStatus()
-                + "; reopen it through /v1/assessment/{id}/status with a reason, or raise a re-evaluation");
+                "This assessment is " + component.assessmentStatus()
+                + " — reopen it with a reason to change marks, or raise a re-evaluation");
         }
     }
 

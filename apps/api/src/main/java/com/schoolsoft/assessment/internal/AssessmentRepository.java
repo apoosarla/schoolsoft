@@ -76,6 +76,19 @@ public class AssessmentRepository {
         UUID schoolId, UUID sectionId, UUID subjectId, UUID termId, String strategyCode,
         String name, String assessmentType, Double maxMarks, Double weightPct, LocalDate scheduledOn
     ) {
+        if (name == null || name.isBlank()) throw new IllegalArgumentException("An assessment needs a name");
+        // The same paper twice — one section, one subject, one name, one day —
+        // splits a class's marks across two grids, and the report card reads
+        // whichever it finds. A second sitting is named as one.
+        Integer same = jdbc.queryForObject(
+            "SELECT count(*) FROM assessment WHERE section_id = ? AND subject_id = ? " +
+            "AND lower(trim(name)) = lower(trim(?)) AND scheduled_on IS NOT DISTINCT FROM ?::date",
+            Integer.class, sectionId, subjectId, name, scheduledOn == null ? null : Date.valueOf(scheduledOn));
+        if (same != null && same > 0) {
+            throw new com.schoolsoft.platform.web.ConflictException(
+                "This section already has \"" + name.trim() + "\" for this subject"
+                    + (scheduledOn == null ? "" : " on " + scheduledOn) + " — name a second sitting differently");
+        }
         UUID id = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO assessment (id, school_id, section_id, subject_id, term_id, strategy_code, name, " +
@@ -208,6 +221,50 @@ public class AssessmentRepository {
             "SELECT a.section_id FROM assessment_component c JOIN assessment a ON a.id = c.assessment_id " +
             "WHERE c.id = ?",
             (rs, i) -> UUID.fromString(rs.getString(1)), componentId).stream().findFirst();
+    }
+
+    /**
+     * Every mark one child holds, newest assessment first. {@code publishedOnly}
+     * is the family's view: a mark is theirs to see once the school publishes
+     * the assessment, not while a teacher is still entering it.
+     */
+    public List<com.schoolsoft.assessment.api.StudentMarkDto> marksForStudent(UUID studentId, boolean publishedOnly) {
+        return jdbc.query(
+            "SELECT a.id AS assessment_id, a.name AS assessment_name, a.assessment_type, sub.name AS subject_name, " +
+            "       a.scheduled_on, a.status AS assessment_status, c.id AS component_id, c.name AS component_name, " +
+            "       c.max_marks, m.id AS mark_id, m.raw_marks, m.status " +
+            "FROM mark m " +
+            "JOIN assessment_component c ON c.id = m.assessment_component_id " +
+            "JOIN assessment a ON a.id = c.assessment_id " +
+            "JOIN subject sub ON sub.id = a.subject_id " +
+            "WHERE m.student_id = ? " + (publishedOnly ? "AND a.status = 'published' " : "") +
+            "ORDER BY a.scheduled_on DESC NULLS LAST, a.name, c.sort_order",
+            (rs, i) -> new com.schoolsoft.assessment.api.StudentMarkDto(
+                UUID.fromString(rs.getString("assessment_id")), rs.getString("assessment_name"),
+                rs.getString("assessment_type"), rs.getString("subject_name"),
+                rs.getDate("scheduled_on") == null ? null : rs.getDate("scheduled_on").toLocalDate(),
+                rs.getString("assessment_status"), UUID.fromString(rs.getString("component_id")),
+                rs.getString("component_name"), rs.getDouble("max_marks"),
+                UUID.fromString(rs.getString("mark_id")),
+                rs.getObject("raw_marks") == null ? null : rs.getDouble("raw_marks"), rs.getString("status")),
+            studentId);
+    }
+
+    /** Section and subject of an assessment — what a write to it is confined by. */
+    public record Owner(UUID sectionId, UUID subjectId) {}
+
+    public Optional<Owner> ownerOf(UUID assessmentId) {
+        return jdbc.query("SELECT section_id, subject_id FROM assessment WHERE id = ?",
+            (rs, i) -> new Owner(UUID.fromString(rs.getString(1)), UUID.fromString(rs.getString(2))),
+            assessmentId).stream().findFirst();
+    }
+
+    public Optional<Owner> ownerOfComponent(UUID componentId) {
+        return jdbc.query(
+            "SELECT a.section_id, a.subject_id FROM assessment_component c JOIN assessment a ON a.id = c.assessment_id " +
+            "WHERE c.id = ?",
+            (rs, i) -> new Owner(UUID.fromString(rs.getString(1)), UUID.fromString(rs.getString(2))),
+            componentId).stream().findFirst();
     }
 
     public List<AssessmentComponentDto> listComponents(UUID assessmentId) {

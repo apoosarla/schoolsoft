@@ -4,6 +4,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.assessment.internal.AssessmentPolicyRepository;
 import com.schoolsoft.assessment.internal.AssessmentRepository;
 import com.schoolsoft.assessment.internal.MarkService;
+import com.schoolsoft.iam.api.Authz;
+import com.schoolsoft.iam.api.PermissionChecker;
 import com.schoolsoft.iam.api.SelfScope;
 import com.schoolsoft.iam.api.TeacherScope;
 import com.schoolsoft.platform.security.Perm;
@@ -30,10 +32,13 @@ public class AssessmentController {
     private final SelfScope selfScope;
     private final TeacherScope teacherScope;
     private final StrategyRegistry strategies;
+    private final Authz authz;
+    private final PermissionChecker perms;
 
     public AssessmentController(AssessmentRepository repo, MarkService marks, ReportCardService reportCards,
                                 AssessmentPolicyRepository policies, SelfScope selfScope,
-                                TeacherScope teacherScope, StrategyRegistry strategies) {
+                                TeacherScope teacherScope, StrategyRegistry strategies, Authz authz,
+                                PermissionChecker perms) {
         this.repo = repo;
         this.marks = marks;
         this.reportCards = reportCards;
@@ -41,6 +46,17 @@ public class AssessmentController {
         this.selfScope = selfScope;
         this.teacherScope = teacherScope;
         this.strategies = strategies;
+        this.authz = authz;
+        this.perms = perms;
+    }
+
+    /**
+     * Writes to an assessment — its components, its status, its marks — are
+     * confined to whoever teaches its subject in its section. A missing id
+     * falls through to the handler, which answers 404 in its own words.
+     */
+    private void requireWritable(java.util.Optional<AssessmentRepository.Owner> owner) {
+        owner.ifPresent(o -> teacherScope.requireTeachesSubject(o.sectionId(), o.subjectId()));
     }
 
     /**
@@ -86,6 +102,7 @@ public class AssessmentController {
     @PreAuthorize("@perm.can('assessment.manage')")
     @PostMapping
     public AssessmentDto create(@RequestBody CreateAssessmentRequest req) {
+        teacherScope.requireTeachesSubject(req.sectionId(), req.subjectId());
         return repo.create(
             req.schoolId(), req.sectionId(), req.subjectId(), req.termId(), req.strategyCode(),
             req.name(), req.assessmentType(), req.maxMarks(), req.weightPct(), req.scheduledOn()
@@ -104,6 +121,7 @@ public class AssessmentController {
     @PostMapping("/{id}/status")
     @Audited(action = "assessment.status_change", targetType = "assessment", requireReason = false)
     public AssessmentDto setStatus(@PathVariable UUID id, @RequestBody StatusRequest req) {
+        requireWritable(repo.ownerOf(id));
         return repo.setStatus(id, req.status(), req.reason());
     }
 
@@ -130,6 +148,7 @@ public class AssessmentController {
     @PreAuthorize("@perm.can('assessment.manage')")
     @PostMapping("/{id}/components")
     public AssessmentComponentDto addComponent(@PathVariable UUID id, @RequestBody CreateComponentRequest req) {
+        requireWritable(repo.ownerOf(id));
         return repo.addComponent(id, req.code(), req.name(), req.maxMarks(), req.weightPct(), req.sortOrder());
     }
 
@@ -156,7 +175,7 @@ public class AssessmentController {
      */
     public record EnterMarkRequest(
         @NotNull UUID schoolId, @NotNull UUID studentId, Double rawMarks, String status, String gradeLetter,
-        String remarks, boolean isAbsent, String reason, UUID enteredByStaffId
+        String remarks, boolean isAbsent, String reason
     ) {
         String effectiveStatus() {
             if (status != null && !status.isBlank()) return status;
@@ -167,10 +186,11 @@ public class AssessmentController {
     @PreAuthorize("@perm.can('mark.enter')")
     @PostMapping("/components/{componentId}/marks")
     public MarkDto enterMark(@PathVariable UUID componentId, @RequestBody EnterMarkRequest req) {
+        requireWritable(repo.ownerOfComponent(componentId));
         return marks.enter(req.schoolId(), componentId,
             new MarkService.MarkEntry(req.studentId(), req.rawMarks(), req.effectiveStatus(),
                 req.gradeLetter(), req.remarks()),
-            req.enteredByStaffId(), req.reason());
+            authz.currentStaffId(), req.reason());
     }
 
     public record BulkMarkEntry(
@@ -179,7 +199,7 @@ public class AssessmentController {
 
     public record BulkMarkRequest(
         @NotNull UUID schoolId, @NotNull UUID componentId, @NotNull List<BulkMarkEntry> entries,
-        UUID enteredByStaffId, String reason
+        String reason
     ) {}
 
     /**
@@ -190,12 +210,13 @@ public class AssessmentController {
     @PreAuthorize("@perm.can('mark.enter')")
     @PostMapping("/marks/bulk")
     public MarkService.BulkResult enterMarksInBulk(@RequestBody BulkMarkRequest req) {
+        requireWritable(repo.ownerOfComponent(req.componentId()));
         return marks.enterBulk(req.schoolId(), req.componentId(),
             req.entries().stream()
                 .map(e -> new MarkService.MarkEntry(e.studentId(), e.rawMarks(), e.status(),
                     e.gradeLetter(), e.remarks()))
                 .toList(),
-            req.enteredByStaffId(), req.reason());
+            authz.currentStaffId(), req.reason());
     }
 
     /** What this mark used to be, and why it changed (ASMT-07, ASMT-08). */
@@ -237,6 +258,19 @@ public class AssessmentController {
     @Audited(action = "mark.re_evaluation_decided", targetType = "mark_reevaluation")
     public MarkReevaluationDto decideReevaluation(@PathVariable UUID id, @RequestBody ReevaluationDecision req) {
         return marks.decideReevaluation(id, req.outcome(), req.newRawMarks(), req.reason());
+    }
+
+    /**
+     * One child's marks across every assessment. The family's grades screen
+     * used to walk the section's assessment list to find them, which a family
+     * may not read — so the screen was refused and sat on "Loading…".
+     */
+    @PreAuthorize("@perm.canAnyOf('mark.view', 'mark.view.own')")
+    @GetMapping("/students/{studentId}/marks")
+    public List<StudentMarkDto> marksForStudent(@PathVariable UUID studentId) {
+        selfScope.requireStudent(studentId, Perm.MARK_VIEW);
+        teacherScope.requireStudent(studentId);
+        return repo.marksForStudent(studentId, !perms.holdsUnrestricted(Perm.MARK_VIEW));
     }
 
     // -------------------------- Report Cards --------------------------

@@ -3,6 +3,7 @@ package com.schoolsoft.attendance.api;
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.attendance.internal.AttendanceAmendmentService;
 import com.schoolsoft.attendance.internal.AttendanceAuthorizer;
+import com.schoolsoft.iam.api.Authz;
 import com.schoolsoft.iam.api.SelfScope;
 import com.schoolsoft.iam.api.TeacherScope;
 import com.schoolsoft.platform.security.Perm;
@@ -27,11 +28,12 @@ public class AttendanceController {
     private final AttendancePolicyRepository policies;
     private final SelfScope selfScope;
     private final TeacherScope teacherScope;
+    private final Authz authz;
 
     public AttendanceController(AttendanceRepository repo, AttendanceMarking marking,
                                 AttendanceAuthorizer authorizer,
                                 AttendanceAmendmentService amendments, AttendancePolicyRepository policies,
-                                SelfScope selfScope, TeacherScope teacherScope) {
+                                SelfScope selfScope, TeacherScope teacherScope, Authz authz) {
         this.repo = repo;
         this.marking = marking;
         this.authorizer = authorizer;
@@ -39,11 +41,18 @@ public class AttendanceController {
         this.policies = policies;
         this.selfScope = selfScope;
         this.teacherScope = teacherScope;
+        this.authz = authz;
     }
 
+    /*
+     * Who marked the register is the caller, never a field of the request. It
+     * used to be one: the office screen never sent it, so every row it wrote
+     * had nobody behind it, and any caller could have written somebody else's
+     * name there instead.
+     */
     public record MarkRequest(
         @NotNull UUID schoolId, @NotNull UUID studentId, @NotNull UUID sectionId, @NotNull LocalDate onDate,
-        Integer periodNo, @NotBlank String status, String source, UUID markedByStaffId, String notes
+        Integer periodNo, @NotBlank String status, String source, String notes
     ) {}
 
     @PreAuthorize("@perm.can('attendance.mark')")
@@ -52,13 +61,13 @@ public class AttendanceController {
         authorizer.requireMayMark(req.sectionId(), req.onDate(), req.periodNo());
         return marking.mark(
             req.schoolId(), req.studentId(), req.sectionId(), req.onDate(), req.periodNo(),
-            req.status(), req.source() == null ? "manual" : req.source(), req.markedByStaffId(), req.notes()
+            req.status(), req.source() == null ? "manual" : req.source(), authz.currentStaffId(), req.notes()
         );
     }
 
     public record BulkMarkRequest(
         @NotNull UUID schoolId, @NotNull UUID sectionId, @NotNull LocalDate onDate, Integer periodNo,
-        String source, UUID markedByStaffId, @NotNull List<StudentStatus> entries
+        String source, @NotNull List<StudentStatus> entries
     ) {}
 
     public record StudentStatus(@NotNull UUID studentId, @NotBlank String status, String notes) {}
@@ -67,10 +76,11 @@ public class AttendanceController {
     @PostMapping("/mark/bulk")
     public List<AttendanceRecordDto> markBulk(@RequestBody BulkMarkRequest req) {
         authorizer.requireMayMark(req.sectionId(), req.onDate(), req.periodNo());
+        UUID markedBy = authz.currentStaffId();
         return req.entries().stream()
             .map(e -> marking.mark(
                 req.schoolId(), e.studentId(), req.sectionId(), req.onDate(), req.periodNo(),
-                e.status(), req.source() == null ? "manual" : req.source(), req.markedByStaffId(), e.notes()
+                e.status(), req.source() == null ? "manual" : req.source(), markedBy, e.notes()
             ))
             .toList();
     }

@@ -117,6 +117,42 @@ public class TeacherScope {
     }
 
     /**
+     * Asserts the caller may <em>write</em> a subject's academic records in a
+     * section — create its assessments, enter its marks. Reading stays
+     * section-wide (a class's teachers see each other's grids), but writing is
+     * narrower: before this, the English teacher of 10-A could correct 10-A's
+     * Maths marks, and nothing confined mark entry to a section at all. A
+     * confined caller must hold a standing assignment for the subject there, a
+     * timetabled period of it in force today, or a cover of one today.
+     */
+    public void requireTeachesSubject(UUID sectionId, UUID subjectId) {
+        var snap = TenantContext.get();
+        var scope = ofCurrentUser();
+        if (scope.unrestricted()) return;
+        if (sectionId == null || subjectId == null) throw new ForbiddenException("No section or subject named");
+        UUID staffId = snap == null ? null : currentStaffId(snap);
+        if (staffId == null) throw new ForbiddenException("You do not teach this subject in this section");
+        var jdbc = new JdbcTemplate(dataSource);
+        var today = java.sql.Date.valueOf(LocalDate.now());
+        Integer n = jdbc.queryForObject(
+            "SELECT count(*) FROM (" +
+            "  SELECT 1 FROM section_subject_teacher WHERE teacher_staff_id = ? AND section_id = ? AND subject_id = ? " +
+            "  UNION ALL " +
+            "  SELECT 1 FROM timetable_slot WHERE teacher_staff_id = ? AND section_id = ? AND subject_id = ? " +
+            "    AND effective_from <= ? AND COALESCE(effective_to, 'infinity'::date) >= ? " +
+            "  UNION ALL " +
+            "  SELECT 1 FROM timetable_cover c JOIN timetable_slot t ON t.id = c.slot_id " +
+            "    WHERE c.substitute_staff_id = ? AND t.section_id = ? AND t.subject_id = ? " +
+            "      AND c.on_date = ? AND c.cancelled_at IS NULL" +
+            ") claims",
+            Integer.class,
+            staffId, sectionId, subjectId,
+            staffId, sectionId, subjectId, today, today,
+            staffId, sectionId, subjectId, today);
+        if (n == null || n == 0) throw new ForbiddenException("You do not teach this subject in this section");
+    }
+
+    /**
      * Asserts the caller may read section-keyed academic records for
      * {@code studentId} — that the student is currently enrolled in one of the
      * caller's sections. The student-keyed reads a teacher makes (an attendance

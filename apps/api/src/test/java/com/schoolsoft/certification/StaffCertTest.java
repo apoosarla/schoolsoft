@@ -180,6 +180,35 @@ class StaffCertTest extends AbstractCertificationTest {
             .isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(get("/v1/assessment/components/" + componentId + "/marks", teacher).getStatusCode())
             .isEqualTo(HttpStatus.FORBIDDEN);
+        // Writing to it is refused too. Mark entry used to check nothing at all.
+        UUID theirStudentForMarks = firstStudentIn(theirs);
+        assertThat(post("/v1/assessment/components/" + componentId + "/marks", body(
+            "schoolId", school.id(), "studentId", theirStudentForMarks, "rawMarks", 15.0), teacher)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // In their own section, a subject somebody else teaches is read-only to
+        // them: the English teacher does not correct the Maths marks.
+        UUID notTheirSubject = queryOne(
+            "SELECT sub.id FROM subject sub WHERE sub.school_id = ? " +
+            "  AND sub.id NOT IN (SELECT subject_id FROM section_subject_teacher " +
+            "                     WHERE teacher_staff_id = ? AND section_id = ?) " +
+            "  AND sub.id NOT IN (SELECT subject_id FROM timetable_slot " +
+            "                     WHERE teacher_staff_id = ? AND section_id = ?) LIMIT 1",
+            UUID.class, school.id(), teacherStaffId, mine, teacherStaffId, mine);
+        UUID otherSubjectPaper = UUID.fromString(post("/v1/assessment", body(
+            "schoolId", school.id(), "sectionId", mine, "subjectId", notTheirSubject,
+            "termId", termOf(school, school.currentAy().code(), "T2"),
+            "strategyCode", "CBSE-CCE-2024", "name", "STF-05 — a colleague's subject",
+            "assessmentType", "UT", "maxMarks", 20.0, "weightPct", 10.0,
+            "scheduledOn", "2026-09-21"), head).getBody().get("id").asText());
+        UUID otherSubjectComponent = UUID.fromString(post("/v1/assessment/" + otherSubjectPaper + "/components",
+            body("code", "THEORY", "name", "Theory paper", "maxMarks", 20.0, "weightPct", 100.0,
+                "sortOrder", 1), head).getBody().get("id").asText());
+        assertThat(get("/v1/assessment/components/" + otherSubjectComponent + "/marks", teacher).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(post("/v1/assessment/components/" + otherSubjectComponent + "/marks", body(
+            "schoolId", school.id(), "studentId", firstStudentIn(mine), "rawMarks", 15.0), teacher)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 
         // A student in that section is not theirs to look through either.
         UUID theirStudent = firstStudentIn(theirs);

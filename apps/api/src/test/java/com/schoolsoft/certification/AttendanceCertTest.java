@@ -29,9 +29,11 @@ class AttendanceCertTest extends AbstractCertificationTest {
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
 
         // Re-submitting the same day corrects rather than duplicates.
+        // The body still names somebody else as the marker; the server ignores
+        // it and records the caller.
         var second = post("/v1/attendance/mark/bulk", body(
             "schoolId", cbse().id(), "sectionId", sectionId, "onDate", MARK_DATE,
-            "markedByStaffId", cbse().teacherStaffIds().get(0),
+            "markedByStaffId", cbse().teacherStaffIds().get(1),
             "entries", List.of(Map.of("studentId", students.get(0), "status", "absent"))), token);
         assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
 
@@ -39,6 +41,9 @@ class AttendanceCertTest extends AbstractCertificationTest {
             + "AND period_no IS NULL", sectionId, MARK_DATE)).isEqualTo(students.size());
         assertThat(queryOne("SELECT status FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
             + "AND period_no IS NULL", String.class, students.get(0), MARK_DATE)).isEqualTo("absent");
+        assertThat(queryOne("SELECT marked_by_staff_id FROM attendance_record WHERE student_id = ? "
+            + "AND on_date = ?::date AND period_no IS NULL", UUID.class, students.get(0), MARK_DATE))
+            .isEqualTo(cbse().teacherStaffIds().get(0));
     }
 
     @Test @Tag("P1")
@@ -194,6 +199,16 @@ class AttendanceCertTest extends AbstractCertificationTest {
         assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? AND status = 'leave' "
             + "AND source = 'auto' AND leave_application_id = ?", studentId, futureLeaveId)).isEqualTo(3);
 
+        // A second approval over the same days is refused: it would take the
+        // days over, and withdrawing it would then delete days the first
+        // approval still covers.
+        UUID overlappingLeaveId = applyLeave(studentId, "2026-08-18", "2026-08-18", "Clinic visit", principal);
+        assertThat(post("/v1/attendance/leave/" + overlappingLeaveId + "/decide", body(
+            "status", "approved", "approverStaffId", cbse().principalStaffId()), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(count("SELECT count(*) FROM attendance_record WHERE student_id = ? AND status = 'leave' "
+            + "AND leave_application_id = ?", studentId, futureLeaveId)).isEqualTo(3);
+
         // The marked day is amended rather than silently overwritten: the
         // teacher's 'absent' is still recoverable.
         assertThat(queryOne("SELECT status FROM attendance_record WHERE student_id = ? AND on_date = ?::date "
@@ -226,7 +241,8 @@ class AttendanceCertTest extends AbstractCertificationTest {
             jdbc.update("DELETE FROM attendance_amendment WHERE student_id = ?", studentId);
             jdbc.update("DELETE FROM attendance_record WHERE student_id = ? AND on_date = ?::date",
                 studentId, markedDay);
-            jdbc.update("DELETE FROM leave_application WHERE id IN (?, ?)", leaveId, futureLeaveId);
+            jdbc.update("DELETE FROM leave_application WHERE id IN (?, ?, ?)", leaveId, futureLeaveId,
+                overlappingLeaveId);
         });
     }
 
