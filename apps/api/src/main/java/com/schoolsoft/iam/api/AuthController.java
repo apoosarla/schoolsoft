@@ -37,9 +37,12 @@ public class AuthController {
     private final OtpStore otpStore;
     private final UserLookupService lookup;
     private final JwtService jwt;
+    private final com.schoolsoft.iam.internal.RefreshTokenLedger refreshTokens;
 
-    public AuthController(OtpStore otpStore, UserLookupService lookup, JwtService jwt) {
+    public AuthController(OtpStore otpStore, UserLookupService lookup, JwtService jwt,
+                          com.schoolsoft.iam.internal.RefreshTokenLedger refreshTokens) {
         this.otpStore = otpStore;
+        this.refreshTokens = refreshTokens;
         this.lookup = lookup;
         this.jwt = jwt;
     }
@@ -157,7 +160,12 @@ public class AuthController {
     public ResponseEntity<AuthResponse> refresh(@RequestBody Map<String, String> body) {
         String token = body.get("refreshToken");
         if (token == null) return ResponseEntity.badRequest().build();
-        var claims = jwt.parse(token);
+        io.jsonwebtoken.Claims claims;
+        try {
+            claims = jwt.parse(token);
+        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException e) {
+            return ResponseEntity.status(401).build();      // expired, forged or not a token: sign in again
+        }
         if (!"refresh".equals(claims.get("typ"))) return ResponseEntity.status(401).build();
 
         UUID sub = UUID.fromString(claims.getSubject());
@@ -170,7 +178,36 @@ public class AuthController {
         // not outlive it by the fifteen minutes an access token is good for.
         refuseUntilTheSchoolIsOpen(r);
 
+        // A refresh spends the token it was given and hands back the next one.
+        // A token already spent — signed out, or rotated a while ago and now
+        // presented by whoever else holds a copy — gets nothing.
+        if (!refreshTokens.spendForRotation(claims.getId(), claims.getExpiration().toInstant())) {
+            return ResponseEntity.status(401).build();
+        }
         String access = jwt.issueAccess(sub, cid, cs, r.schoolId(), r.subjectType());
-        return ResponseEntity.ok(new AuthResponse(access, token, Map.of()));
+        return ResponseEntity.ok(new AuthResponse(access, jwt.issueRefresh(sub, cid, cs), Map.of()));
+    }
+
+    /**
+     * Signing out spends the refresh token, so a copy of it — another tab, a
+     * shared machine, a leaked backup — stops working too. Clearing the
+     * browser's storage was all signing out used to do. Always 204: a client
+     * signing out needs no answer, and an unparseable token is already useless.
+     */
+    @PreAuthorize("permitAll()")
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@RequestBody Map<String, String> body) {
+        String token = body.get("refreshToken");
+        if (token != null) {
+            try {
+                var claims = jwt.parse(token);
+                if ("refresh".equals(claims.get("typ"))) {
+                    refreshTokens.signOut(claims.getId(), claims.getExpiration().toInstant());
+                }
+            } catch (io.jsonwebtoken.JwtException | IllegalArgumentException ignored) {
+                // Expired or forged: nothing to spend.
+            }
+        }
+        return ResponseEntity.noContent().build();
     }
 }

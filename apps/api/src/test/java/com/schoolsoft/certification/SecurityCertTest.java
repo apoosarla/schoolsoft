@@ -38,6 +38,15 @@ class SecurityCertTest extends AbstractCertificationTest {
         String newAccess = refreshed.getBody().get("accessToken").asText();
         assertThat(get("/v1/tenancy/schools", newAccess).getStatusCode()).isEqualTo(HttpStatus.OK);
 
+        // The refresh rotates: a new refresh token comes back, and once it is
+        // signed out it is spent — a copy of it exchanges for nothing.
+        String next = refreshed.getBody().get("refreshToken").asText();
+        assertThat(next).isNotEqualTo(refresh);
+        assertThat(post("/v1/auth/logout", Map.of("refreshToken", next), null).getStatusCode())
+            .isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(post("/v1/auth/refresh", Map.of("refreshToken", next), null).getStatusCode())
+            .isEqualTo(HttpStatus.UNAUTHORIZED);
+
         // An access token presented to the refresh endpoint is refused.
         var wrongType = post("/v1/auth/refresh", Map.of("refreshToken", principalToken(cbse())), null);
         assertThat(wrongType.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);

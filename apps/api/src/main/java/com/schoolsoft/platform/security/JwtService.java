@@ -67,6 +67,9 @@ public class JwtService {
     public String issueRefresh(UUID userAccountId, String chainIdOrPlatform, String chainSchema) {
         Instant now = Instant.now();
         return Jwts.builder()
+                // The id is what lets one refresh token be spent (rotated or
+                // signed out) without touching the user's other sessions.
+                .id(java.util.UUID.randomUUID().toString())
                 .subject(userAccountId.toString())
                 .claims(Map.of("cid", chainIdOrPlatform, "cs", chainSchema, "typ", "refresh"))
                 .issuedAt(Date.from(now))
