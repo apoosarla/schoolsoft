@@ -4,6 +4,7 @@ import com.schoolsoft.audit.api.AuditService;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.transport.api.RouteAssignmentDto;
+import com.schoolsoft.transport.api.RouteClashDto;
 import com.schoolsoft.transport.api.RouteGapDto;
 import java.util.ArrayList;
 import java.sql.Date;
@@ -115,6 +116,91 @@ public class RouteAssignmentService {
             if (gap != null) gaps.add(gap);
         }
         return gaps;
+    }
+
+    /** One assignment window, with what a clash check compares. {@code id} is null for a proposal. */
+    private record Slot(UUID id, UUID routeId, String code, String direction, UUID driverId, String driverName,
+                        UUID vehicleId, String registrationNo, LocalDate from, LocalDate to) {}
+
+    /** Every clash between saved assignments that is still to come, from {@code today}. */
+    public List<RouteClashDto> clashes(UUID schoolId, LocalDate today) {
+        List<Slot> slots = slotsFrom(schoolId, today);
+        List<RouteClashDto> out = new ArrayList<>();
+        for (int i = 0; i < slots.size(); i++) {
+            for (int j = i + 1; j < slots.size(); j++) {
+                clash(slots.get(i), slots.get(j), today, out);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The clashes a proposed assignment would make, before it is saved — what
+     * the office is warned of ahead of pressing Assign. The route's own
+     * current window is left out: the proposal replaces it.
+     */
+    public List<RouteClashDto> clashesFor(UUID schoolId, UUID routeId, UUID vehicleId, UUID driverId,
+                                          LocalDate effectiveFrom, LocalDate today) {
+        if (effectiveFrom == null) throw new IllegalArgumentException("An assignment needs a first day");
+        var route = jdbc.query("SELECT code, direction FROM transport_route WHERE id = ? AND school_id = ?",
+            (rs, i) -> new String[]{ rs.getString(1), rs.getString(2) }, routeId, schoolId);
+        if (route.isEmpty()) throw new NotFoundException("Route " + routeId + " is not in school " + schoolId);
+        String driverName = jdbc.query("SELECT name FROM driver WHERE id = ? AND school_id = ?",
+            (rs, i) -> rs.getString(1), driverId, schoolId).stream().findFirst()
+            .orElseThrow(() -> new NotFoundException("Driver " + driverId + " is not in school " + schoolId));
+        String registrationNo = jdbc.query("SELECT registration_no FROM vehicle WHERE id = ? AND school_id = ?",
+            (rs, i) -> rs.getString(1), vehicleId, schoolId).stream().findFirst()
+            .orElseThrow(() -> new NotFoundException("Vehicle " + vehicleId + " is not in school " + schoolId));
+
+        Slot proposed = new Slot(null, routeId, route.get(0)[0], route.get(0)[1], driverId, driverName,
+            vehicleId, registrationNo, effectiveFrom, null);
+        List<RouteClashDto> out = new ArrayList<>();
+        for (Slot saved : slotsFrom(schoolId, today)) {
+            if (!saved.routeId().equals(routeId)) clash(saved, proposed, today, out);
+        }
+        return out;
+    }
+
+    private List<Slot> slotsFrom(UUID schoolId, LocalDate today) {
+        return jdbc.query(
+            "SELECT ra.id, ra.route_id, r.code, r.direction, ra.driver_id, d.name, ra.vehicle_id, " +
+            "  v.registration_no, ra.effective_from, ra.effective_to " +
+            "FROM route_assignment ra " +
+            "JOIN transport_route r ON r.id = ra.route_id " +
+            "JOIN vehicle v ON v.id = ra.vehicle_id " +
+            "JOIN driver d ON d.id = ra.driver_id " +
+            "WHERE r.school_id = ? AND r.is_active AND COALESCE(ra.effective_to, 'infinity'::date) >= ? " +
+            "ORDER BY r.code, ra.effective_from",
+            (rs, i) -> new Slot(UUID.fromString(rs.getString(1)), UUID.fromString(rs.getString(2)),
+                rs.getString(3), rs.getString(4), UUID.fromString(rs.getString(5)), rs.getString(6),
+                UUID.fromString(rs.getString(7)), rs.getString(8), rs.getDate(9).toLocalDate(),
+                rs.getDate(10) == null ? null : rs.getDate(10).toLocalDate()),
+            schoolId, Date.valueOf(today));
+    }
+
+    /** Adds the driver clash and the vehicle clash between {@code a} and {@code b}, if any. */
+    private static void clash(Slot a, Slot b, LocalDate today, List<RouteClashDto> out) {
+        if (a.routeId().equals(b.routeId())) return;
+        if (!sameWay(a.direction(), b.direction())) return;
+        LocalDate from = max(max(a.from(), b.from()), today);
+        LocalDate to = a.to() == null ? b.to() : b.to() == null ? a.to() : (a.to().isBefore(b.to()) ? a.to() : b.to());
+        if (to != null && to.isBefore(from)) return;
+        if (a.driverId().equals(b.driverId())) {
+            out.add(new RouteClashDto("driver", a.driverId(), a.driverName(), a.id(), a.code(), a.direction(),
+                b.id(), b.code(), b.direction(), from, to));
+        }
+        if (a.vehicleId().equals(b.vehicleId())) {
+            out.add(new RouteClashDto("vehicle", a.vehicleId(), a.registrationNo(), a.id(), a.code(), a.direction(),
+                b.id(), b.code(), b.direction(), from, to));
+        }
+    }
+
+    private static boolean sameWay(String a, String b) {
+        return a.equals(b) || "both".equals(a) || "both".equals(b);
+    }
+
+    private static LocalDate max(LocalDate a, LocalDate b) {
+        return a.isAfter(b) ? a : b;
     }
 
     /**

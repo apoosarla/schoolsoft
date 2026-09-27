@@ -137,6 +137,24 @@ public class TransportController {
         @NotNull LocalDate effectiveFrom
     ) {}
 
+    /**
+     * Drivers and vehicles on two routes running the same way over the same
+     * days. A warning: routes carry no times, so two pickups may run back to back.
+     */
+    @PreAuthorize("@perm.can('transport.view')")
+    @GetMapping("/route-assignments/clashes")
+    public List<RouteClashDto> routeClashes(@RequestParam UUID schoolId) {
+        return rosters.clashes(schoolId, LocalDate.now());
+    }
+
+    /** The clashes an assignment would make, asked before saving it. Changes nothing. */
+    @PreAuthorize("@perm.can('transport.manage')")
+    @PostMapping("/route-assignments/check")
+    public List<RouteClashDto> checkRouteAssignment(@RequestBody AssignRouteRequest req) {
+        return rosters.clashesFor(req.schoolId(), req.routeId(), req.vehicleId(), req.driverId(),
+            req.effectiveFrom(), LocalDate.now());
+    }
+
     /** Rosters a driver and vehicle to a route from a day, replacing whoever drove it then. */
     @PreAuthorize("@perm.can('transport.manage')")
     @PostMapping("/route-assignments")

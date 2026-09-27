@@ -1915,6 +1915,43 @@ export function listRouteGaps(schoolId: string): Promise<RouteGapDto[]> {
   return apiFetch<RouteGapDto[]>(`/v1/transport/route-assignments/gaps?schoolId=${schoolId}`);
 }
 
+/**
+ * One driver or vehicle on two routes running the same way over the same days.
+ * A warning only: routes carry no times, so two pickups may run back to back.
+ */
+export type RouteClashDto = {
+  kind: "driver" | "vehicle";
+  resourceId: string;
+  resourceName: string;
+  firstAssignmentId: string;
+  firstRouteCode: string;
+  firstDirection: string;
+  /** Absent when the second side is a proposal not yet saved. */
+  secondAssignmentId?: string | null;
+  secondRouteCode: string;
+  secondDirection: string;
+  from: string;
+  to?: string | null;
+};
+
+export function listRouteClashes(schoolId: string): Promise<RouteClashDto[]> {
+  return apiFetch<RouteClashDto[]>(`/v1/transport/route-assignments/clashes?schoolId=${schoolId}`);
+}
+
+/** The clashes an assignment would make, asked before saving it. Changes nothing. */
+export function checkRouteAssignment(req: {
+  schoolId: string;
+  routeId: string;
+  vehicleId: string;
+  driverId: string;
+  effectiveFrom: string;
+}): Promise<RouteClashDto[]> {
+  return apiFetch<RouteClashDto[]>(`/v1/transport/route-assignments/check`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
 /** Rosters a driver and vehicle to a route from a day; whoever drove it then stops the day before. */
 export function assignRoute(req: {
   schoolId: string;

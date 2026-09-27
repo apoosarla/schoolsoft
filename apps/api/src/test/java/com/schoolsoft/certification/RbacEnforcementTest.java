@@ -642,6 +642,67 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         return null;
     }
 
+    /**
+     * One driver, or one vehicle, on two routes running the same way on the
+     * same days is warned of, not refused: routes carry no times yet, so two
+     * pickups may run back to back. A pickup and a drop are the normal day.
+     */
+    @Test
+    @DisplayName("a driver or vehicle on two same-way routes at once is a warning, not a refusal")
+    void sameWayRoutesClashAsAWarning() {
+        String principal = principalToken(cbse());
+        String sfx = UUID.randomUUID().toString().substring(0, 6);
+        java.util.function.BiFunction<String, String, UUID> route = (code, direction) -> UUID.fromString(
+            post("/v1/transport/routes?schoolId=" + cbse().id(), body("code", code + sfx, "name", code + " " + sfx,
+                "direction", direction), principal).getBody().get("id").asText());
+        java.util.function.Function<String, UUID> vehicle = reg -> UUID.fromString(
+            post("/v1/transport/vehicles?schoolId=" + cbse().id(), body("registrationNo", reg + sfx, "capacity", 30),
+                principal).getBody().get("id").asText());
+        UUID morningA = route.apply("CA", "pickup");
+        UUID morningB = route.apply("CB", "pickup");
+        UUID evening = route.apply("CC", "drop");
+        UUID busOne = vehicle.apply("TS-C1-");
+        UUID busTwo = vehicle.apply("TS-C2-");
+        UUID driverId = UUID.fromString(post("/v1/transport/drivers?schoolId=" + cbse().id(),
+            body("name", "Clash " + sfx, "staffId", newStaffLogin().staffId()), principal).getBody().get("id").asText());
+        String today = java.time.LocalDate.now().toString();
+        java.util.function.BiFunction<UUID, UUID, java.util.Map<String, Object>> req = (routeId, bus) -> body(
+            "schoolId", cbse().id(), "routeId", routeId, "vehicleId", bus, "driverId", driverId, "effectiveFrom", today);
+
+        assertThat(post("/v1/transport/route-assignments", req.apply(morningA, busOne), principal).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+
+        // Only the office asks; asking changes nothing.
+        assertThat(post("/v1/transport/route-assignments/check", req.apply(morningB, busTwo),
+            teacherToken(cbse(), 0)).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Same driver, another pickup, another bus: the driver clashes, the bus does not.
+        var warned = post("/v1/transport/route-assignments/check", req.apply(morningB, busTwo), principal).getBody();
+        assertThat(warned).hasSize(1);
+        assertThat(warned.get(0).get("kind").asText()).isEqualTo("driver");
+        assertThat(warned.get(0).get("firstRouteCode").asText()).isEqualTo("CA" + sfx);
+        assertThat(warned.get(0).get("secondRouteCode").asText()).isEqualTo("CB" + sfx);
+        assertThat(count("SELECT count(*) FROM route_assignment WHERE route_id = ?", morningB)).isZero();
+
+        // A drop in the same bus with the same driver is the ordinary day.
+        assertThat(post("/v1/transport/route-assignments/check", req.apply(evening, busOne), principal).getBody())
+            .isEmpty();
+
+        // Saved anyway, the clash stays on the office's list until somebody resolves it.
+        assertThat(post("/v1/transport/route-assignments", req.apply(morningB, busOne), principal).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        var standing = get("/v1/transport/route-assignments/clashes?schoolId=" + cbse().id(), principal).getBody();
+        long ours = 0;
+        for (var c : standing) {
+            if (c.get("firstRouteCode").asText().endsWith(sfx)) {
+                ours++;
+                assertThat(c.get("from").asText()).isEqualTo(today);
+                assertThat(c.hasNonNull("to")).isFalse();
+            }
+        }
+        assertThat(ours).describedAs("driver and vehicle both on two pickups").isEqualTo(2);
+    }
+
     private record StaffLogin(UUID staffId, UUID accountId, String token) {}
 
     /** A staff member of CBSE with a sign-in and no role, the test's own. */

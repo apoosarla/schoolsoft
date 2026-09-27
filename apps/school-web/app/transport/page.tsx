@@ -7,6 +7,7 @@ import {
   ApiError,
   assignRoute,
   assignStudentTransport,
+  checkRouteAssignment,
   createDriver,
   createTransportRoute,
   createVehicle,
@@ -19,6 +20,7 @@ import {
   hasScreen,
   listDirectory,
   listRouteAssignments,
+  listRouteClashes,
   listRouteGaps,
   linkDriver,
   listDrivers,
@@ -29,6 +31,7 @@ import {
   listTripsForSchool,
   listVehicles,
   RouteAssignmentDto,
+  RouteClashDto,
   RouteGapDto,
   RouteRiderDto,
   Session,
@@ -59,6 +62,14 @@ function describeGap(g: RouteGapDto, today: string): string {
   const from = g.uncoveredFrom === today ? "today" : g.uncoveredFrom;
   const until = g.coveredAgainOn ? ` until ${g.coveredAgainOn}` : "";
   return `${g.routeCode} (${g.routeName}) has no driver from ${from}${until}.`;
+}
+
+function describeClash(c: RouteClashDto, today: string): string {
+  const from = c.from === today ? "today" : c.from;
+  const until = c.to ? ` until ${c.to}` : "";
+  const way = c.firstDirection === c.secondDirection ? `both ${c.firstDirection}` : "running the same way";
+  const who = c.kind === "driver" ? `${c.resourceName} drives` : `Vehicle ${c.resourceName} is on`;
+  return `${who} ${c.firstRouteCode} and ${c.secondRouteCode} (${way}) from ${from}${until}.`;
 }
 
 function duration(startedAt: string, endedAt: string | null): string {
@@ -97,6 +108,9 @@ export default function TransportPage() {
 
   const [rosters, setRosters] = useState<RouteAssignmentDto[] | null>(null);
   const [gaps, setGaps] = useState<RouteGapDto[]>([]);
+  const [clashes, setClashes] = useState<RouteClashDto[]>([]);
+  // What Assign would clash with, shown before it saves; null until asked.
+  const [pendingClashes, setPendingClashes] = useState<RouteClashDto[] | null>(null);
   const [rosterForm, setRosterForm] = useState({ routeId: "", vehicleId: "", driverId: "", effectiveFrom: todayIso() });
   const [savingRoster, setSavingRoster] = useState(false);
   // Ending or deleting an assignment takes a route away from somebody, so each asks twice.
@@ -138,6 +152,7 @@ export default function TransportPage() {
   function refreshRosters(schoolId: string) {
     listRouteAssignments(schoolId).then(setRosters).catch((err) => setError(describeError(err)));
     listRouteGaps(schoolId).then(setGaps).catch((err) => setError(describeError(err)));
+    listRouteClashes(schoolId).then(setClashes).catch((err) => setError(describeError(err)));
   }
 
   function refreshAll(schoolId: string) {
@@ -251,14 +266,24 @@ export default function TransportPage() {
     }
   }
 
-  async function onAssignRoute() {
+  async function onAssignRoute(confirmed: boolean) {
     if (!session || !rosterForm.routeId || !rosterForm.vehicleId || !rosterForm.driverId || !rosterForm.effectiveFrom) {
       return;
     }
     setSavingRoster(true);
     setError(null);
     try {
-      await assignRoute({ schoolId: session.schoolId, ...rosterForm });
+      const req = { schoolId: session.schoolId, ...rosterForm };
+      if (!confirmed) {
+        // Warn, don't refuse: a second pickup may run after the first.
+        const found = await checkRouteAssignment(req);
+        if (found.length > 0) {
+          setPendingClashes(found);
+          return;
+        }
+      }
+      await assignRoute(req);
+      setPendingClashes(null);
       setRosterForm((f) => ({ ...f, driverId: "" }));
       refreshRosters(session.schoolId);
     } catch (err) {
@@ -392,6 +417,14 @@ export default function TransportPage() {
             <div key={g.routeId}>{describeGap(g, todayIso())}</div>
           ))}
           <div>Assign a driver under “Who drives each route”, or the bus has nobody to run it in the driver app.</div>
+        </div>
+      )}
+      {clashes.length > 0 && (
+        <div className="warn-banner">
+          {clashes.map((c, i) => (
+            <div key={i}>{describeClash(c, todayIso())}</div>
+          ))}
+          <div>Check under “Who drives each route” that these run one after the other.</div>
         </div>
       )}
 
@@ -708,7 +741,7 @@ export default function TransportPage() {
           day replaces whoever drove it then; they stop the day before.
         </p>
         <div className="form-row">
-          <select value={rosterForm.routeId} onChange={(e) => setRosterForm((f) => ({ ...f, routeId: e.target.value }))}>
+          <select value={rosterForm.routeId} onChange={(e) => { setPendingClashes(null); setRosterForm((f) => ({ ...f, routeId: e.target.value })); }}>
             <option value="">Route…</option>
             {routes?.map((r) => (
               <option key={r.id} value={r.id}>
@@ -716,7 +749,7 @@ export default function TransportPage() {
               </option>
             ))}
           </select>
-          <select value={rosterForm.driverId} onChange={(e) => setRosterForm((f) => ({ ...f, driverId: e.target.value }))}>
+          <select value={rosterForm.driverId} onChange={(e) => { setPendingClashes(null); setRosterForm((f) => ({ ...f, driverId: e.target.value })); }}>
             <option value="">Driver…</option>
             {drivers
               ?.filter((d) => d.isActive)
@@ -727,7 +760,7 @@ export default function TransportPage() {
                 </option>
               ))}
           </select>
-          <select value={rosterForm.vehicleId} onChange={(e) => setRosterForm((f) => ({ ...f, vehicleId: e.target.value }))}>
+          <select value={rosterForm.vehicleId} onChange={(e) => { setPendingClashes(null); setRosterForm((f) => ({ ...f, vehicleId: e.target.value })); }}>
             <option value="">Vehicle…</option>
             {vehicles?.map((v) => (
               <option key={v.id} value={v.id}>
@@ -740,17 +773,43 @@ export default function TransportPage() {
             <input
               type="date"
               value={rosterForm.effectiveFrom}
-              onChange={(e) => setRosterForm((f) => ({ ...f, effectiveFrom: e.target.value }))}
+              onChange={(e) => {
+                setPendingClashes(null);
+                setRosterForm((f) => ({ ...f, effectiveFrom: e.target.value }));
+              }}
             />
           </label>
           <button
             type="button"
-            onClick={onAssignRoute}
-            disabled={savingRoster || !rosterForm.routeId || !rosterForm.driverId || !rosterForm.vehicleId || !rosterForm.effectiveFrom}
+            onClick={() => onAssignRoute(false)}
+            disabled={
+              savingRoster ||
+              pendingClashes != null ||
+              !rosterForm.routeId ||
+              !rosterForm.driverId ||
+              !rosterForm.vehicleId ||
+              !rosterForm.effectiveFrom
+            }
           >
             {savingRoster ? "Assigning…" : "Assign"}
           </button>
         </div>
+        {pendingClashes && (
+          <div className="warn-banner">
+            {pendingClashes.map((c, i) => (
+              <div key={i}>{describeClash(c, todayIso())}</div>
+            ))}
+            <div>Routes have no times yet, so this may be fine if one runs after the other.</div>
+            <div className="form-row" style={{ marginTop: 8 }}>
+              <button type="button" onClick={() => onAssignRoute(true)} disabled={savingRoster}>
+                {savingRoster ? "Assigning…" : "Assign anyway"}
+              </button>
+              <button type="button" className="secondary" onClick={() => setPendingClashes(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         {rosters && rosters.length === 0 && <p className="hint">No route has a driver yet.</p>}
         {rosters && rosters.length > 0 && (
           <table>
