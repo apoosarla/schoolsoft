@@ -19,6 +19,7 @@ import {
   hasScreen,
   listDirectory,
   listRouteAssignments,
+  listRouteGaps,
   linkDriver,
   listDrivers,
   unlinkDriver,
@@ -28,6 +29,7 @@ import {
   listTripsForSchool,
   listVehicles,
   RouteAssignmentDto,
+  RouteGapDto,
   RouteRiderDto,
   Session,
   StudentDto,
@@ -44,6 +46,19 @@ function todayIso(): string {
   // yesterday until 05:30 — and a register opened early landed on the wrong day.
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** The ISO date after `iso`, in local calendar terms. */
+function nextDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const n = new Date(y, m - 1, d + 1);
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+}
+
+function describeGap(g: RouteGapDto, today: string): string {
+  const from = g.uncoveredFrom === today ? "today" : g.uncoveredFrom;
+  const until = g.coveredAgainOn ? ` until ${g.coveredAgainOn}` : "";
+  return `${g.routeCode} (${g.routeName}) has no driver from ${from}${until}.`;
 }
 
 function duration(startedAt: string, endedAt: string | null): string {
@@ -81,6 +96,7 @@ export default function TransportPage() {
   const [selectedRouteId, setSelectedRouteId] = useState("");
 
   const [rosters, setRosters] = useState<RouteAssignmentDto[] | null>(null);
+  const [gaps, setGaps] = useState<RouteGapDto[]>([]);
   const [rosterForm, setRosterForm] = useState({ routeId: "", vehicleId: "", driverId: "", effectiveFrom: todayIso() });
   const [savingRoster, setSavingRoster] = useState(false);
   // Ending or deleting an assignment takes a route away from somebody, so each asks twice.
@@ -119,10 +135,15 @@ export default function TransportPage() {
     refreshAll(s.schoolId);
   }, [router]);
 
+  function refreshRosters(schoolId: string) {
+    listRouteAssignments(schoolId).then(setRosters).catch((err) => setError(describeError(err)));
+    listRouteGaps(schoolId).then(setGaps).catch((err) => setError(describeError(err)));
+  }
+
   function refreshAll(schoolId: string) {
     listVehicles(schoolId).then(setVehicles).catch((err) => setError(describeError(err)));
     listDrivers(schoolId).then(setDrivers).catch((err) => setError(describeError(err)));
-    listRouteAssignments(schoolId).then(setRosters).catch((err) => setError(describeError(err)));
+    refreshRosters(schoolId);
     listTransportRoutes(schoolId)
       .then((rs) => {
         setRoutes(rs);
@@ -239,7 +260,7 @@ export default function TransportPage() {
     try {
       await assignRoute({ schoolId: session.schoolId, ...rosterForm });
       setRosterForm((f) => ({ ...f, driverId: "" }));
-      setRosters(await listRouteAssignments(session.schoolId));
+      refreshRosters(session.schoolId);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -258,7 +279,7 @@ export default function TransportPage() {
         await deleteRouteAssignment(session.schoolId, rosterAction.id);
       }
       setRosterAction(null);
-      setRosters(await listRouteAssignments(session.schoolId));
+      refreshRosters(session.schoolId);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -278,6 +299,7 @@ export default function TransportPage() {
       });
       setRouteForm({ code: "", name: "", direction: "pickup" });
       const rs = await listTransportRoutes(session.schoolId);
+      refreshRosters(session.schoolId);
       setRoutes(rs);
       setSelectedRouteId(created.id);
     } catch (err) {
@@ -364,6 +386,14 @@ export default function TransportPage() {
   return (
     <main className="shell">
       {error && <div className="error-banner">{error}</div>}
+      {gaps.length > 0 && (
+        <div className="warn-banner">
+          {gaps.map((g) => (
+            <div key={g.routeId}>{describeGap(g, todayIso())}</div>
+          ))}
+          <div>Assign a driver under “Who drives each route”, or the bus has nobody to run it in the driver app.</div>
+        </div>
+      )}
 
       <div className="panel">
         <h2>Vehicles</h2>
@@ -773,16 +803,34 @@ export default function TransportPage() {
                       {acting && (
                         <div className="form-row">
                           {acting.kind === "end" ? (
-                            <label className="hint">
-                              Last day{" "}
-                              <input
-                                type="date"
-                                min={a.effectiveFrom}
-                                max={a.effectiveTo ?? undefined}
-                                value={acting.lastDay}
-                                onChange={(e) => setRosterAction({ ...acting, lastDay: e.target.value })}
-                              />
-                            </label>
+                            <>
+                              <label className="hint">
+                                Last day{" "}
+                                <input
+                                  type="date"
+                                  min={a.effectiveFrom}
+                                  max={a.effectiveTo ?? undefined}
+                                  value={acting.lastDay}
+                                  onChange={(e) => setRosterAction({ ...acting, lastDay: e.target.value })}
+                                />
+                              </label>
+                              {acting.lastDay &&
+                                (() => {
+                                  const after = nextDay(acting.lastDay);
+                                  const pickedUp = rosters.some(
+                                    (b) =>
+                                      b.id !== a.id &&
+                                      b.routeId === a.routeId &&
+                                      b.effectiveFrom <= after &&
+                                      (b.effectiveTo == null || b.effectiveTo >= after)
+                                  );
+                                  return pickedUp ? null : (
+                                    <span style={{ color: "var(--warning)" }}>
+                                      {a.routeCode} will have no driver from {after}.
+                                    </span>
+                                  );
+                                })()}
+                            </>
                           ) : (
                             <span className="hint">Remove this assignment?</span>
                           )}

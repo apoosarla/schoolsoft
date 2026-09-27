@@ -1901,6 +1901,20 @@ export function listRouteAssignments(schoolId: string): Promise<RouteAssignmentD
   return apiFetch<RouteAssignmentDto[]>(`/v1/transport/route-assignments?schoolId=${schoolId}`);
 }
 
+/** An active route with a day, today or later, that nobody is assigned to drive. */
+export type RouteGapDto = {
+  routeId: string;
+  routeCode: string;
+  routeName: string;
+  uncoveredFrom: string;
+  /** When an assignment picks the route up again; absent when none does. */
+  coveredAgainOn?: string | null;
+};
+
+export function listRouteGaps(schoolId: string): Promise<RouteGapDto[]> {
+  return apiFetch<RouteGapDto[]>(`/v1/transport/route-assignments/gaps?schoolId=${schoolId}`);
+}
+
 /** Rosters a driver and vehicle to a route from a day; whoever drove it then stops the day before. */
 export function assignRoute(req: {
   schoolId: string;

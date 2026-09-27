@@ -122,6 +122,16 @@ public class TransportController {
         return rosters.list(schoolId, routeId);
     }
 
+    /**
+     * Active routes that nobody is assigned to drive on some day from today:
+     * the office's warning that a bus has no driver.
+     */
+    @PreAuthorize("@perm.can('transport.view')")
+    @GetMapping("/route-assignments/gaps")
+    public List<RouteGapDto> routeGaps(@RequestParam UUID schoolId) {
+        return rosters.gaps(schoolId, LocalDate.now());
+    }
+
     public record AssignRouteRequest(
         @NotNull UUID schoolId, @NotNull UUID routeId, @NotNull UUID vehicleId, @NotNull UUID driverId,
         @NotNull LocalDate effectiveFrom

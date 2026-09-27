@@ -4,6 +4,8 @@ import com.schoolsoft.audit.api.AuditService;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.transport.api.RouteAssignmentDto;
+import com.schoolsoft.transport.api.RouteGapDto;
+import java.util.ArrayList;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
@@ -70,6 +72,49 @@ public class RouteAssignmentService {
         }
         return jdbc.query(SELECT + "WHERE r.school_id = ? ORDER BY r.code, ra.effective_from DESC",
             MAPPER, schoolId);
+    }
+
+    /**
+     * The first day from {@code today} on which each active route has nobody
+     * assigned — a route that never had a driver, one whose assignment was
+     * ended with nothing after it, or a hole between two windows. Only the
+     * first gap per route is reported; closing it brings the next one up.
+     */
+    public List<RouteGapDto> gaps(UUID schoolId, LocalDate today) {
+        record Window(UUID routeId, String code, String name, LocalDate from, LocalDate to) {}
+        List<Window> rows = jdbc.query(
+            "SELECT r.id, r.code, r.name, ra.effective_from, ra.effective_to FROM transport_route r " +
+            "LEFT JOIN route_assignment ra ON ra.route_id = r.id " +
+            "  AND COALESCE(ra.effective_to, 'infinity'::date) >= ? " +
+            "WHERE r.school_id = ? AND r.is_active ORDER BY r.code, ra.effective_from",
+            (rs, i) -> new Window(UUID.fromString(rs.getString(1)), rs.getString(2), rs.getString(3),
+                rs.getDate(4) == null ? null : rs.getDate(4).toLocalDate(),
+                rs.getDate(5) == null ? null : rs.getDate(5).toLocalDate()),
+            Date.valueOf(today), schoolId);
+
+        List<RouteGapDto> gaps = new ArrayList<>();
+        int i = 0;
+        while (i < rows.size()) {
+            Window first = rows.get(i);
+            // `covered` is the first day not yet known to have a driver; null once open-ended.
+            LocalDate covered = today;
+            RouteGapDto gap = null;
+            for (; i < rows.size() && rows.get(i).routeId().equals(first.routeId()); i++) {
+                Window w = rows.get(i);
+                if (w.from() == null || covered == null || gap != null) continue;
+                if (w.from().isAfter(covered)) {
+                    gap = new RouteGapDto(w.routeId(), w.code(), w.name(), covered, w.from());
+                    continue;
+                }
+                if (w.to() == null) covered = null;
+                else if (!w.to().isBefore(covered)) covered = w.to().plusDays(1);
+            }
+            if (gap == null && covered != null) {
+                gap = new RouteGapDto(first.routeId(), first.code(), first.name(), covered, null);
+            }
+            if (gap != null) gaps.add(gap);
+        }
+        return gaps;
     }
 
     /**

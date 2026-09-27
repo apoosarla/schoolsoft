@@ -573,6 +573,9 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         String roster = "/v1/transport/routes/" + routeId + "/students";
         java.time.LocalDate today = java.time.LocalDate.now();
 
+        // A route nobody drives is the office's warning, from today.
+        assertThat(gapFor(routeId, principal)).isEqualTo(today + "|null");
+
         // Only the office rosters.
         assertThat(post("/v1/transport/route-assignments", body("schoolId", cbse().id(), "routeId", routeId,
             "vehicleId", vehicleId, "driverId", firstDriver, "effectiveFrom", today.toString()),
@@ -588,6 +591,7 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         UUID firstWindow = UUID.fromString(assigned.getBody().get("id").asText());
         assertThat(get(roster, first.token()).getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(get(roster, second.token()).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(gapFor(routeId, principal)).isNull();
 
         // Tomorrow somebody else drives it: today's window closes today, and today is still first's.
         var replaced = post("/v1/transport/route-assignments", body("schoolId", cbse().id(), "routeId", routeId,
@@ -621,8 +625,21 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(post(end, body("schoolId", cbse().id(), "lastDay", today.toString()), principal)
             .getStatusCode()).isEqualTo(HttpStatus.OK);
+        // Ended with nothing after it: no driver from tomorrow, and nobody picks it up.
+        assertThat(gapFor(routeId, principal)).isEqualTo(today.plusDays(1) + "|null");
         assertThat(post(end, body("schoolId", cbse().id(), "lastDay", today.plusDays(5).toString()), principal)
             .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    /** The route's first uncovered day and when it is covered again, as "from|to", or null when it has none. */
+    private String gapFor(UUID routeId, String token) {
+        for (var g : get("/v1/transport/route-assignments/gaps?schoolId=" + cbse().id(), token).getBody()) {
+            if (g.get("routeId").asText().equals(routeId.toString())) {
+                return g.get("uncoveredFrom").asText() + "|"
+                    + (g.hasNonNull("coveredAgainOn") ? g.get("coveredAgainOn").asText() : "null");
+            }
+        }
+        return null;
     }
 
     private record StaffLogin(UUID staffId, UUID accountId, String token) {}
