@@ -119,30 +119,34 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="panel">
-            <h2>Fees — month to date</h2>
-            <div className="stat-grid">
-              <Stat label="Invoiced" value={formatInr(overview.feeInvoicedMtd)} />
-              <Stat label="Collected" value={formatInr(overview.feeCollectedMtd)} />
-              <Stat
-                label="Collection %"
-                value={overview.feeCollectionMtdPct == null ? "—" : `${overview.feeCollectionMtdPct.toFixed(0)}%`}
-              />
-            </div>
-          </div>
-
-          <div className="panel">
-            <h2>Admissions funnel</h2>
-            {Object.keys(overview.admissionsFunnel).length === 0 ? (
-              <p className="hint">No applications yet.</p>
-            ) : (
+          {overview.feeInvoicedMtd != null && overview.feeCollectedMtd != null && (
+            <div className="panel">
+              <h2>Fees — month to date</h2>
               <div className="stat-grid">
-                {Object.entries(overview.admissionsFunnel).map(([state, count]) => (
-                  <Stat key={state} label={humanize(state)} value={count} />
-                ))}
+                <Stat label="Invoiced" value={formatInr(overview.feeInvoicedMtd)} />
+                <Stat label="Collected" value={formatInr(overview.feeCollectedMtd)} />
+                <Stat
+                  label="Collection %"
+                  value={overview.feeCollectionMtdPct == null ? "—" : `${overview.feeCollectionMtdPct.toFixed(0)}%`}
+                />
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {overview.admissionsFunnel != null && (
+            <div className="panel">
+              <h2>Admissions funnel</h2>
+              {Object.keys(overview.admissionsFunnel).length === 0 ? (
+                <p className="hint">No applications yet.</p>
+              ) : (
+                <div className="stat-grid">
+                  {Object.entries(overview.admissionsFunnel).map(([state, count]) => (
+                    <Stat key={state} label={humanize(state)} value={count} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="panel">
             <h2>Comms reach (30 days)</h2>

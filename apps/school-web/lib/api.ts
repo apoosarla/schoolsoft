@@ -214,10 +214,11 @@ export type SchoolOverviewDto = {
   activeEnrolments: number;
   presentToday: number;
   attendanceTodayPct: number | null;
-  feeInvoicedMtd: number;
-  feeCollectedMtd: number;
+  // null when the caller may not read fee reports / admissions (BUG-26).
+  feeInvoicedMtd: number | null;
+  feeCollectedMtd: number | null;
   feeCollectionMtdPct: number | null;
-  admissionsFunnel: Record<string, number>;
+  admissionsFunnel: Record<string, number> | null;
   announcementsPublished30d: number;
   announcementReads30d: number;
 };

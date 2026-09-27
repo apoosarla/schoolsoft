@@ -13,7 +13,12 @@ public class DashboardRepository {
     private final JdbcTemplate jdbc;
     public DashboardRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
-    public SchoolOverviewDto overview(UUID schoolId) {
+    /**
+     * {@code includeFees} and {@code includeAdmissions} are the caller's
+     * answer, decided at the controller; a section left out is {@code null},
+     * not zero, and is not queried at all.
+     */
+    public SchoolOverviewDto overview(UUID schoolId, boolean includeFees, boolean includeAdmissions) {
         // The denominator today's attendance percentage divides by, so it has
         // to be the register today. Read as a status it shrank the moment a
         // withdrawal was filed while the child was still being marked present,
@@ -40,24 +45,32 @@ public class DashboardRepository {
         Double attendanceTodayPct = activeEnrolments == 0 || markedToday == 0
             ? null : (presentToday * 100.0 / activeEnrolments);
 
-        double feeInvoicedMtd = jdbc.queryForObject(
-            "SELECT COALESCE(sum(total), 0) FROM fee_invoice WHERE school_id = ? " +
-            "  AND issued_on >= date_trunc('month', CURRENT_DATE)::date",
-            Double.class, schoolId
-        );
-        double feeCollectedMtd = jdbc.queryForObject(
-            "SELECT COALESCE(sum(paid), 0) FROM fee_invoice WHERE school_id = ? " +
-            "  AND issued_on >= date_trunc('month', CURRENT_DATE)::date",
-            Double.class, schoolId
-        );
-        Double feeCollectionMtdPct = feeInvoicedMtd == 0 ? null : (feeCollectedMtd * 100.0 / feeInvoicedMtd);
+        Double feeInvoicedMtd = null, feeCollectedMtd = null, feeCollectionMtdPct = null;
+        if (includeFees) {
+            feeInvoicedMtd = jdbc.queryForObject(
+                "SELECT COALESCE(sum(total), 0) FROM fee_invoice WHERE school_id = ? " +
+                "  AND issued_on >= date_trunc('month', CURRENT_DATE)::date",
+                Double.class, schoolId
+            );
+            feeCollectedMtd = jdbc.queryForObject(
+                "SELECT COALESCE(sum(paid), 0) FROM fee_invoice WHERE school_id = ? " +
+                "  AND issued_on >= date_trunc('month', CURRENT_DATE)::date",
+                Double.class, schoolId
+            );
+            feeCollectionMtdPct = feeInvoicedMtd == 0 ? null : (feeCollectedMtd * 100.0 / feeInvoicedMtd);
+        }
 
-        Map<String, Long> admissionsFunnel = new LinkedHashMap<>();
-        jdbc.query(
-            "SELECT state, count(*) AS n FROM admission_application WHERE school_id = ? GROUP BY state ORDER BY state",
-            rs -> { admissionsFunnel.put(rs.getString("state"), rs.getLong("n")); },
-            schoolId
-        );
+        Map<String, Long> admissionsFunnel = null;
+        if (includeAdmissions) {
+            Map<String, Long> funnel = new LinkedHashMap<>();
+            jdbc.query(
+                "SELECT state, count(*) AS n FROM admission_application WHERE school_id = ? " +
+                "GROUP BY state ORDER BY state",
+                rs -> { funnel.put(rs.getString("state"), rs.getLong("n")); },
+                schoolId
+            );
+            admissionsFunnel = funnel;
+        }
 
         long announcementsPublished30d = jdbc.queryForObject(
             "SELECT count(*) FROM announcement WHERE school_id = ? AND published_at >= now() - interval '30 days'",

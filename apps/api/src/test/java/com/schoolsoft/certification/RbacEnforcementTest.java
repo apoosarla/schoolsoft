@@ -191,6 +191,34 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             .isEqualTo(HttpStatus.FORBIDDEN);
     }
 
+    /**
+     * BUG-26. {@code dashboard.view} opens the overview for a teacher's
+     * register and comms cards, but the school's takings and admissions
+     * pipeline follow the grants that open those modules' own reports. The
+     * figures are left out of the payload, not hidden by the page.
+     */
+    @Test
+    @DisplayName("a teacher's dashboard carries no school-wide fee or admissions totals")
+    void dashboardTotalsFollowTheirModulesGrants() {
+        String overview = "/v1/dashboards/schools/" + cbse().id() + "/overview";
+
+        var teacher = get(overview, teacherToken(cbse(), 0));
+        assertThat(teacher.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(teacher.getBody().get("activeEnrolments").isNumber()).isTrue();
+        assertThat(teacher.getBody().hasNonNull("feeInvoicedMtd")).isFalse();
+        assertThat(teacher.getBody().hasNonNull("feeCollectedMtd")).isFalse();
+        assertThat(teacher.getBody().hasNonNull("admissionsFunnel")).isFalse();
+
+        var principal = get(overview, principalToken(cbse())).getBody();
+        assertThat(principal.get("feeInvoicedMtd").isNumber()).isTrue();
+        assertThat(principal.get("admissionsFunnel").isObject()).isTrue();
+
+        // The accountant reads the takings but not the admissions pipeline.
+        var accountant = get(overview, accountantToken(cbse())).getBody();
+        assertThat(accountant.get("feeInvoicedMtd").isNumber()).isTrue();
+        assertThat(accountant.hasNonNull("admissionsFunnel")).isFalse();
+    }
+
     @Test
     @DisplayName("an accountant cannot enter marks or publish a report card")
     void accountantIsNotATeacher() {
