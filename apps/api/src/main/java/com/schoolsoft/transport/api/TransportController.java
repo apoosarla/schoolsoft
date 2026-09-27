@@ -63,6 +63,23 @@ public class TransportController {
         return drivers.createDriver(schoolId, req.staffId(), req.name(), req.phone(), req.licenseNo());
     }
 
+    public record LinkDriverRequest(@NotNull UUID staffId) {}
+
+    /** Links the staff record whose login drives, and grants it the driver role. */
+    @PreAuthorize("@perm.can('transport.manage')")
+    @PostMapping("/drivers/{id}/link")
+    public DriverDto linkDriver(@PathVariable UUID id, @RequestParam UUID schoolId,
+                                @RequestBody LinkDriverRequest req) {
+        return drivers.link(schoolId, id, req.staffId());
+    }
+
+    /** Unlinks the driver's staff record and takes the driver role back. */
+    @PreAuthorize("@perm.can('transport.manage')")
+    @PostMapping("/drivers/{id}/unlink")
+    public DriverDto unlinkDriver(@PathVariable UUID id, @RequestParam UUID schoolId) {
+        return drivers.unlink(schoolId, id);
+    }
+
     // -------------------------- Routes + Stops --------------------------
 
     @PreAuthorize("@perm.can('transport.view')")

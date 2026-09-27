@@ -120,6 +120,13 @@ public class TransportRepository {
         );
     }
 
+    public java.util.Optional<DriverDto> findDriver(UUID schoolId, UUID driverId) {
+        return jdbc.query(
+            "SELECT " + DRIVER_COLS + " FROM driver WHERE id = ? AND school_id = ?",
+            DRIVER_MAPPER, driverId, schoolId
+        ).stream().findFirst();
+    }
+
     public DriverDto createDriver(UUID schoolId, UUID staffId, String name, String phone, String licenseNo) {
         UUID id = UUID.randomUUID();
         jdbc.update(

@@ -15,7 +15,9 @@ import {
   getSession,
   hasScreen,
   listDirectory,
+  linkDriver,
   listDrivers,
+  unlinkDriver,
   listStudents,
   listTransportRoutes,
   listTransportStops,
@@ -63,6 +65,10 @@ export default function TransportPage() {
   const [driverStaffResults, setDriverStaffResults] = useState<UserDirectoryEntryDto[] | null>(null);
   const [driverStaff, setDriverStaff] = useState<UserDirectoryEntryDto | null>(null);
   const [creatingDriver, setCreatingDriver] = useState(false);
+  // Unlinking takes the driver app away from somebody, so it asks twice.
+  const [confirmUnlinkId, setConfirmUnlinkId] = useState<string | null>(null);
+  const [linkPick, setLinkPick] = useState<Record<string, string>>({});
+  const [busyDriverId, setBusyDriverId] = useState<string | null>(null);
 
   const [routes, setRoutes] = useState<TransportRouteDto[] | null>(null);
   const [routeForm, setRouteForm] = useState({ code: "", name: "", direction: "pickup" });
@@ -177,6 +183,37 @@ export default function TransportPage() {
       setError(describeError(err));
     } finally {
       setCreatingDriver(false);
+    }
+  }
+
+  async function onUnlinkDriver(driverId: string) {
+    if (!session) return;
+    setBusyDriverId(driverId);
+    setError(null);
+    try {
+      await unlinkDriver(session.schoolId, driverId);
+      setConfirmUnlinkId(null);
+      setDrivers(await listDrivers(session.schoolId));
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusyDriverId(null);
+    }
+  }
+
+  async function onLinkDriver(driverId: string) {
+    const staffId = linkPick[driverId];
+    if (!session || !staffId) return;
+    setBusyDriverId(driverId);
+    setError(null);
+    try {
+      await linkDriver(session.schoolId, driverId, staffId);
+      setLinkPick((p) => ({ ...p, [driverId]: "" }));
+      setDrivers(await listDrivers(session.schoolId));
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusyDriverId(null);
     }
   }
 
@@ -383,6 +420,7 @@ export default function TransportPage() {
                 <th>Phone</th>
                 <th>License</th>
                 <th>App login</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -401,6 +439,49 @@ export default function TransportPage() {
                         </div>
                       );
                     })()}
+                  </td>
+                  <td>
+                    {d.staffId && confirmUnlinkId !== d.id && (
+                      <button type="button" className="secondary" onClick={() => setConfirmUnlinkId(d.id)}>
+                        Unlink
+                      </button>
+                    )}
+                    {d.staffId && confirmUnlinkId === d.id && (
+                      <div className="form-row">
+                        <span className="hint">Removes their driver app access.</span>
+                        <button type="button" onClick={() => onUnlinkDriver(d.id)} disabled={busyDriverId === d.id}>
+                          {busyDriverId === d.id ? "Unlinking…" : "Confirm unlink"}
+                        </button>
+                        <button type="button" className="secondary" onClick={() => setConfirmUnlinkId(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                    {!d.staffId && (
+                      <div className="form-row">
+                        <select
+                          value={linkPick[d.id] ?? ""}
+                          onChange={(e) => setLinkPick((p) => ({ ...p, [d.id]: e.target.value }))}
+                        >
+                          <option value="">Link staff account…</option>
+                          {staffAccounts
+                            ?.filter((a) => a.subjectId && !drivers.some((x) => x.staffId === a.subjectId))
+                            .map((a) => (
+                              <option key={a.userAccountId} value={a.subjectId!}>
+                                {a.displayName}
+                                {a.email ? ` · ${a.email}` : ""}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => onLinkDriver(d.id)}
+                          disabled={!linkPick[d.id] || busyDriverId === d.id}
+                        >
+                          {busyDriverId === d.id ? "Linking…" : "Link"}
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

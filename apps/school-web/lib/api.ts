@@ -1858,6 +1858,21 @@ export function listDrivers(schoolId: string): Promise<DriverDto[]> {
   return apiFetch<DriverDto[]>(`/v1/transport/drivers?schoolId=${schoolId}`);
 }
 
+/** Links the staff record whose login drives; the API grants it the driver role. */
+export function linkDriver(schoolId: string, driverId: string, staffId: string): Promise<DriverDto> {
+  return apiFetch<DriverDto>(`/v1/transport/drivers/${driverId}/link?schoolId=${schoolId}`, {
+    method: "POST",
+    body: JSON.stringify({ staffId }),
+  });
+}
+
+/** Unlinks the driver's staff record; the API takes the driver role back. */
+export function unlinkDriver(schoolId: string, driverId: string): Promise<DriverDto> {
+  return apiFetch<DriverDto>(`/v1/transport/drivers/${driverId}/unlink?schoolId=${schoolId}`, {
+    method: "POST",
+  });
+}
+
 export function createDriver(
   schoolId: string,
   req: { name: string; phone?: string; licenseNo?: string; staffId?: string }

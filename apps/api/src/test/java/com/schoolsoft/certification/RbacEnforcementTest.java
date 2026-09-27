@@ -450,7 +450,7 @@ class RbacEnforcementTest extends AbstractCertificationTest {
      * to the principal, which with the grant would hand her a second role.
      */
     @Test
-    @DisplayName("linking a driver grants the driver role, and never to somebody who holds another")
+    @DisplayName("linking a driver grants the driver role, unlinking takes it back, and neither touches another role")
     void linkingADriverGrantsTheDriverRole() {
         UUID staffId = UUID.randomUUID();
         UUID accountId = UUID.randomUUID();
@@ -497,6 +497,33 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         assertThat(count("SELECT count(*) FROM staff_role WHERE staff_id = ? AND role_code = 'driver'",
             cbse().principalStaffId())).isZero();
         assertThat(count("SELECT count(*) FROM driver WHERE staff_id = ?", cbse().principalStaffId())).isZero();
+
+        // Unlinking takes the role back with the link; the driver row stays.
+        UUID driverId = UUID.fromString(linked.getBody().get("id").asText());
+        String unlink = "/v1/transport/drivers/" + driverId + "/unlink?schoolId=" + cbse().id();
+        assertThat(post(unlink, body(), teacherToken(cbse(), 0)).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        var unlinked = post(unlink, body(), principalToken(cbse()));
+        assertThat(unlinked.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(unlinked.getBody().hasNonNull("staffId")).isFalse();
+        assertThat(count("SELECT count(*) FROM staff_role WHERE staff_id = ? AND role_code = 'driver' "
+            + "AND revoked_at IS NULL", staffId)).isZero();
+        var gateAgain = get(roster, newDriver);
+        assertThat(gateAgain.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(gateAgain.getBody().get("message").asText()).doesNotContain("do not drive this route");
+        // A retry of an unlink that already happened is not an error.
+        assertThat(post(unlink, body(), principalToken(cbse())).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Relinking the same row restores the grant, and refuses the principal just as creating did.
+        String link = "/v1/transport/drivers/" + driverId + "/link?schoolId=" + cbse().id();
+        assertThat(post(link, body("staffId", cbse().principalStaffId()), principalToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(post(link, body("staffId", staffId), teacherToken(cbse(), 0)).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post(link, body("staffId", staffId), principalToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(count("SELECT count(*) FROM staff_role WHERE staff_id = ? AND role_code = 'driver' "
+            + "AND revoked_at IS NULL", staffId)).isEqualTo(1);
     }
 
     // ===================== the driver's bus, and only the driver's bus =====================
