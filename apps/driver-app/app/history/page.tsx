@@ -101,6 +101,6 @@ export default function HistoryPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

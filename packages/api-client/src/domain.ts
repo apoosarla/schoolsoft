@@ -19,6 +19,7 @@ import type {
   HallTicketDto,
   MarkDto,
   MarkReevaluationDto,
+  StudentMarkDto,
   MessageDto,
   MessageThreadDto,
   PaymentDto,
@@ -110,8 +111,10 @@ export function createFeesApi(client: ApiClient) {
     adjustmentsForInvoice(invoiceId: string): Promise<FeeAdjustmentDto[]> {
       return client.apiFetch<FeeAdjustmentDto[]>(`/v1/fees/invoices/${invoiceId}/adjustments`);
     },
-    duesForStudent(studentId: string): Promise<{ studentId: string; balance: number; hasDues: boolean }> {
-      return client.apiFetch<{ studentId: string; balance: number; hasDues: boolean }>(
+    duesForStudent(
+      studentId: string,
+    ): Promise<{ studentId: string; balance: number; hasDues: boolean; credit: number }> {
+      return client.apiFetch<{ studentId: string; balance: number; hasDues: boolean; credit: number }>(
         `/v1/fees/students/${studentId}/dues`
       );
     },
@@ -144,6 +147,10 @@ export function createAssessmentApi(client: ApiClient) {
         method: "POST",
         body: JSON.stringify({ reason }),
       });
+    },
+    /** One child's marks across every assessment (published ones only, for a family). */
+    marksForStudent(studentId: string): Promise<StudentMarkDto[]> {
+      return client.apiFetch<StudentMarkDto[]>(`/v1/assessment/students/${studentId}/marks`);
     },
     reevaluationsForStudent(studentId: string): Promise<MarkReevaluationDto[]> {
       return client.apiFetch<MarkReevaluationDto[]>(

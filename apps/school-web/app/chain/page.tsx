@@ -117,7 +117,7 @@ function describeError(err: unknown): string {
       return "Forbidden — this account is not a chain HQ admin, or cannot open schools.";
     }
     if (err.status === 401) return "Unauthorized — token missing, expired, or invalid.";
-    return `${err.code ?? "error"}: ${err.message}`;
+    return err.userMessage;
   }
   return err instanceof Error ? err.message : "Unknown error";
 }

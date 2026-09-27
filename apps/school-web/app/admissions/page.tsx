@@ -59,6 +59,9 @@ const LANES: { key: string; label: string; states: string[] }[] = [
 ];
 
 /** What a state is called on screen. The wire keeps the snake_case. */
+/** Moves that close an application for good — each asks twice. */
+const CLOSING = ["rejected", "lapsed", "withdrawn"];
+
 const STATE_LABEL: Record<string, string> = {
   lead: "Lead",
   application_started: "Started",
@@ -110,6 +113,8 @@ export default function AdmissionsPage() {
   const [loadingRows, setLoadingRows] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pendingMove, setPendingMove] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
@@ -252,7 +257,7 @@ export default function AdmissionsPage() {
     setCreating(true);
     setError(null);
     try {
-      await createAdmissionApplication({
+      const created = await createAdmissionApplication({
         schoolId: session.schoolId,
         academicYearId: form.academicYearId,
         gradeId: form.gradeId,
@@ -268,6 +273,7 @@ export default function AdmissionsPage() {
       });
       setForm((f) => ({ ...emptyForm, academicYearId: f.academicYearId, gradeId: f.gradeId }));
       setShowForm(false);
+      setNotice(`Application ${created.applicationNo} created for ${created.applicantFirstName}.`);
       afterChange();
     } catch (err) {
       setError(describeError(err));
@@ -277,6 +283,14 @@ export default function AdmissionsPage() {
   }
 
   async function onMove(app: AdmissionApplicationDto, toState: string) {
+    // Closing an application is a letter to a family. It takes a second press
+    // on the same button, so a mis-click on a crowded row is not a rejection.
+    if (CLOSING.includes(toState) && pendingMove !== `${app.id}:${toState}`) {
+      setPendingMove(`${app.id}:${toState}`);
+      return;
+    }
+    setPendingMove(null);
+    setNotice(null);
     setBusyId(app.id);
     setError(null);
     try {
@@ -377,7 +391,7 @@ export default function AdmissionsPage() {
               onChange={(e) => setForm((f) => ({ ...f, applicationNo: e.target.value }))}
             />
             <input
-              placeholder="Applicant first name"
+              placeholder="Applicant first name *"
               value={form.applicantFirstName}
               onChange={(e) => setForm((f) => ({ ...f, applicantFirstName: e.target.value }))}
             />
@@ -398,12 +412,12 @@ export default function AdmissionsPage() {
               style={{ maxWidth: 100 }}
             />
             <input
-              placeholder="Guardian name"
+              placeholder="Guardian name *"
               value={form.guardianName}
               onChange={(e) => setForm((f) => ({ ...f, guardianName: e.target.value }))}
             />
             <input
-              placeholder="Guardian phone"
+              placeholder="Guardian phone *"
               value={form.guardianPhone}
               onChange={(e) => setForm((f) => ({ ...f, guardianPhone: e.target.value }))}
             />
@@ -543,6 +557,7 @@ export default function AdmissionsPage() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {notice && <div className="notice-banner">{notice}</div>}
 
       {summary && (summary.offersExpired > 0 || summary.offersExpiringSoon > 0) && (
         <div className={summary.offersExpired > 0 ? "warn-banner" : "notice-banner"}>
@@ -680,7 +695,7 @@ export default function AdmissionsPage() {
                                   disabled={busyId === a.id}
                                   onClick={() => onMove(a, to)}
                                 >
-                                  {STATE_LABEL[to] ?? to}
+                                  {pendingMove === `${a.id}:${to}` ? `Confirm: ${STATE_LABEL[to] ?? to}?` : (STATE_LABEL[to] ?? to)}
                                 </button>
                               ))}
                             </div>
@@ -782,7 +797,7 @@ export default function AdmissionsPage() {
                                 disabled={busyId === a.id}
                                 onClick={() => onMove(a, to)}
                               >
-                                {STATE_LABEL[to] ?? to}
+                                {pendingMove === `${a.id}:${to}` ? `Confirm: ${STATE_LABEL[to] ?? to}?` : (STATE_LABEL[to] ?? to)}
                               </button>
                             ))}
                           </div>
@@ -853,6 +868,6 @@ function expiryClass(on: string | null): string {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

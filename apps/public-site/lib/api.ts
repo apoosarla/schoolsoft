@@ -58,12 +58,11 @@ export function apply(req: ApplyRequest): Promise<{ applicationNo: string }> {
 }
 
 export type ApplicationStatusDto = {
-  id: string;
   applicationNo: string;
   applicantFirstName: string;
   applicantLastName: string | null;
-  guardianName: string;
   state: string;
+  source: string;
   testScore: number | null;
   offerExpiresOn: string | null;
   createdAt: string;

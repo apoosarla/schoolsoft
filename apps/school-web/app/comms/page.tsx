@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatDateTime } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import {
   ANNOUNCEMENT_SCOPES,
@@ -47,6 +48,8 @@ export default function CommsPage() {
   const [directoryResults, setDirectoryResults] = useState<UserDirectoryEntryDto[] | null>(null);
   const [participants, setParticipants] = useState<UserDirectoryEntryDto[]>([]);
   const [creatingThread, setCreatingThread] = useState(false);
+  // Names for the people in a thread; a thread used to be labelled by its id.
+  const [people, setPeople] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const s = getSession();
@@ -113,6 +116,13 @@ export default function CommsPage() {
       channels: f.channels.includes(ch) ? f.channels.filter((c) => c !== ch) : [...f.channels, ch],
     }));
   }
+
+  useEffect(() => {
+    if (!session) return;
+    listDirectory(session.schoolId)
+      .then((all) => setPeople(Object.fromEntries(all.map((p) => [p.userAccountId, p.displayName]))))
+      .catch(() => setPeople({}));
+  }, [session]);
 
   useEffect(() => {
     if (!session || !directoryQ) {
@@ -324,15 +334,15 @@ export default function CommsPage() {
             <table style={{ maxWidth: 320 }}>
               <thead>
                 <tr>
-                  <th>Thread</th>
+                  <th>With</th>
                   <th>Last activity</th>
                 </tr>
               </thead>
               <tbody>
                 {threads.map((t) => (
                   <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => selectThread(t)}>
-                    <td>{t.id.slice(0, 8)}</td>
-                    <td>{t.lastMessageAt ?? "—"}</td>
+                    <td>{threadLabel(t, session.userAccountId, people)}</td>
+                    <td>{formatDateTime(t.lastMessageAt)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -345,9 +355,9 @@ export default function CommsPage() {
                   <div style={{ marginBottom: 8 }}>
                     {messages.map((m) => (
                       <div key={m.id} style={{ padding: "4px 0" }}>
-                        <strong>{m.senderUserId === session.userAccountId ? "You" : m.senderUserId.slice(0, 8)}:</strong>{" "}
+                        <strong>{m.senderUserId === session.userAccountId ? "You" : people[m.senderUserId] ?? "Someone"}:</strong>{" "}
                         {m.body}
-                        <span className="hint"> — {m.sentAt}</span>
+                        <span className="hint"> — {formatDateTime(m.sentAt)}</span>
                       </div>
                     ))}
                   </div>
@@ -373,6 +383,11 @@ export default function CommsPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
+}
+
+function threadLabel(t: MessageThreadDto, me: string, people: Record<string, string>): string {
+  const others = t.participants.filter((p) => p !== me).map((p) => people[p] ?? "Someone");
+  return others.length > 0 ? others.join(", ") : "Just you";
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { CSSProperties, Fragment, useEffect, useState } from "react";
+import { formatClock } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import {
   ApiError,
@@ -25,10 +26,17 @@ import {
   TimetableSlotDto,
 } from "@/lib/api";
 
-const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+// Indexed as the API numbers days: ISO, Monday = 1 … Sunday = 7. This list
+// used to be Sunday-first from 0, so choosing "Sunday" sent 0 — a day no read
+// ever matches. Index 0 stays named only so a slot stored that way still shows.
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const WEEK = [1, 2, 3, 4, 5, 6, 7];
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The local calendar date. toISOString() is UTC, which in India is still
+  // yesterday until 05:30 — and a register opened early landed on the wrong day.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** Which view the user last chose. Per browser, not per school. */
@@ -69,6 +77,7 @@ export default function TimetablePage() {
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   // The week is a question about a date: a revision supersedes rather than
   // overwrites, so "the timetable" without one is not a thing the school has.
   const [asOf, setAsOf] = useState(todayIso());
@@ -194,6 +203,12 @@ export default function TimetablePage() {
   }
 
   async function onDelete(id: string) {
+    // Deleting erases a slot outright (retiring is the usual move); ask twice.
+    if (confirmDelete !== id) {
+      setConfirmDelete(id);
+      return;
+    }
+    setConfirmDelete(null);
     setDeletingId(id);
     setError(null);
     try {
@@ -290,9 +305,9 @@ export default function TimetablePage() {
               ))}
             </select>
             <select value={form.dayOfWeek} onChange={(e) => setForm((f) => ({ ...f, dayOfWeek: e.target.value }))}>
-              {DAY_NAMES.map((d, i) => (
+              {WEEK.map((i) => (
                 <option key={i} value={i}>
-                  {d}
+                  {DAY_NAMES[i]}
                 </option>
               ))}
             </select>
@@ -398,7 +413,7 @@ export default function TimetablePage() {
                       <td>{DAY_NAMES[slot.dayOfWeek]}</td>
                       <td>{slot.periodNo}</td>
                       <td>
-                        {slot.startsAt}–{slot.endsAt}
+                        {formatClock(slot.startsAt)}–{formatClock(slot.endsAt)}
                       </td>
                       <td>{slot.subjectName}</td>
                       <td>{teacher ? `${teacher.firstName} ${teacher.lastName ?? ""}` : "—"}</td>
@@ -435,7 +450,7 @@ export default function TimetablePage() {
                               Retire
                             </button>{" "}
                             <button type="button" onClick={() => onDelete(slot.id)} disabled={deletingId === slot.id}>
-                              {deletingId === slot.id ? "…" : "Delete"}
+                              {deletingId === slot.id ? "…" : confirmDelete === slot.id ? "Confirm delete?" : "Delete"}
                             </button>
                           </>
                         )}
@@ -544,7 +559,7 @@ export default function TimetablePage() {
                     onClick={() => onDelete(selectedSlot.id)}
                     disabled={deletingId === selectedSlot.id}
                   >
-                    {deletingId === selectedSlot.id ? "\u2026" : "Delete"}
+                    {deletingId === selectedSlot.id ? "\u2026" : confirmDelete === selectedSlot.id ? "Confirm delete?" : "Delete"}
                   </button>
                   <button type="button" className="secondary" onClick={() => setSelectedId(null)}>
                     Close
@@ -882,6 +897,6 @@ function WeekGrid({
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

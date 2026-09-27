@@ -6,9 +6,10 @@
  * the transport module (drivers, routes, stops, vehicles, trips, GPS pings).
  */
 
-import { createApiClient } from "@schoolsoft/api-client";
+import { createApiClient, revokeRefreshToken } from "@schoolsoft/api-client";
 
-export { ApiError } from "@schoolsoft/api-client";
+import { ApiError } from "@schoolsoft/api-client";
+export { ApiError };
 
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
 const SESSION_KEY = "schoolsoft_driver_session";
@@ -40,6 +41,8 @@ export function setSession(session: Session): void {
 }
 
 export function clearSession(): void {
+  // Spend the refresh token too: clearing this copy left every other copy working.
+  revokeRefreshToken(API_BASE, getSession()?.refreshToken);
   window.localStorage.removeItem(SESSION_KEY);
 }
 
@@ -89,6 +92,12 @@ export async function verifyOtp(identifier: string, chainSlug: string, code: str
     method: "POST",
     body: JSON.stringify({ identifier, chainSlug, code }),
   });
+  // A token for the wrong kind of person is refused here, before it is kept:
+  // the API would 403 every call anyway, and the person would be left in a
+  // shell that is not theirs with no idea why.
+  if (!["staff"].includes(res.profile.subjectType)) {
+    throw new ApiError(403, "This app is for the school’s drivers. Parents and guardians use the Schoolsoft app.", "wrong_app");
+  }
   let session: Session = {
     accessToken: res.accessToken,
     refreshToken: res.refreshToken,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, ApplicationStatusDto, trackApplication } from "@/lib/api";
 
 const STATE_LABELS: Record<string, string> = {
@@ -25,6 +25,12 @@ export default function TrackPage() {
   const [result, setResult] = useState<ApplicationStatusDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Arriving from the "application received" page carries the number along.
+  useEffect(() => {
+    const no = new URLSearchParams(window.location.search).get("no");
+    if (no) setApplicationNo(no);
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -55,7 +61,7 @@ export default function TrackPage() {
             onChange={(e) => setApplicationNo(e.target.value)}
             required
             disabled={submitting}
-            placeholder="WEB-XXXXXXXX"
+            placeholder="APP260001"
           />
         </div>
         <div className="field-group">
@@ -87,7 +93,7 @@ export default function TrackPage() {
           {result.testScore != null && <p>Test score: {result.testScore}</p>}
           {result.offerExpiresOn && <p>Offer valid until {result.offerExpiresOn}</p>}
           <div className="app-no">{result.applicationNo}</div>
-          <p className="hint">Applied {result.createdAt.slice(0, 10)}</p>
+          <p className="hint">Applied {new Date(result.createdAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}</p>
         </div>
       )}
     </main>

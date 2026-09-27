@@ -65,7 +65,7 @@ export default function ApplyPage() {
           <div className="app-no">{applicationNo}</div>
           <p className="hint">Keep this reference number for your records.</p>
           <p className="hint" style={{ marginTop: 12 }}>
-            <Link href="/track">Track this application&apos;s status</Link>
+            <Link href={`/track?no=${encodeURIComponent(applicationNo)}`}>Track this application&apos;s status</Link>
           </p>
         </div>
       </main>
@@ -94,7 +94,7 @@ export default function ApplyPage() {
         <div className="field-row">
           <div className="field-group">
             <label htmlFor="dob">Date of birth</label>
-            <input id="dob" type="date" value={dob} onChange={(e) => setDob(e.target.value)} disabled={submitting} />
+            <input id="dob" type="date" max={new Date().toISOString().slice(0, 10)} value={dob} onChange={(e) => setDob(e.target.value)} disabled={submitting} />
           </div>
           <div className="field-group">
             <label htmlFor="gender">Gender</label>
@@ -126,7 +126,7 @@ export default function ApplyPage() {
         <div className="field-row">
           <div className="field-group">
             <label htmlFor="guardianPhone">Phone</label>
-            <input id="guardianPhone" value={guardianPhone} onChange={(e) => setGuardianPhone(e.target.value)} required disabled={submitting} />
+            <input id="guardianPhone" type="tel" inputMode="tel" autoComplete="tel" value={guardianPhone} onChange={(e) => setGuardianPhone(e.target.value)} required disabled={submitting} />
           </div>
           <div className="field-group">
             <label htmlFor="guardianEmail">Email</label>

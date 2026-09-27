@@ -39,7 +39,11 @@ function AssessmentInner() {
   const searchParams = useSearchParams();
   const [session, setSessionState] = useState<Session | null>(null);
   const [mySections, setMySections] = useState<SectionDto[] | null>(null);
-  const [subjectBySection, setSubjectBySection] = useState<Record<string, string>>({});
+  // Every subject the teacher takes in each section. One per section used to
+  // be kept (the last timetable slot won), so a teacher with Maths and Science
+  // in 7-B could only ever set Science papers.
+  const [subjectsBySection, setSubjectsBySection] = useState<Record<string, { id: string; name: string }[]>>({});
+  const [subjectId, setSubjectId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [assessments, setAssessments] = useState<AssessmentDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,12 +66,15 @@ function AssessmentInner() {
 
     Promise.all([timetableForTeacher(s.subjectId), listSections(s.schoolId)])
       .then(([tt, allSections]: [TimetableSlotDto[], SectionDto[]]) => {
-        const bySection: Record<string, string> = {};
-        for (const slot of tt) bySection[slot.sectionId] = slot.subjectId;
+        const bySection: Record<string, { id: string; name: string }[]> = {};
+        for (const slot of tt) {
+          const list = (bySection[slot.sectionId] ??= []);
+          if (!list.some((x) => x.id === slot.subjectId)) list.push({ id: slot.subjectId, name: slot.subjectName });
+        }
         const ids = Object.keys(bySection);
         const mine = allSections.filter((sec) => ids.includes(sec.id));
         setMySections(mine);
-        setSubjectBySection(bySection);
+        setSubjectsBySection(bySection);
         const preselect = searchParams.get("section");
         if (preselect && ids.includes(preselect)) setSectionId(preselect);
         else if (mine.length > 0) setSectionId(mine[0].id);
@@ -75,6 +82,10 @@ function AssessmentInner() {
       .catch((err) => setError(describeError(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
+
+  useEffect(() => {
+    setSubjectId(subjectsBySection[sectionId]?.[0]?.id ?? "");
+  }, [sectionId, subjectsBySection]);
 
   useEffect(() => {
     if (!sectionId) return;
@@ -85,7 +96,6 @@ function AssessmentInner() {
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!session || !sectionId) return;
-    const subjectId = subjectBySection[sectionId];
     const section = mySections?.find((s) => s.id === sectionId);
     if (!subjectId || !section) return;
     setCreating(true);
@@ -149,6 +159,15 @@ function AssessmentInner() {
 
         <form onSubmit={onCreate} style={{ marginTop: 12 }}>
           <div className="form-row" style={{ flexDirection: "column" }}>
+            {(subjectsBySection[sectionId]?.length ?? 0) > 1 && (
+              <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} disabled={creating}>
+                {subjectsBySection[sectionId].map((sub) => (
+                  <option key={sub.id} value={sub.id}>
+                    {sub.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <input
               placeholder="Assessment name (e.g. Unit Test 1)"
               value={name}
@@ -356,6 +375,6 @@ function MarksEditor({ assessment, schoolId, sectionId }: { assessment: Assessme
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

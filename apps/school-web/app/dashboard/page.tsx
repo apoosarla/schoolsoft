@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { humanize } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -20,6 +21,7 @@ export default function DashboardPage() {
   const [session, setSessionState] = useState<Session | null>(null);
   const [overview, setOverview] = useState<SchoolOverviewDto | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [noAccess, setNoAccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [readiness, setReadiness] = useState<SchoolReadinessDto | null>(null);
 
@@ -32,7 +34,12 @@ export default function DashboardPage() {
     setSessionState(s);
     getSchoolOverview(s.schoolId)
       .then(setOverview)
-      .catch((err) => setError(err instanceof ApiError ? `${err.code}: ${err.message}` : "Failed to load"))
+      .catch((err) => {
+        // Staff with no role yet can sign in but may read nothing. That is a
+        // state to explain, not an error to print.
+        if (err instanceof ApiError && err.status === 403) setNoAccess(true);
+        else setError(err instanceof ApiError ? err.userMessage : "Failed to load");
+      })
       .finally(() => setLoading(false));
     // A dashboard of zeroes reads as broken. While the school is still being
     // set up it is not broken, it is unopened, and this is where that gets
@@ -56,8 +63,9 @@ export default function DashboardPage() {
           <div>
             <h2 style={{ marginBottom: 4 }}>Overview</h2>
             <p className="hint">
-              Signed in as <code>{session.subjectType}</code> · chain{" "}
-              <code>{session.chainSchema}</code>
+              {session.roleCodes.length > 0
+                ? `Signed in as ${session.roleCodes.map((r) => r.replace(/_/g, " ")).join(", ")}`
+                : "Signed in"}
             </p>
           </div>
           <button type="button" onClick={signOut}>
@@ -86,6 +94,16 @@ export default function DashboardPage() {
       )}
 
       {error && <div className="error-banner">{error}</div>}
+
+      {noAccess && (
+        <div className="panel">
+          <h2>No access yet</h2>
+          <p className="hint">
+            You are signed in, but nobody has given you a role at this school yet, so there is nothing here for you
+            to see. Ask the school office to assign you one — it takes effect the next time you sign in.
+          </p>
+        </div>
+      )}
 
       {overview && (
         <>
@@ -120,7 +138,7 @@ export default function DashboardPage() {
             ) : (
               <div className="stat-grid">
                 {Object.entries(overview.admissionsFunnel).map(([state, count]) => (
-                  <Stat key={state} label={state} value={count} />
+                  <Stat key={state} label={humanize(state)} value={count} />
                 ))}
               </div>
             )}

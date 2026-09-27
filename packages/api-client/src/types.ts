@@ -66,6 +66,8 @@ export type FeeInvoiceDto = {
   total: number;
   paid: number;
   status: string;
+  /** Paid beyond the total and held for the family. */
+  advanceAmount?: number;
 };
 
 export type FeeInvoiceLineDto = {
@@ -255,6 +257,21 @@ export type AssessmentComponentDto = {
   maxMarks: number;
   weightPct: number | null;
   sortOrder: number;
+};
+
+export type StudentMarkDto = {
+  assessmentId: string;
+  assessmentName: string;
+  assessmentType: string;
+  subjectName: string;
+  scheduledOn: string | null;
+  assessmentStatus: string;
+  componentId: string;
+  componentName: string;
+  maxMarks: number;
+  markId: string;
+  rawMarks: number | null;
+  status: string;
 };
 
 export type MarkDto = {

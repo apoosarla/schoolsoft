@@ -264,7 +264,7 @@ function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 403) return "Forbidden — this token isn't a platform_admin account.";
     if (err.status === 401) return "Unauthorized — token missing, expired, or invalid.";
-    return `${err.code ?? "error"}: ${err.message}`;
+    return err.userMessage;
   }
   return err instanceof Error ? err.message : "Unknown error";
 }

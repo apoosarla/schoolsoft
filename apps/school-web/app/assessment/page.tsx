@@ -70,6 +70,7 @@ export default function AssessmentPage() {
   const [creatingAssessment, setCreatingAssessment] = useState(false);
 
   const [selectedAssessment, setSelectedAssessment] = useState<AssessmentDto | null>(null);
+  const [marksError, setMarksError] = useState<string | null>(null);
   const [components, setComponents] = useState<AssessmentComponentDto[] | null>(null);
   const [showComponentForm, setShowComponentForm] = useState(false);
   const [componentForm, setComponentForm] = useState(emptyComponentForm);
@@ -265,7 +266,9 @@ export default function AssessmentPage() {
     if (!session || !selectedComponent || !roster) return;
     setSavingAll(true);
     setError(null);
+    setMarksError(null);
     setBulkResult(null);
+    const typed = marks;
     try {
       const result = await enterMarksInBulk({
         schoolId: session.schoolId,
@@ -282,10 +285,15 @@ export default function AssessmentPage() {
         }),
       });
       setBulkResult(result);
-      const refreshed = await listMarksForComponent(selectedComponent.id);
-      setMarks(markStateFrom(roster, refreshed));
+      const refreshed = markStateFrom(roster, await listMarksForComponent(selectedComponent.id));
+      // A refused row keeps what was typed, so the teacher can see and fix it
+      // rather than finding the old mark back in the box.
+      for (const r of result.rejected) {
+        if (typed[r.studentId]) refreshed[r.studentId] = { ...refreshed[r.studentId], ...typed[r.studentId] };
+      }
+      setMarks(refreshed);
     } catch (err) {
-      setError(describeError(err));
+      setMarksError(describeError(err));
     } finally {
       setSavingAll(false);
     }
@@ -325,6 +333,11 @@ export default function AssessmentPage() {
   }
 
   if (!session) return null;
+
+  // Once locked or published the marks are the school's record: reopening
+  // takes a reason (the status menu asks for it), and until then nothing on
+  // the grid is editable. It used to look editable and fail on save.
+  const isLocked = selectedAssessment ? ["locked", "published"].includes(selectedAssessment.status) : false;
 
   return (
     <main className="shell">
@@ -456,7 +469,7 @@ export default function AssessmentPage() {
                   </option>
                 ))}
               </select>
-              <button type="button" onClick={() => setShowComponentForm((v) => !v)}>
+              <button type="button" onClick={() => setShowComponentForm((v) => !v)} disabled={isLocked}>
                 {showComponentForm ? "Cancel" : "Add component"}
               </button>
             </div>
@@ -565,10 +578,17 @@ export default function AssessmentPage() {
             <h2>
               Marks — {selectedComponent.name} <span className="hint">(max {selectedComponent.maxMarks})</span>
             </h2>
-            <button type="button" onClick={onSaveAllMarks} disabled={savingAll || roster.length === 0}>
+            <button type="button" onClick={onSaveAllMarks} disabled={savingAll || roster.length === 0 || isLocked}>
               {savingAll ? "Saving…" : "Save all"}
             </button>
           </div>
+          {isLocked && (
+            <div className="warn-banner">
+              This assessment is {selectedAssessment?.status}. To change a mark, reopen it from the status menu
+              above — it asks for a reason — or raise a re-evaluation.
+            </div>
+          )}
+          {marksError && <div className="error-banner">{marksError}</div>}
           <p className="hint">
             Typing a mark records it as entered — zero included. Leave it blank and pick a reason instead:
             an unmarked paper is <em>pending</em>, and an absence is never a nought.
@@ -621,7 +641,7 @@ export default function AssessmentPage() {
                             type="number"
                             max={selectedComponent.maxMarks}
                             value={mark.rawMarks}
-                            disabled={mark.status !== "entered" && mark.status !== "pending"}
+                            disabled={isLocked || (mark.status !== "entered" && mark.status !== "pending")}
                             onChange={(e) =>
                               setMarks((m) => ({
                                 ...m,
@@ -639,6 +659,7 @@ export default function AssessmentPage() {
                         <td>
                           <select
                             value={mark.status}
+                            disabled={isLocked}
                             onChange={(e) =>
                               setMarks((m) => ({
                                 ...m,
@@ -986,6 +1007,6 @@ function studentLabel(roster: StudentDto[] | null, studentId: string): string {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

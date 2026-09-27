@@ -33,7 +33,10 @@ import {
 } from "@/lib/api";
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The local calendar date. toISOString() is UTC, which in India is still
+  // yesterday until 05:30 — and a register opened early landed on the wrong day.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function duration(startedAt: string, endedAt: string | null): string {
@@ -134,6 +137,16 @@ export default function TransportPage() {
       setCreatingVehicle(false);
     }
   }
+
+  // Who each driver's app login belongs to. "linked" alone hid a driver
+  // linked to the wrong person's account.
+  const [staffAccounts, setStaffAccounts] = useState<UserDirectoryEntryDto[] | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    listDirectory(session.schoolId, undefined, "staff")
+      .then(setStaffAccounts)
+      .catch(() => setStaffAccounts([]));
+  }, [session]);
 
   useEffect(() => {
     if (!session || !driverStaffQ) {
@@ -380,6 +393,14 @@ export default function TransportPage() {
                   <td>{d.licenseNo ?? "—"}</td>
                   <td>
                     <span className={`badge ${d.staffId ? "badge-active" : ""}`}>{d.staffId ? "linked" : "not linked"}</span>
+                    {d.staffId && (() => {
+                      const account = staffAccounts?.find((a) => a.subjectId === d.staffId);
+                      return (
+                        <div className="hint">
+                          {account ? `${account.displayName}${account.email ? ` · ${account.email}` : ""}` : "a staff record with no sign-in"}
+                        </div>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}
@@ -592,6 +613,6 @@ export default function TransportPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

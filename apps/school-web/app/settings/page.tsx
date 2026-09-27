@@ -171,7 +171,7 @@ function describeError(err: unknown): string {
     if (err.status === 403) {
       return "You can see these settings but not change them — that needs admission.policy.manage.";
     }
-    return `${err.code ?? "error"}: ${err.message}`;
+    return err.userMessage;
   }
   return err instanceof Error ? err.message : "Unknown error";
 }

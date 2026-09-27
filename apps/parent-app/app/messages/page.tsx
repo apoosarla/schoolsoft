@@ -67,6 +67,16 @@ export default function MessagesPage() {
     return directory?.find((d) => d.subjectType === "staff" && d.subjectId === staffId);
   }
 
+  /** The other people in a thread, by name — a thread used to be its id. */
+  function threadTitle(t: MessageThreadDto | undefined): string {
+    if (!t || !session) return "Conversation";
+    const names = t.participants
+      .filter((p) => p !== session.userAccountId)
+      .map((p) => directory?.find((d) => d.userAccountId === p)?.displayName)
+      .filter(Boolean);
+    return names.length > 0 ? `With ${names.join(", ")}` : "Conversation";
+  }
+
   async function onStartThread(teacherUserId: string) {
     if (!session || !active) return;
     setStarting(true);
@@ -180,8 +190,12 @@ export default function MessagesPage() {
                 onClick={() => openThread(t.id)}
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span>Thread {t.id.slice(0, 8)}</span>
-                  <span className="list-row-sub">{t.lastMessageAt?.slice(0, 16).replace("T", " ") ?? "—"}</span>
+                  <span>{threadTitle(t)}</span>
+                  <span className="list-row-sub">
+                    {t.lastMessageAt
+                      ? new Date(t.lastMessageAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+                      : "—"}
+                  </span>
                 </div>
               </button>
             ))}
@@ -191,7 +205,7 @@ export default function MessagesPage() {
         <div className="pane-detail">
           {openThreadId && (
             <div className="panel">
-              <h2>Thread {openThreadId.slice(0, 8)}</h2>
+              <h2>{threadTitle(threads?.find((t) => t.id === openThreadId))}</h2>
               <div className="timeline" style={{ marginTop: 12 }}>
                 {messages?.length === 0 && <p className="hint">No messages yet.</p>}
                 {messages?.map((m) => (
@@ -221,6 +235,6 @@ export default function MessagesPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

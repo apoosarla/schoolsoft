@@ -5,12 +5,9 @@ import { useRouter } from "next/navigation";
 import { ReasonField } from "@schoolsoft/ui";
 import {
   ApiError,
-  AssessmentDto,
-  assessmentsForSection,
-  componentsForAssessment,
   getSession,
   MarkReevaluationDto,
-  marksForComponent,
+  marksForStudent,
   reevaluationsForStudent,
   reportCard,
   ReportCardDetailDto,
@@ -23,7 +20,7 @@ import {
 } from "@/lib/api";
 
 type GradeRow = {
-  assessment: AssessmentDto;
+  assessment: { id: string; name: string; assessmentType: string };
   markId: string;
   marks: number | null;
   maxMarks: number | null;
@@ -88,31 +85,28 @@ export default function ReportCardsPage() {
     reportCardsForStudent(active.id).then(setReportCards).catch((err) => setError(describeError(err)));
     reevaluationsForStudent(active.id).then(setReevaluations).catch(() => setReevaluations([]));
 
-    if (!active.currentSectionId) return;
-    (async () => {
-      try {
-        const assessments = await assessmentsForSection(active.currentSectionId!);
-        const rows: GradeRow[] = [];
-        for (const a of assessments) {
-          const comps = await componentsForAssessment(a.id);
-          const comp = comps[0];
-          if (!comp) continue;
-          const marks = await marksForComponent(comp.id);
-          const m = marks.find((mk) => mk.studentId === active.id);
-          if (!m) continue;
-          rows.push({
-            assessment: a,
-            markId: m.id,
+    // The child's own marks, read as the child's. Walking the section's
+    // assessment list is a read a family may not make.
+    marksForStudent(active.id)
+      .then((marks) =>
+        setGrades(
+          marks.map((m) => ({
+            assessment: {
+              id: m.assessmentId,
+              name: m.componentName && m.componentName !== "Overall" ? `${m.assessmentName} — ${m.componentName}` : m.assessmentName,
+              assessmentType: `${m.subjectName} · ${m.assessmentType}`,
+            },
+            markId: m.markId,
             marks: m.rawMarks,
-            maxMarks: comp.maxMarks,
+            maxMarks: m.maxMarks,
             status: m.status,
-          });
-        }
-        setGrades(rows);
-      } catch (err) {
+          })),
+        ),
+      )
+      .catch((err) => {
+        setGrades([]);
         setError(describeError(err));
-      }
-    })();
+      });
   }, [active]);
 
   async function askForReevaluation(row: GradeRow, reason: string) {
@@ -175,7 +169,7 @@ export default function ReportCardsPage() {
         <div className="panel">
           <h2>Grades this year</h2>
           {!grades && <p className="hint">Loading…</p>}
-          {grades && grades.length === 0 && <p className="empty-note">No marks entered yet.</p>}
+          {grades && grades.length === 0 && <p className="empty-note">No published marks yet — they appear once the school publishes an assessment.</p>}
           {grades && grades.length > 0 && (
             <table>
               <thead>
@@ -190,7 +184,7 @@ export default function ReportCardsPage() {
                   const pending = reevaluations?.find((r) => r.markId === g.markId && r.status === "pending");
                   const decided = reevaluations?.find((r) => r.markId === g.markId && r.status !== "pending");
                   return (
-                    <tr key={g.assessment.id}>
+                    <tr key={g.markId}>
                       <td>
                         {g.assessment.name}
                         <div className="list-row-sub">{g.assessment.assessmentType.replace("_", " ")}</div>
@@ -337,6 +331,6 @@ export default function ReportCardsPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

@@ -6,6 +6,7 @@ import {
   checkIn,
   DriverDto,
   endTrip,
+  ApiError,
   getSession,
   listRoutes,
   listVehicles,
@@ -72,7 +73,15 @@ export default function HomePage() {
         }
         setDriver(drivers[0]);
       })
-      .catch((err) => setError(describeError(err)));
+      .catch((err) =>
+        setError(
+          // Linked in Transport but holding no driver role: the school has to
+          // grant it, and "no permission" said nothing about what was missing.
+          err instanceof ApiError && err.status === 403
+            ? "This account is not set up as a driver yet. Ask the school office to give it the driver role."
+            : describeError(err),
+        ),
+      );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
@@ -229,7 +238,7 @@ export default function HomePage() {
               {starting ? "Starting…" : "Start trip"}
             </button>
           </div>
-          {!routes || routes.length === 0 ? <p className="hint">No routes set up for this school yet.</p> : null}
+          {routes && routes.length === 0 ? <p className="hint">No routes set up for this school yet.</p> : null}
         </div>
       )}
 
@@ -307,6 +316,7 @@ export default function HomePage() {
 }
 
 function describeError(err: unknown): string {
+  if (err instanceof ApiError) return err.userMessage;
   if (err && typeof err === "object" && "message" in err) return String((err as Error).message);
   return "Unknown error";
 }

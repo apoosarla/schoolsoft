@@ -245,7 +245,7 @@ function describeError(err: unknown): string {
       return "The office has no record of that email or mobile. They can add it in a minute — it is not something you can fix here.";
     }
     if (err.status === 403) return err.message;
-    return `${err.code ?? "error"}: ${err.message}`;
+    return err.userMessage;
   }
   return err instanceof Error ? err.message : "Unknown error";
 }

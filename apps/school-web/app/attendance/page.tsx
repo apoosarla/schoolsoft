@@ -44,7 +44,10 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The local calendar date. toISOString() is UTC, which in India is still
+  // yesterday until 05:30 — and a register opened early landed on the wrong day.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /**
@@ -57,6 +60,7 @@ export default function AttendancePage() {
   const [session, setSessionState] = useState<Session | null>(null);
   const [staffId, setStaffId] = useState("");
   const [tab, setTab] = useState<Tab>("register");
+  const [confirmWithdraw, setConfirmWithdraw] = useState<string | null>(null);
   const [sections, setSections] = useState<SectionDto[] | null>(null);
   const [sectionId, setSectionId] = useState("");
   const [onDate, setOnDate] = useState(todayIso());
@@ -105,12 +109,16 @@ export default function AttendancePage() {
   }, [router]);
 
   useEffect(() => {
-    if (!sectionId || tab !== "register") return;
+    // A date input is empty for a moment while it is being typed into; asking
+    // for that register was a 500 that then outlived the real answer.
+    if (!sectionId || !onDate || tab !== "register") return;
+    let current = true;
     setLoading(true);
     setError(null);
     setNotice(null);
     Promise.all([rosterForSection(sectionId), attendanceForSectionOnDate(sectionId, onDate)])
       .then(([r, existing]) => {
+        if (!current) return;
         setRoster(r);
         const initial: Record<string, string> = {};
         for (const enr of r) {
@@ -122,9 +130,23 @@ export default function AttendancePage() {
         }
         setStatuses(initial);
       })
-      .catch((err) => setError(describeError(err)))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (current) setError(describeError(err));
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    // A slower answer for a date already moved past must not land on the new one.
+    return () => {
+      current = false;
+    };
   }, [sectionId, onDate, tab]);
+
+  // A banner belongs to the tab that raised it.
+  useEffect(() => {
+    setError(null);
+    setNotice(null);
+  }, [tab]);
 
   const refreshAmendments = useCallback(() => {
     if (!session) return;
@@ -141,7 +163,7 @@ export default function AttendancePage() {
   }, [session, leaveFilter]);
 
   const refreshCover = useCallback(() => {
-    if (!session) return;
+    if (!session || !onDate) return;
     Promise.all([coverNeeds(session.schoolId, onDate), coverForDay(session.schoolId, onDate)])
       .then(([n, c]) => {
         setNeeds(n);
@@ -233,6 +255,7 @@ export default function AttendancePage() {
               <thead>
                 <tr>
                   <th>Roll no.</th>
+                  <th>Name</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -243,6 +266,7 @@ export default function AttendancePage() {
                   .map((r) => (
                     <tr key={r.studentId}>
                       <td>{r.rollNo ?? "—"}</td>
+                      <td>{studentLabel(students, r.studentId)}</td>
                       <td>
                         <select
                           value={statuses[r.studentId] ?? "present"}
@@ -498,15 +522,21 @@ export default function AttendancePage() {
                           type="button"
                           className="secondary"
                           disabled={busy || !staffId}
-                          onClick={() =>
+                          onClick={() => {
+                            // Withdrawing rewrites the register; it takes a second press.
+                            if (confirmWithdraw !== l.id) {
+                              setConfirmWithdraw(l.id);
+                              return;
+                            }
+                            setConfirmWithdraw(null);
                             run(async () => {
                               await decideLeave(l.id, { status: "cancelled", approverStaffId: staffId });
                               setNotice("Approval withdrawn — the days it created have been removed.");
                               refreshLeave();
-                            })
-                          }
+                            });
+                          }}
                         >
-                          Withdraw
+                          {confirmWithdraw === l.id ? "Confirm withdraw?" : "Withdraw"}
                         </button>
                       )}
                     </div>
@@ -669,6 +699,6 @@ function studentLabel(students: StudentDto[] | null, studentId: string): string 
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

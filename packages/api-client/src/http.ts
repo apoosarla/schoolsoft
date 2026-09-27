@@ -19,6 +19,25 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
   }
+
+  /**
+   * What a person at the screen should read. The API's code (`bad_request`,
+   * `conflict`) is for programs, and every screen used to print it in front of
+   * the message. A server fault says so without pretending to explain it, and
+   * a raw database refusal is put into words — its constraint name means
+   * nothing to the office.
+   */
+  get userMessage(): string {
+    if (this.status >= 500) {
+      return "Something went wrong on our side. Try again, and tell the office if it keeps happening.";
+    }
+    if (this.code === "constraint_violation") {
+      if (/duplicate key/i.test(this.message)) return "That is already recorded — it has to be unique.";
+      if (/not-null|null value/i.test(this.message)) return "Something required is missing.";
+      return "Those values are not allowed together. Check the dates and numbers and try again.";
+    }
+    return this.message;
+  }
 }
 
 export type RefreshedTokens = {
@@ -121,4 +140,19 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   }
 
   return { baseUrl, apiFetch };
+}
+
+/**
+ * Spends a refresh token on the server, so a copy of it stops working when the
+ * person signs out. Fire-and-forget with `keepalive`: sign-out must not wait on
+ * the network, and the request should outlive the navigation that follows.
+ */
+export function revokeRefreshToken(baseUrl: string, refreshToken: string | null | undefined): void {
+  if (!refreshToken || typeof fetch === "undefined") return;
+  void fetch(`${baseUrl}/v1/auth/logout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken }),
+    keepalive: true,
+  }).catch(() => undefined);
 }

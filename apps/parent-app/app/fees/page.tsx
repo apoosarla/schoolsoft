@@ -43,7 +43,7 @@ export default function FeesPage() {
   const [lines, setLines] = useState<FeeInvoiceLineDto[] | null>(null);
   const [payments, setPayments] = useState<PaymentDto[] | null>(null);
   const [adjustments, setAdjustments] = useState<FeeAdjustmentDto[] | null>(null);
-  const [dues, setDues] = useState<{ balance: number; hasDues: boolean } | null>(null);
+  const [dues, setDues] = useState<{ balance: number; hasDues: boolean; credit: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -153,6 +153,9 @@ export default function FeesPage() {
               ? "Across every unpaid invoice below, after any credit or waiver the school has applied."
               : "Every invoice is settled."}
           </p>
+          {dues.credit > 0 && (
+            <p className="hint">You have {inr(dues.credit)} paid in advance, held by the school.</p>
+          )}
         </div>
       )}
 
@@ -281,6 +284,6 @@ export default function FeesPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

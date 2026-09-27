@@ -6,7 +6,7 @@ import {
   AnnouncementDto,
   ApiError,
   AttendanceRecordDto,
-  attendanceForSectionOnDate,
+  attendanceHistoryForStudent,
   getSession,
   listAnnouncements,
   Session,
@@ -15,7 +15,10 @@ import {
 } from "@/lib/api";
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The local calendar date. toISOString() is UTC, which in India is still
+  // yesterday until 05:30 — and a register opened early landed on the wrong day.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function studentName(s: StudentDto): string {
@@ -65,7 +68,9 @@ export default function HomePage() {
       setAttendance(null);
       return;
     }
-    attendanceForSectionOnDate(active.currentSectionId, todayIso())
+    // The child's own record for today. Asking for the section's register
+    // was refused — a family may see its own child, not the class.
+    attendanceHistoryForStudent(active.id, todayIso(), todayIso())
       .then(setAttendance)
       .catch((err) => setError(describeError(err)));
   }, [active]);
@@ -159,6 +164,6 @@ export default function HomePage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

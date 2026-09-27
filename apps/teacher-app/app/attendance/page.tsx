@@ -19,7 +19,10 @@ import {
 const STATUSES = ["present", "absent", "late", "leave", "excused", "half_day"];
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The local calendar date. toISOString() is UTC, which in India is still
+  // yesterday until 05:30 — and a register opened early landed on the wrong day.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export default function AttendancePage() {
@@ -70,7 +73,7 @@ function AttendanceInner() {
   }, [router]);
 
   useEffect(() => {
-    if (!sectionId) return;
+    if (!sectionId || !onDate) return;
     setLoading(true);
     setError(null);
     setSaveMessage(null);
@@ -191,6 +194,11 @@ function AttendanceInner() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  // A subject teacher holds no attendance permission: the register is the
+  // class teacher's. Say that, rather than "you do not have permission".
+  if (err instanceof ApiError && err.status === 403) {
+    return "Taking the register is not part of your role here — the class teacher or the office marks attendance for this section.";
+  }
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

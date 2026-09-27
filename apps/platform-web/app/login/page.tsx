@@ -165,7 +165,7 @@ function describeError(err: unknown): string {
     // anything at all — it answers "sent" whatever it was handed.
     if (err.status === 404) return "That address cannot sign in here. Platform accounts are a separate list.";
     if (err.status === 403) return err.message;
-    return `${err.code ?? "error"}: ${err.message}`;
+    return err.userMessage;
   }
   return err instanceof Error ? err.message : "Unknown error";
 }

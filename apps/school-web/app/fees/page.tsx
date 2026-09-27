@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { formatDateTime, humanize } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import {
   AcademicYearDto,
@@ -71,7 +72,10 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The local calendar date. toISOString() is UTC, which in India is still
+  // yesterday until 05:30 — and a register opened early landed on the wrong day.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function monthStartIso(): string {
@@ -112,7 +116,7 @@ export default function FeesPage() {
   const [students, setStudents] = useState<StudentDto[] | null>(null);
   const [student, setStudent] = useState<StudentDto | null>(null);
   const [invoices, setInvoices] = useState<FeeInvoiceDto[] | null>(null);
-  const [dues, setDues] = useState<{ balance: number; hasDues: boolean } | null>(null);
+  const [dues, setDues] = useState<{ balance: number; hasDues: boolean; credit: number } | null>(null);
   const [concessions, setConcessions] = useState<ConcessionDto[] | null>(null);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -180,6 +184,7 @@ export default function FeesPage() {
   const [to, setTo] = useState(todayIso());
   const [dayBook, setDayBook] = useState<DayBookDto | null>(null);
   const [outstanding, setOutstanding] = useState<OutstandingReportDto | null>(null);
+  const [overpayConfirm, setOverpayConfirm] = useState<string | null>(null);
   const [outstandingGradeId, setOutstandingGradeId] = useState("");
 
   useEffect(() => {
@@ -403,6 +408,7 @@ export default function FeesPage() {
               <p className="hint">
                 Outstanding {inr(dues.balance)}
                 {dues.hasDues ? " — year-end clearance reads this number." : " — nothing owed."}
+                {dues.credit > 0 && <> Credit held for the family: {inr(dues.credit)}.</>}
               </p>
             )}
             {concessions && concessions.length > 0 && (
@@ -555,7 +561,12 @@ export default function FeesPage() {
                         <td>{inv.cycleLabel}</td>
                         <td>{inv.dueOn}</td>
                         <td>{inr(inv.total)}</td>
-                        <td>{inr(inv.paid)}</td>
+                        <td>
+                          {inr(inv.paid)}
+                          {inv.advanceAmount > 0 && (
+                            <div className="hint">+ {inr(inv.advanceAmount)} credit</div>
+                          )}
+                        </td>
                         <td>
                           <span className={`badge ${inv.status === "paid" ? "badge-active" : ""}`}>{inv.status}</span>
                         </td>
@@ -567,7 +578,7 @@ export default function FeesPage() {
                       </tr>
                       {expandedId === inv.id && (
                         <tr>
-                          <td colSpan={7}>
+                          <td colSpan={7} style={{ whiteSpace: "normal" }}>
                             <div style={{ padding: "8px 0" }}>
                               <strong>Lines</strong>
                               {invoiceLines && invoiceLines.length > 0 ? (
@@ -612,7 +623,7 @@ export default function FeesPage() {
                                         <td>{inr(p.amount)}</td>
                                         <td>{p.method ?? "—"}</td>
                                         <td>{p.status}</td>
-                                        <td>{p.capturedAt ?? "—"}</td>
+                                        <td>{formatDateTime(p.capturedAt)}</td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -646,6 +657,16 @@ export default function FeesPage() {
                                         setError("Enter a valid payment amount.");
                                         return;
                                       }
+                                      // More than is owed is held as credit, which is
+                                      // right for a family paying ahead and wrong for a
+                                      // typo — so it takes a second press.
+                                      const owed = Math.max(0, inv.total - inv.paid);
+                                      const confirmKey = `${inv.id}:${amount}`;
+                                      if (amount > owed + 0.005 && overpayConfirm !== confirmKey) {
+                                        setOverpayConfirm(confirmKey);
+                                        return;
+                                      }
+                                      setOverpayConfirm(null);
                                       setPayingId(inv.id);
                                       setError(null);
                                       try {
@@ -667,8 +688,19 @@ export default function FeesPage() {
                                       }
                                     }}
                                   >
-                                    {payingId === inv.id ? "Recording…" : "Record payment"}
+                                    {payingId === inv.id
+                                      ? "Recording…"
+                                      : overpayConfirm === `${inv.id}:${Number(payAmount)}`
+                                        ? "Record anyway"
+                                        : "Record payment"}
                                   </button>
+                                  {overpayConfirm === `${inv.id}:${Number(payAmount)}` && (
+                                    <span className="hint">
+                                      Only {inr(Math.max(0, inv.total - inv.paid))} is owed —{" "}
+                                      {inr(Number(payAmount) - Math.max(0, inv.total - inv.paid))} will be held as
+                                      credit.
+                                    </span>
+                                  )}
                                 </div>
                               )}
 
@@ -691,7 +723,7 @@ export default function FeesPage() {
                                   <tbody>
                                     {adjustments.map((a) => (
                                       <tr key={a.id}>
-                                        <td>{a.kind}</td>
+                                        <td>{humanize(a.kind)}</td>
                                         <td>{inr(a.amount)}</td>
                                         <td style={{ whiteSpace: "normal" }}>{a.reason}</td>
                                         <td>{a.createdAt.slice(0, 10)}</td>
@@ -709,7 +741,7 @@ export default function FeesPage() {
                                 >
                                   {FEE_ADJUSTMENT_KINDS.map((k) => (
                                     <option key={k} value={k}>
-                                      {k}
+                                      {humanize(k)}
                                     </option>
                                   ))}
                                 </select>
@@ -1741,6 +1773,6 @@ export default function FeesPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

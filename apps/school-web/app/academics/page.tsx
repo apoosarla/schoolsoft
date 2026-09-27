@@ -51,7 +51,10 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The local calendar date. toISOString() is UTC, which in India is still
+  // yesterday until 05:30 — and a register opened early landed on the wrong day.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 const emptyPeriod = { periodNo: 1, label: "", startsAt: "08:30", endsAt: "09:15", isBreak: false };
@@ -172,6 +175,22 @@ export default function AcademicsPage() {
   }, [router]);
 
   const section = sections?.find((s) => s.id === sectionId) ?? null;
+
+  // Assign is an upsert: picking a subject and teacher already on the section
+  // edits that row. The checkboxes start from what the row says, so pressing
+  // Assign without touching them changes nothing — before, they started blank
+  // and a re-assign quietly took a section's class teacher away.
+  const existingAssignment =
+    sectionTeachers?.find(
+      (t) => t.subjectId === assignForm.subjectId && t.teacherStaffId === assignForm.teacherStaffId,
+    ) ?? null;
+  useEffect(() => {
+    setAssignForm((f) => ({
+      ...f,
+      isPrimary: existingAssignment?.isPrimary ?? false,
+      isElective: existingAssignment?.isElective ?? false,
+    }));
+  }, [existingAssignment]);
 
   const refreshTeaching = useCallback(() => {
     if (!sectionId) return;
@@ -421,13 +440,23 @@ export default function AcademicsPage() {
                 disabled={busy || !sectionId || !assignForm.subjectId || !assignForm.teacherStaffId}
                 onClick={() =>
                   run(async () => {
+                    const losesClassTeacher =
+                      existingAssignment?.isPrimary === true &&
+                      !assignForm.isPrimary &&
+                      !sectionTeachers?.some((t) => t.id !== existingAssignment.id && t.isPrimary);
                     await assignSectionTeacher(sectionId, assignForm);
                     refreshTeaching();
-                    setNotice("Teacher assigned.");
+                    setNotice(
+                      losesClassTeacher
+                        ? "Updated — this section now has no class teacher."
+                        : existingAssignment
+                          ? "Assignment updated."
+                          : "Teacher assigned.",
+                    );
                   })
                 }
               >
-                Assign
+                {existingAssignment ? "Update" : "Assign"}
               </button>
             </div>
             <table>
@@ -1128,6 +1157,6 @@ export default function AcademicsPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

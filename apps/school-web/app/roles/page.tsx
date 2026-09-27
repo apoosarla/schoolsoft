@@ -270,11 +270,14 @@ export default function RolesPage() {
                         ))}
                       </div>
                     ) : (
-                      r.screenKeys.map((k) => (
-                        <span key={k} className="badge" style={{ marginRight: 4 }}>
-                          {SCREEN_DEFS.find((s) => s.key === k)?.label ?? k}
-                        </span>
-                      ))
+                      // Cells do not wrap by default; a role with a dozen screens ran off the page.
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, whiteSpace: "normal" }}>
+                        {r.screenKeys.map((k) => (
+                          <span key={k} className="badge">
+                            {SCREEN_DEFS.find((s) => s.key === k)?.label ?? k}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </td>
                   <td>
@@ -409,6 +412,6 @@ export default function RolesPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

@@ -14,7 +14,10 @@ import {
 } from "@/lib/api";
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The local calendar date. toISOString() is UTC, which in India is still
+  // yesterday until 05:30 — and a register opened early landed on the wrong day.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function daysAgoIso(n: number): string {
@@ -37,6 +40,7 @@ export default function AttendanceHistoryPage() {
 
   const [fromDate, setFromDate] = useState(daysAgoIso(30));
   const [toDate, setToDate] = useState(daysAgoIso(0));
+  const [leaveFrom, setLeaveFrom] = useState(todayIso());
   const [leaveTo, setLeaveTo] = useState(todayIso());
   const [reason, setReason] = useState("");
   const [applying, setApplying] = useState(false);
@@ -68,6 +72,10 @@ export default function AttendanceHistoryPage() {
   async function onApplyLeave(e: React.FormEvent) {
     e.preventDefault();
     if (!session || !activeId) return;
+    if (!leaveFrom || !leaveTo || leaveTo < leaveFrom) {
+      setError("The last day of leave has to be on or after the first.");
+      return;
+    }
     setApplying(true);
     setError(null);
     setLeaveMessage(null);
@@ -75,7 +83,7 @@ export default function AttendanceHistoryPage() {
       await applyLeave({
         schoolId: session.schoolId,
         subjectId: activeId,
-        fromDate: todayIso(),
+        fromDate: leaveFrom,
         toDate: leaveTo,
         reason: reason.trim() || undefined,
       });
@@ -166,8 +174,26 @@ export default function AttendanceHistoryPage() {
           <form onSubmit={onApplyLeave}>
             <div className="form-row" style={{ flexDirection: "column" }}>
               <div className="form-row">
-                <input value={todayIso()} disabled style={{ flex: 1 }} />
-                <input type="date" value={leaveTo} min={todayIso()} onChange={(e) => setLeaveTo(e.target.value)} style={{ flex: 1 }} />
+                {/* A trip next week is applied for now; leave used to start today, always. */}
+                <input
+                  type="date"
+                  aria-label="First day of leave"
+                  value={leaveFrom}
+                  min={todayIso()}
+                  onChange={(e) => {
+                    setLeaveFrom(e.target.value);
+                    if (leaveTo < e.target.value) setLeaveTo(e.target.value);
+                  }}
+                  style={{ flex: 1 }}
+                />
+                <input
+                  type="date"
+                  aria-label="Last day of leave"
+                  value={leaveTo}
+                  min={leaveFrom || todayIso()}
+                  onChange={(e) => setLeaveTo(e.target.value)}
+                  style={{ flex: 1 }}
+                />
               </div>
               <input placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} disabled={applying} />
               <button type="submit" disabled={applying || !activeId}>
@@ -183,6 +209,6 @@ export default function AttendanceHistoryPage() {
 }
 
 function describeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.code ?? "error"}: ${err.message}`;
+  if (err instanceof ApiError) return err.userMessage;
   return err instanceof Error ? err.message : "Unknown error";
 }

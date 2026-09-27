@@ -1,4 +1,4 @@
-export { ApiError, createApiClient } from "./http";
+export { ApiError, createApiClient, revokeRefreshToken } from "./http";
 export type { ApiClient, ApiClientOptions } from "./http";
 
 export { createAuthApi } from "./auth";

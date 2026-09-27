@@ -81,6 +81,8 @@ export default function LoginPage() {
             <div className="form-row" style={{ flexDirection: "column" }}>
               <input
                 placeholder="6-digit code"
+                autoFocus
+                autoComplete="one-time-code"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 required
@@ -108,7 +110,7 @@ function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 401) return "Invalid or expired code.";
     if (err.status === 404) return "No account found for that identifier in that chain.";
-    return `${err.code ?? "error"}: ${err.message}`;
+    return err.userMessage;
   }
   return err instanceof Error ? err.message : "Unknown error";
 }

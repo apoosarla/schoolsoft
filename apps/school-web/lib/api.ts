@@ -9,7 +9,7 @@
  * OTP code "000000" (OtpStore's dev bypass).
  */
 
-import { ApiError, createApiClient } from "@schoolsoft/api-client";
+import { ApiError, createApiClient, revokeRefreshToken } from "@schoolsoft/api-client";
 
 export { ApiError };
 
@@ -44,6 +44,8 @@ export function setSession(session: Session): void {
 }
 
 export function clearSession(): void {
+  // Spend the refresh token too: clearing this copy left every other copy working.
+  revokeRefreshToken(API_BASE, getSession()?.refreshToken);
   window.localStorage.removeItem(SESSION_KEY);
 }
 
@@ -125,6 +127,12 @@ export async function verifyOtp(identifier: string, chainSlug: string, code: str
     method: "POST",
     body: JSON.stringify({ identifier, chainSlug, code }),
   });
+  // A token for the wrong kind of person is refused here, before it is kept:
+  // the API would 403 every call anyway, and the person would be left in a
+  // shell that is not theirs with no idea why.
+  if (!["staff", "chain_admin"].includes(res.profile.subjectType)) {
+    throw new ApiError(403, "This sign-in is for school staff. Parents and guardians use the Schoolsoft app.", "wrong_app");
+  }
   let session: Session = {
     accessToken: res.accessToken,
     refreshToken: res.refreshToken,
@@ -544,6 +552,8 @@ export type FeeInvoiceDto = {
   total: number;
   paid: number;
   status: string;
+  /** Paid beyond the total and held for the family. */
+  advanceAmount: number;
 };
 
 export function listInvoicesForStudent(studentId: string): Promise<FeeInvoiceDto[]> {
@@ -2535,8 +2545,8 @@ export function feeOutstanding(
 
 export function studentDues(
   studentId: string
-): Promise<{ studentId: string; balance: number; hasDues: boolean }> {
-  return apiFetch<{ studentId: string; balance: number; hasDues: boolean }>(
+): Promise<{ studentId: string; balance: number; hasDues: boolean; credit: number }> {
+  return apiFetch<{ studentId: string; balance: number; hasDues: boolean; credit: number }>(
     `/v1/fees/students/${studentId}/dues`
   );
 }

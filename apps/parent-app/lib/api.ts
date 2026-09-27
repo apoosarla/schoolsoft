@@ -16,10 +16,10 @@ import {
   createLmsApi,
   createPeopleApi,
   createTenancyApi,
-  type LeaveApplicationDto,
-} from "@schoolsoft/api-client";
+  type LeaveApplicationDto, revokeRefreshToken } from "@schoolsoft/api-client";
 
-export { ApiError } from "@schoolsoft/api-client";
+import { ApiError } from "@schoolsoft/api-client";
+export { ApiError };
 export type * from "@schoolsoft/api-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
@@ -52,6 +52,8 @@ export function setSession(session: Session): void {
 }
 
 export function clearSession(): void {
+  // Spend the refresh token too: clearing this copy left every other copy working.
+  revokeRefreshToken(API_BASE, getSession()?.refreshToken);
   window.localStorage.removeItem(SESSION_KEY);
 }
 
@@ -75,6 +77,12 @@ export const startOtp = auth.startOtp;
 
 export async function verifyOtp(identifier: string, chainSlug: string, code: string): Promise<Session> {
   const res = await auth.verifyOtpTokens(identifier, chainSlug, code);
+  // A token for the wrong kind of person is refused here, before it is kept:
+  // the API would 403 every call anyway, and the person would be left in a
+  // shell that is not theirs with no idea why.
+  if (!["guardian", "student"].includes(res.profile.subjectType)) {
+    throw new ApiError(403, "This app is for parents and guardians. School staff sign in on the school’s staff site.", "wrong_app");
+  }
   let session: Session = {
     accessToken: res.accessToken,
     refreshToken: res.refreshToken,
@@ -127,6 +135,7 @@ export const componentsForAssessment = assessment.componentsForAssessment;
 export const marksForComponent = assessment.marksForComponent;
 export const requestReevaluation = assessment.requestReevaluation;
 export const reevaluationsForStudent = assessment.reevaluationsForStudent;
+export const marksForStudent = assessment.marksForStudent;
 
 const lms = createLmsApi(client);
 export const assignmentsForSection = lms.assignmentsForSection;

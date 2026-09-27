@@ -37,6 +37,18 @@ export function CodeStep({ sentTo, submitting, onSubmit, onBack, note }: CodeSte
     boxes.current[0]?.focus();
   }, []);
 
+  // A verify that comes back without leaving this step failed. The six boxes
+  // are then all full, so correcting any one digit re-submitted at once and
+  // locked the boxes under the rest of the typing. Start clean instead.
+  const wasSubmitting = useRef(false);
+  useEffect(() => {
+    if (wasSubmitting.current && !submitting) {
+      setDigits(["", "", "", "", "", ""]);
+      boxes.current[0]?.focus();
+    }
+    wasSubmitting.current = submitting;
+  }, [submitting]);
+
   function place(next: string[]) {
     setDigits(next);
     const code = next.join("");
@@ -44,7 +56,13 @@ export function CodeStep({ sentTo, submitting, onSubmit, onBack, note }: CodeSte
   }
 
   function onChange(i: number, raw: string) {
-    const typed = raw.replace(/\D/g, "");
+    let typed = raw.replace(/\D/g, "");
+    // One keystroke into a box that already holds a digit arrives as two
+    // digits, old and new, in whichever order the caret put them. That is a
+    // replacement, not a paste: keep the digit that is not the old one.
+    if (typed.length === 2 && digits[i]) {
+      typed = typed.startsWith(digits[i]) ? typed.slice(1) : typed.slice(0, 1);
+    }
     if (!typed) {
       const next = [...digits];
       next[i] = "";

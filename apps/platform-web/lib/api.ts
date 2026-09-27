@@ -16,6 +16,7 @@
 import { createApiClient } from "@schoolsoft/api-client";
 
 export { ApiError } from "@schoolsoft/api-client";
+import { revokeRefreshToken } from "@schoolsoft/api-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_SCHOOLSOFT_API_URL ?? "http://localhost:8080";
 const TOKEN_KEY = "schoolsoft_platform_admin_token";
@@ -31,6 +32,8 @@ export function setToken(token: string): void {
 }
 
 export function clearToken(): void {
+  // Spend the refresh token too: clearing this copy left every other copy working.
+  revokeRefreshToken(API_BASE, window.localStorage.getItem(REFRESH_KEY));
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(REFRESH_KEY);
 }

@@ -287,3 +287,20 @@ button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* A whole panel row that opens something. Without its own rule it took the
+   filled accent style of every other button and read as a mis-drawn pill. */
+.panel-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: inherit;
+  border: none;
+  box-shadow: none;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+.panel-btn:hover { background: none; }
+.panel-btn:active { transform: none; }

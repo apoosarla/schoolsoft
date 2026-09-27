@@ -225,7 +225,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className="profile-text">
               <div className="profile-role">{roleLabel}</div>
-              <div className="profile-sub">{session.chainSchema}</div>
+              <div className="profile-sub">{session.chainSchema.replace(/^chain_/, "")}</div>
             </div>
           </div>
           <button type="button" className="signout-btn" onClick={signOut}>
