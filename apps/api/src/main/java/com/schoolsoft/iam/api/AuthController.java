@@ -2,10 +2,12 @@ package com.schoolsoft.iam.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.iam.internal.OtpStore;
+import com.schoolsoft.iam.internal.OtpThrottle;
 import com.schoolsoft.iam.internal.UserLookupService;
 import com.schoolsoft.platform.security.JwtService;
 import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.platform.web.NotFoundException;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
 import java.util.Map;
 import java.util.UUID;
@@ -34,14 +36,20 @@ public class AuthController {
 
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
+    /** Codes asked for and wrong guesses allowed, per account and per address, in the throttle's window. */
+    private static final int STARTS_PER_ACCOUNT = 5, STARTS_PER_ADDRESS = 60;
+    private static final int WRONG_PER_ACCOUNT = 5, WRONG_PER_ADDRESS = 20;
+
     private final OtpStore otpStore;
+    private final OtpThrottle throttle;
     private final UserLookupService lookup;
     private final JwtService jwt;
     private final com.schoolsoft.iam.internal.RefreshTokenLedger refreshTokens;
 
-    public AuthController(OtpStore otpStore, UserLookupService lookup, JwtService jwt,
+    public AuthController(OtpStore otpStore, OtpThrottle throttle, UserLookupService lookup, JwtService jwt,
                           com.schoolsoft.iam.internal.RefreshTokenLedger refreshTokens) {
         this.otpStore = otpStore;
+        this.throttle = throttle;
         this.refreshTokens = refreshTokens;
         this.lookup = lookup;
         this.jwt = jwt;
@@ -51,11 +59,39 @@ public class AuthController {
     public record OtpVerifyRequest(@NotBlank String identifier, String chainSlug, @NotBlank String code) {}
     public record AuthResponse(String accessToken, String refreshToken, Map<String, Object> profile) {}
 
-    private static final String PLATFORM_OTP_NAMESPACE = "platform";
+    private static final String PLATFORM_ACCOUNTS = "*platform";
+
+    /** A request for a code always counts: each one is a message somebody pays for and receives. */
+    private void countStart(String namespace, String identifier, HttpServletRequest http) {
+        String account = "start:" + namespace + ":" + identifier.toLowerCase();
+        String address = "start:ip:" + http.getRemoteAddr();
+        throttle.refuseIfOver(account, STARTS_PER_ACCOUNT);
+        throttle.refuseIfOver(address, STARTS_PER_ADDRESS);
+        throttle.record(account);
+        throttle.record(address);
+    }
+
+    /**
+     * Runs one verification under the limit and counts it only if it fails.
+     * Refused before the code is looked at, so a locked-out caller learns
+     * nothing from the answer — not even whether the guess was right.
+     */
+    private boolean verified(String namespace, String identifier, HttpServletRequest http,
+                             java.util.function.BooleanSupplier check) {
+        String account = "verify:" + namespace + ":" + identifier.toLowerCase();
+        String address = "verify:ip:" + http.getRemoteAddr();
+        throttle.refuseIfOver(account, WRONG_PER_ACCOUNT);
+        throttle.refuseIfOver(address, WRONG_PER_ADDRESS);
+        if (check.getAsBoolean()) return true;
+        throttle.record(account);
+        throttle.record(address);
+        return false;
+    }
 
     @PreAuthorize("permitAll()")
     @PostMapping("/otp/start")
-    public ResponseEntity<Map<String, Object>> start(@RequestBody OtpStartRequest req) {
+    public ResponseEntity<Map<String, Object>> start(@RequestBody OtpStartRequest req, HttpServletRequest http) {
+        countStart(String.valueOf(req.chainSlug()), req.identifier(), http);
         String code = otpStore.issue(req.identifier(), req.chainSlug());
         // In prod this hands off to the notification module; for dev we echo the
         // code into logs to make the flow self-serve.
@@ -65,8 +101,9 @@ public class AuthController {
 
     @PreAuthorize("permitAll()")
     @PostMapping("/otp/verify")
-    public ResponseEntity<AuthResponse> verify(@RequestBody OtpVerifyRequest req) {
-        if (!otpStore.verify(req.identifier(), req.chainSlug(), req.code())) {
+    public ResponseEntity<AuthResponse> verify(@RequestBody OtpVerifyRequest req, HttpServletRequest http) {
+        if (!verified(String.valueOf(req.chainSlug()), req.identifier(), http,
+                () -> otpStore.verify(req.identifier(), req.chainSlug(), req.code()))) {
             return ResponseEntity.status(401).build();
         }
         var resolved = lookup.resolve(req.identifier(), req.chainSlug())
@@ -104,16 +141,20 @@ public class AuthController {
 
     @PreAuthorize("permitAll()")
     @PostMapping("/platform-admin/otp/start")
-    public ResponseEntity<Map<String, Object>> platformStart(@RequestBody PlatformOtpStartRequest req) {
-        String code = otpStore.issue(req.email(), PLATFORM_OTP_NAMESPACE);
+    public ResponseEntity<Map<String, Object>> platformStart(@RequestBody PlatformOtpStartRequest req,
+                                                             HttpServletRequest http) {
+        countStart(PLATFORM_ACCOUNTS, req.email(), http);
+        String code = otpStore.issueForPlatformAdmin(req.email());
         log.info("[dev] Platform-admin OTP for {}: {}", req.email(), code);
         return ResponseEntity.ok(Map.of("status", "sent"));
     }
 
     @PreAuthorize("permitAll()")
     @PostMapping("/platform-admin/otp/verify")
-    public ResponseEntity<AuthResponse> platformVerify(@RequestBody PlatformOtpVerifyRequest req) {
-        if (!otpStore.verify(req.email(), PLATFORM_OTP_NAMESPACE, req.code())) {
+    public ResponseEntity<AuthResponse> platformVerify(@RequestBody PlatformOtpVerifyRequest req,
+                                                       HttpServletRequest http) {
+        if (!verified(PLATFORM_ACCOUNTS, req.email(), http,
+                () -> otpStore.verifyPlatformAdmin(req.email(), req.code()))) {
             return ResponseEntity.status(401).build();
         }
         var resolved = lookup.resolvePlatformAdmin(req.email())

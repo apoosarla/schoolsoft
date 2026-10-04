@@ -35,6 +35,17 @@ schoolsoft:
     secret: ${SCHOOLSOFT_JWT_SECRET:dev-only-change-me-dev-only-change-me-dev-only}
     access-ttl-minutes: 15
     refresh-ttl-days: 30
+  iam:
+    # A code that always verifies, because nothing delivers a real one yet.
+    # Empty = no backdoor; production MUST set SCHOOLSOFT_DEV_OTP_CODE to empty.
+    dev-otp-code: ${SCHOOLSOFT_DEV_OTP_CODE:000000}
+    # Whether that code also opens a platform admin's account. A stack shared
+    # with outsiders sets this false: they are given the code, not the console.
+    dev-otp-covers-platform: ${SCHOOLSOFT_DEV_OTP_PLATFORM:true}
+  cors:
+    # Origin patterns the browser apps are served from, comma-separated.
+    # The defaults are the dev servers and the Capacitor shells.
+    allowed-origins: "${SCHOOLSOFT_CORS_ORIGINS:http://localhost:[*],http://127.0.0.1:[*],https://localhost,capacitor://localhost}"
   tenant:
     header: X-SCHOOLSOFT-Chain
     default-platform-schema: platform

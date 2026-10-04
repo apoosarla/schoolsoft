@@ -80,16 +80,33 @@ shared_apps() {
 
 # ------------------------------------------------------------------- api
 
-# The default JWT secret is in git, so an API on a public URL must not use it.
-# One secret is kept for the life of .run/share so a restart does not sign
-# everybody out.
-ensure_api() {
+# A dev API is open in four ways that do not matter on localhost and do on a
+# public URL, so the shared one is started differently:
+#   - the JWT secret is private. The default is in git. One secret is kept for
+#     the life of .run/share so a restart does not sign everybody out.
+#   - the sign-in code is random, not 000000, and new for each share. It is
+#     what the user hands out along with the URL.
+#   - that code does not open a platform admin. The API serves that door too,
+#     whether or not platform-web is shared.
+#   - CORS names the shared apps' origins and no others.
+# Forwarded headers are honoured (from loopback only, which is where
+# cloudflared connects from) so the per-address rate limits see the visitor
+# and not 127.0.0.1 for everybody.
+ensure_api() { # origins, comma-separated
+  local origins="$1"
   [ -f "$SH/jwt.secret" ] || (umask 077; openssl rand -hex 32 > "$SH/jwt.secret")
+  [ -f "$SH/otp.code" ] || (umask 077; printf '%06d\n' $(( $(od -An -N4 -tu4 /dev/urandom) % 1000000 )) > "$SH/otp.code")
 
   if alive "$RUN/api.pid" && [ "$(read_file "$RUN/api.pid")" != "$(read_file "$SH/api.started")" ]; then
-    echo "api: running with the dev JWT secret — restarting it with a private one"
+    echo "api: running as a dev API — restarting it locked down for sharing"
+    "$LOCAL" stop api
+  elif alive "$RUN/api.pid" && [ "$(read_file "$SH/api.origins")" != "$origins" ]; then
+    echo "api: the set of shared apps changed — restarting it to allow their origins"
     "$LOCAL" stop api
   fi
+  echo "$origins" > "$SH/api.origins"
+  export SCHOOLSOFT_DEV_OTP_CODE="$(cat "$SH/otp.code")" SCHOOLSOFT_DEV_OTP_PLATFORM=false
+  export SCHOOLSOFT_CORS_ORIGINS="$origins" SERVER_FORWARD_HEADERS_STRATEGY=native
   # local.sh's exit status is not the API's — "start api" alone ends on a false
   # test — so the pid file is what says whether it came up.
   SCHOOLSOFT_JWT_SECRET="$(cat "$SH/jwt.secret")" "$LOCAL" start api
@@ -192,12 +209,18 @@ expose() { # target — tunnel it and wait until the public URL answers
 # ------------------------------------------------------------- commands
 
 up() {
-  local apps="$*" failed=0
-  [ -z "$apps" ] && apps=$(shared_apps | xargs)
+  local apps failed=0 origins=""
+  check_apps "$@"
+  apps=$(for t in "$@" $(shared_apps); do echo "$t"; done | sort -u | xargs)
   [ -z "$apps" ] && apps=school
-  check_apps $apps
 
-  ensure_api || exit 1
+  # The apps' tunnels first: their URLs are the origins the API has to allow,
+  # and cloudflared does not mind that nothing is listening yet.
+  for t in $apps; do
+    ensure_tunnel "$t" || exit 1
+    origins="${origins:+$origins,}$(cat "$SH/$t.url")"
+  done
+  ensure_api "$origins" || exit 1
   expose api || exit 1
   for t in $apps; do
     { ensure_app "$t" && expose "$t"; } || failed=1
@@ -209,8 +232,11 @@ up() {
   done
   echo "  api  $(cat "$SH/api.url")"
   echo
-  echo "Sign-in accepts the code 000000 for any account: anyone holding a URL above and"
-  echo "an email address is in. Demo data only. URLs change if a tunnel is restarted."
+  echo "  sign-in code  $(cat "$SH/otp.code")   (chain slug: smoketest)"
+  echo
+  echo "That code opens every school account, so it is the password: send it only to the"
+  echo "people trying the app. It does not open a platform admin. Demo data only."
+  echo "URLs change if a tunnel is restarted; the code changes after down."
   return $failed
 }
 
@@ -230,7 +256,7 @@ status() {
   for t in $(shared_apps); do
     [ "$(read_file "$SH/$t.baked")" = "$(read_file "$SH/api.url")" ] || { echo "$t: built against a different API URL than the live one — run up"; bad=1; }
   done
-  alive "$RUN/api.pid" && [ "$(read_file "$RUN/api.pid")" != "$(read_file "$SH/api.started")" ] && { echo "api: not started by share.sh, so it runs the dev JWT secret — run up"; bad=1; }
+  alive "$RUN/api.pid" && [ "$(read_file "$RUN/api.pid")" != "$(read_file "$SH/api.started")" ] && { echo "api: not started by share.sh, so it is a dev API: 000000 signs anyone in, platform admins included — run up"; bad=1; }
   if [ $bad -eq 0 ]; then echo "all reachable"; else echo "NOT all reachable — 'up' repairs whatever is down"; fi
   return $bad
 }
@@ -252,6 +278,7 @@ down() {
     [ "$(read_file "$RUN/api.pid")" = "$(cat "$SH/api.started")" ] && "$LOCAL" stop api
     rm -f "$SH/api.started"
   fi
+  rm -f "$SH/otp.code" "$SH/api.origins"
 }
 
 cmd="${1:-status}"; shift || true

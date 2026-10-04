@@ -1,5 +1,7 @@
 package com.schoolsoft.platform.security;
 
+import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -26,13 +28,23 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
 
     private final TenantResolverFilter tenantFilter;
+    private final List<String> allowedOrigins;
 
-    public SecurityConfig(TenantResolverFilter tenantFilter) { this.tenantFilter = tenantFilter; }
+    public SecurityConfig(
+        TenantResolverFilter tenantFilter,
+        @Value("${schoolsoft.cors.allowed-origins}") List<String> allowedOrigins
+    ) {
+        this.tenantFilter = tenantFilter;
+        this.allowedOrigins = allowedOrigins;
+    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         var cors = new CorsConfiguration();
-        cors.addAllowedOriginPattern("*");
+        // Named origins, never "*": a pattern that matches everything, with
+        // credentials allowed, lets any page on the internet read a signed-in
+        // browser's responses.
+        allowedOrigins.forEach(cors::addAllowedOriginPattern);
         cors.addAllowedHeader("*");
         cors.addAllowedMethod("*");
         cors.setAllowCredentials(true);

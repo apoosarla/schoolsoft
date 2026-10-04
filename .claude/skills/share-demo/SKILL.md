@@ -24,8 +24,10 @@ Apps: `school` `parent` `teacher` `driver` `public`.
 
 ## The loop
 
-1. `up`. It returns only once each public URL answers 200, and prints them.
-2. Hand the user the app URL (it ends in `/login`) and the sign-in below.
+1. `up`. It returns only once each public URL answers 200, and prints them
+   with the sign-in code for this share.
+2. Hand the user the app URL (it ends in `/login`), the code and the sign-in
+   below.
 3. Asked "is it up?" — `status`. Its columns are the hops in order: `LOCAL`
    is the process on its port, `TUNNEL` is cloudflared, `PUBLIC` is the URL
    fetched from outside.
@@ -39,23 +41,33 @@ Apps: `school` `parent` `teacher` `driver` `public`.
 | `LOCAL -` | the process is gone; `up` starts it |
 | `LOCAL 200`, `PUBLIC 502` or `530` | the tunnel died or lost its origin; `up` |
 | "built against a different API URL" | the API's tunnel was reopened; `up` rebuilds |
-| "runs the dev JWT secret" | somebody restarted the API with `local-env`; `up` |
+| "it is a dev API" | somebody restarted the API with `local-env`; `up` |
 
 Logs: `.run/api.log`, `.run/<app>.log`, and under `.run/share/` each
 `<target>.tunnel.log` and `<app>.build.log`.
 
 ## What to know before running it
 
-- **Say this to the user before the first `up`: sign-in is open.** `OtpStore`
-  accepts `000000` for any account and real codes only reach the API log, so
-  anyone holding the URL and an email address is in. The stack behind the URL
-  is the dev database. Demo data only.
-- **`platform` is refused**, for that reason: platform-web is the operator
-  console for every chain. Do not work around it by tunnelling 3002 by hand.
-- **The API runs with a private JWT secret**, generated once into
-  `.run/share/jwt.secret`. The default is in git, and a token forged with it
-  would be honoured on a public URL. `up` restarts an API that `local-env`
-  started without it, which signs local sessions out once.
+- **The shared API is not the dev API.** `up` starts it with four things
+  changed, and restarts one that `local-env` started without them (which signs
+  local sessions out once):
+  - a private JWT secret, kept in `.run/share/jwt.secret`. The default is in
+    git, and a token forged with it would be honoured on a public URL.
+  - a random six-digit sign-in code in place of `000000`, kept in
+    `.run/share/otp.code` and new after every `down`. Nothing delivers real
+    codes yet, so this one is the password to every school account in the dev
+    database: it goes to the people trying the app and nowhere public.
+  - that code does not open a platform admin. A platform admin signs in with
+    the real code from `.run/api.log`.
+  - CORS allows the shared apps' origins and no others, so adding an app
+    later restarts the API.
+- **`platform` is refused.** platform-web is the operator console for every
+  chain. Do not work around it by tunnelling 3002 by hand.
+- **Say this to the user before the first `up`: whoever holds the code is in**,
+  as any account they can name, against the dev database. Demo data only.
+  Five wrong codes lock an account for fifteen minutes and twenty lock an
+  address, so the code cannot be guessed in useful time — but it can be
+  forwarded.
 - **Each app is a production build, and it takes the app's port.** The API's
   public URL is inlined at build time, so `up` stops a dev server this stack
   started, runs `next build`, and serves with `next start`. A server on that
@@ -72,7 +84,8 @@ Logs: `.run/api.log`, `.run/<app>.log`, and under `.run/share/` each
 
 ## Signing in
 
-Chain slug `smoketest`, code `000000`. `priya.menon@oakridge-hyd.test` is the
+Chain slug `smoketest`, the code `up` printed (also `cat .run/share/otp.code`)
+— not `000000`, which the shared API refuses. `priya.menon@oakridge-hyd.test` is the
 principal and sees every screen; the other seeded accounts are in the
 `dev-browser-login` memory. The dev database is thin — one school — so a
 screen may be empty until somebody makes a row.
@@ -80,5 +93,6 @@ screen may be empty until somebody makes a row.
 ## Reporting back
 
 Give the app URL with `/login`, the chain slug, an account and the code, and
-the one-line warning that sign-in is open. After `status`, name the hop that
+the one-line warning that the code is the only thing between the URL and the
+data. After `status`, name the hop that
 is down rather than pasting the table.

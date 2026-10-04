@@ -2,24 +2,74 @@ package com.schoolsoft.certification;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.schoolsoft.certification.support.AbstractCertificationTest;
+import com.schoolsoft.iam.internal.OtpStore;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 /** CERT-SEC — roles, access & security. */
 class SecurityCertTest extends AbstractCertificationTest {
 
+    @Autowired private OtpStore otps;
+
+    private String guardianPhone(int nth) {
+        return queryOne("SELECT phone FROM user_account WHERE subject_type = 'guardian' AND is_active "
+            + "AND school_id = ? ORDER BY phone LIMIT 1 OFFSET " + nth, String.class, cbse().id());
+    }
+
+    private ResponseEntity<JsonNode> verifyOtp(String phone, String code) {
+        return post("/v1/auth/otp/verify",
+            Map.of("identifier", phone, "chainSlug", seed.chainSlug(), "code", code), null);
+    }
+
     @Test @Tag("P1")
-    @Disabled("A used OTP is consumed and a wrong code is refused, but there is no rate limiting on "
-        + "/v1/auth/otp/verify and OtpStore accepts the literal code 000000 unconditionally — the dev "
-        + "bypass is not gated on a profile or property despite its own doc comment. New gap found in "
-        + "Phase 0 — security-relevant.")
     void cert_SEC_01_otpLoginRejectsExpiredReusedAndBruteForcedCodes() {
+        String phone = guardianPhone(0);
+
+        // The code that was issued signs the guardian in, as a guardian.
+        String code = otps.issue(phone, seed.chainSlug());
+        var signedIn = verifyOtp(phone, code);
+        assertThat(signedIn.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(signedIn.getBody().get("profile").get("subjectType").asText()).isEqualTo("guardian");
+
+        // Once. A copy of a used code is worth nothing.
+        assertThat(verifyOtp(phone, code).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        // And only for five minutes.
+        String stale = otps.issue(phone, seed.chainSlug());
+        try {
+            clock.pin(Instant.now().plus(Duration.ofMinutes(6)));
+            assertThat(verifyOtp(phone, stale).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        } finally {
+            clock.release();
+        }
+
+        // Guessing locks the account: after five wrong codes the right one is
+        // refused too, with an answer that does not say whether it was right.
+        String target = guardianPhone(1);
+        String real = otps.issue(target, seed.chainSlug());
+        String wrong = real.equals("135790") ? "246801" : "135790";
+        for (int i = 0; i < 5; i++) {
+            assertThat(verifyOtp(target, wrong).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+        assertThat(verifyOtp(target, wrong).getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(verifyOtp(target, otps.issue(target, seed.chainSlug())).getStatusCode())
+            .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+
+        // Another family is not locked out by it.
+        String bystander = guardianPhone(2);
+        assertThat(verifyOtp(bystander, otps.issue(bystander, seed.chainSlug())).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
     }
 
     @Test @Tag("P1")

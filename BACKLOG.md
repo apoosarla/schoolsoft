@@ -1518,10 +1518,14 @@ several are security-relevant.
   succeeds for any authenticated staff account regardless of role grants
   (SEC-03).
 
-- **GAP-33 — OTP has no rate limit and a permanent dev bypass.** `OtpStore`
-  accepts the literal code `000000` unconditionally — its own doc comment says
-  the bypass is gated on a property, and it is not — and nothing throttles
-  repeated verify attempts (SEC-01).
+- **GAP-33 — OTP has no rate limit and a permanent dev bypass.** *Closed.* The
+  bypass is `schoolsoft.iam.dev-otp-code` — blank means none, and
+  `dev-otp-covers-platform` says whether it reaches a platform admin.
+  `OtpThrottle` locks an account after five wrong codes and an address after
+  twenty, in fifteen minutes (SEC-01). What remains is delivery: a real code
+  still only reaches the API log, so the dev code is how anyone signs in, and
+  `application.yml` still defaults it to `000000` — production must set
+  `SCHOOLSOFT_DEV_OTP_CODE` empty.
 
 - **GAP-34 — Platform-admin actions are unaudited.** `audit_log` lives in the
   chain schema and `ChainAdminController` writes nothing, so chain provisioning
