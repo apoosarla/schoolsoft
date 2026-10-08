@@ -969,17 +969,22 @@ are different claims:
   bounced cheque — a `reversal`, which marks the payment `failed` — leaves it
   where it was, owing again. Conversion writes the student onto the invoice.
   The office collects from the fee stage's own column on the Admissions
-  screen. Not built, each a decision first:
-  - **What happens to a paid fee when the application is rejected or lapses.**
-    The exits are not gated and nothing refunds; the invoice stays on the
-    application, paid.
-  - **A cheque that bounces after the application has moved on.** The gate is
-    at the move. A reversal later restores the dues on the invoice and tells
-    nobody in admissions.
-  - **An applicant's unpaid invoice is in no dues report.** Those reports join
-    `student`. It surfaces on the Admissions screen only.
-  - **The fee is not on the public tracking page**, so a family learns the
-    amount from the office.
+  screen. Closed the same day, with these rules:
+  - **Rejected or lapsed, nothing paid:** the bill is cancelled, so a family
+    the school turned away is in nobody's dues.
+  - **Rejected or lapsed, money paid:** kept until somebody decides. The
+    closed stages show the amount and a Refund action that asks its reason and
+    answers to `fee.adjustment.manage` — rejecting is admissions' call, paying
+    money back is accounts'. One refund per payment.
+  - **A cheque that bounces after the move:** the gate is no longer only at
+    the fee stage. No forward move, and no enrolment, while the fee is owed;
+    the board carries a banner naming each such application and its stage, and
+    the fee column follows it there so it can be collected in place.
+  - **Dues report:** applicants who owe are a section of their own under the
+    students, outside the student totals.
+  Still not built: the fee on the public tracking page; and a lapsed
+  application sent back to the waitlist after its unpaid bill was cancelled
+  is not billed again.
 
 - ~~**Generation billed a mid-year joiner the whole cycle (ADM-16).**~~ Built
   2026-10-08. A run may name the months its cycle covers
@@ -993,17 +998,31 @@ are different claims:
   monthly rate on its own assignment dates; and a **leaver** — a withdrawal
   mid-cycle is still a credit note by hand (FEE-11).
 
-- **A family the chain already knows cannot be admitted to a second school.**
-  Found 2026-10-08 writing ADM-10. Conversion looks for an existing guardian by
-  `school_id` and phone, but `user_account` is unique on phone and on email
-  across the whole chain. So a parent with a child at School A applying to
-  School B, or a member of staff admitting their own child on the number or
-  address they sign in with, finds no guardian, tries to create a second login,
-  and `/enrol` answers 409 with the constraint's name — every time, with
-  nothing the office can do but change the phone on the application. The
-  conversion rolls back cleanly, which is what ADM-10 leans on; the refusal
-  itself is the gap. Needs a decision on what one login spanning two schools,
-  or two subject types, means before it needs code.
+- ~~**A family the chain already knows cannot be admitted to a second school.**~~
+  Fixed 2026-10-08, the admission half. Conversion looked for an existing
+  guardian by school and phone while `user_account` is unique on phone and
+  email across the chain, so a parent with a child at a sister school, or a
+  member of staff admitting their own child, got a 409 naming a constraint,
+  every time. Now the child is admitted and the guardian recorded regardless;
+  the login takes whichever of phone and email is free, and when neither is,
+  the enrol answer says so (`guardianHasLogin`) and the Enrolled stage carries
+  a "Parent login" column where the office types another address or number
+  (`PUT /v1/admissions/applications/{id}/guardian-login`). The insert is
+  `ON CONFLICT DO NOTHING` rather than look-then-insert because the account in
+  the way may be another school's, which RLS hides from the session — a SELECT
+  says the number is free. `AdmissionFeeAndFamilyTest` reproduces the
+  cross-school case. **Still open, and a design question:** one person signing
+  in once and seeing two schools, or being staff and a parent on one
+  identifier. Today they need a second address. `AccountProvisioningService
+  .identityTaken` has the same blind spot for staff — it SELECTs.
+
+- ~~**An application could be marked enrolled with no student behind it.**~~
+  Fixed 2026-10-08, found driving the screen above. `accepted → enrolled` was
+  offered as a plain move beside the Enrol action, and taking it flipped the
+  state without creating a student, enrolment or guardian. `transition`
+  refuses it and the moves reads no longer offer it. The dev seed has ~310
+  such rows; the Enrolled stage now says so on each rather than implying a
+  guardian is missing.
 
 - ~~**A credit note or waiver is not bounded, and its ledger legs can disagree
   with the invoice.**~~ Found and fixed 2026-10-08. `FeeAdjustmentService`

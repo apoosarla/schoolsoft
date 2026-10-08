@@ -1,11 +1,15 @@
 package com.schoolsoft.fees.internal;
 
+import com.schoolsoft.fees.api.AdmissionFeeOwedDto;
 import com.schoolsoft.fees.api.AdmissionFeeStatusDto;
+import com.schoolsoft.platform.web.ConflictException;
+import com.schoolsoft.platform.web.NotFoundException;
 import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.schoolcalendar.api.WorkingDayService;
 import com.schoolsoft.tenancy.api.NumberSeries;
 import java.sql.Date;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,10 +30,12 @@ public class AdmissionFeeInvoices {
     private final NumberSeries numbers;
     private final WorkingDayService workingDays;
     private final SchoolClock clock;
+    private final FeeAdjustmentService adjustments;
 
     public AdmissionFeeInvoices(JdbcTemplate jdbc, NumberSeries numbers, WorkingDayService workingDays,
-                                SchoolClock clock) {
+                                SchoolClock clock, FeeAdjustmentService adjustments) {
         this.jdbc = jdbc;
+        this.adjustments = adjustments;
         this.numbers = numbers;
         this.workingDays = workingDays;
         this.clock = clock;
@@ -37,7 +43,7 @@ public class AdmissionFeeInvoices {
 
     public AdmissionFeeStatusDto raise(UUID schoolId, UUID applicationId, String applicationNo,
                                        String applicantName, double amount) {
-        var existing = statusFor(applicationId);
+        var existing = live(applicationId);
         if (existing.isPresent()) return existing.get();
         if (amount <= 0) throw new IllegalArgumentException("An admission fee needs a positive amount");
 
@@ -75,16 +81,84 @@ public class AdmissionFeeInvoices {
             "INSERT INTO fee_invoice_line (id, fee_invoice_id, fee_head_id, description, amount, discount, " +
             "  gst, source) VALUES (?, ?, ?, ?, ?, 0, ?, 'manual')",
             UUID.randomUUID(), invoiceId, head.id(), "Admission fee — " + applicantName, line.amount(), line.gst());
-        return statusFor(applicationId).orElseThrow();
+        return live(applicationId).orElseThrow();
     }
 
+    private static final String STATUS_SQL =
+        "SELECT fi.id, fi.invoice_no, fi.total, fi.paid, fi.status, " +
+        "  (SELECT COALESCE(sum(a.amount), 0) FROM fee_adjustment a " +
+        "    WHERE a.fee_invoice_id = fi.id AND a.kind = 'refund') AS refunded " +
+        "FROM fee_invoice fi WHERE fi.admission_application_id = ? ";
+
+    private static final org.springframework.jdbc.core.RowMapper<AdmissionFeeStatusDto> STATUS_MAPPER =
+        (rs, i) -> new AdmissionFeeStatusDto(UUID.fromString(rs.getString("id")), rs.getString("invoice_no"),
+            rs.getDouble("total"), rs.getDouble("paid"), rs.getString("status"), rs.getDouble("refunded"));
+
+    /** The bill in force: at most one, by {@code fee_invoice_one_per_application}. */
+    private Optional<AdmissionFeeStatusDto> live(UUID applicationId) {
+        return jdbc.query(STATUS_SQL + "AND fi.status <> 'cancelled'", STATUS_MAPPER, applicationId)
+            .stream().findFirst();
+    }
+
+    /**
+     * The bill in force, or failing that the one that was cancelled when the
+     * application closed — so a closed application still says what became of
+     * its fee instead of reading as never billed.
+     */
     public Optional<AdmissionFeeStatusDto> statusFor(UUID applicationId) {
+        var inForce = live(applicationId);
+        if (inForce.isPresent()) return inForce;
+        return jdbc.query(STATUS_SQL + "ORDER BY fi.created_at DESC LIMIT 1", STATUS_MAPPER, applicationId)
+            .stream().findFirst();
+    }
+
+    public List<AdmissionFeeOwedDto> owed(UUID schoolId) {
+        // student_id IS NULL: once the seat is confirmed the bill is the
+        // child's, and the student dues report is where it is chased.
         return jdbc.query(
-            "SELECT id, invoice_no, total, paid, status FROM fee_invoice " +
-            "WHERE admission_application_id = ? AND status <> 'cancelled'",
-            (rs, i) -> new AdmissionFeeStatusDto(UUID.fromString(rs.getString("id")), rs.getString("invoice_no"),
-                rs.getDouble("total"), rs.getDouble("paid"), rs.getString("status")),
-            applicationId).stream().findFirst();
+            "SELECT admission_application_id, id, invoice_no, total, paid FROM fee_invoice " +
+            "WHERE school_id = ? AND admission_application_id IS NOT NULL AND student_id IS NULL " +
+            "  AND status IN ('open','partial','overdue') AND total > paid ORDER BY due_on",
+            (rs, i) -> new AdmissionFeeOwedDto(UUID.fromString(rs.getString("admission_application_id")),
+                UUID.fromString(rs.getString("id")), rs.getString("invoice_no"),
+                rs.getDouble("total"), rs.getDouble("paid")),
+            schoolId);
+    }
+
+    /**
+     * One conditional UPDATE naming the state it moves out of: only a bill with
+     * nothing paid and nothing held is cancelled, so a payment landing at the
+     * same moment keeps its invoice.
+     */
+    public void cancelIfUnpaid(UUID applicationId) {
+        jdbc.update(
+            "UPDATE fee_invoice SET status = 'cancelled', updated_at = now() " +
+            "WHERE admission_application_id = ? AND student_id IS NULL " +
+            "  AND status IN ('open','overdue') AND paid = 0 AND advance_amount = 0", applicationId);
+    }
+
+    public AdmissionFeeStatusDto refund(UUID schoolId, UUID applicationId, String reason) {
+        AdmissionFeeStatusDto fee = live(applicationId).orElseThrow(
+            () -> new NotFoundException("This application has no admission fee to refund."));
+        record Left(UUID paymentId, double amount) {}
+        List<Left> payments = jdbc.query(
+            "SELECT p.id, p.amount - COALESCE((SELECT sum(a.amount) FROM fee_adjustment a " +
+            "    WHERE a.payment_id = p.id AND a.kind IN ('reversal','refund')), 0) AS left_over " +
+            "FROM payment p WHERE p.fee_invoice_id = ? AND p.status = 'captured' ORDER BY p.created_at",
+            (rs, i) -> new Left(UUID.fromString(rs.getString("id")), rs.getDouble("left_over")),
+            fee.invoiceId());
+        payments = payments.stream().filter(p -> p.amount() > 0.005).toList();
+        if (payments.isEmpty()) {
+            // Not an error to ask twice — but say so, rather than report a
+            // refund that moved no money.
+            if ("refunded".equals(fee.status())) return fee;
+            throw new ConflictException("Nothing has been paid on " + fee.invoiceNo() + ", so there is nothing to refund.");
+        }
+        for (Left payment : payments) {
+            adjustments.adjust(schoolId, fee.invoiceId(), "refund", payment.amount(), reason,
+                payment.paymentId(), null, null);
+        }
+        return live(applicationId).orElseThrow();
     }
 
     public void attachToStudent(UUID applicationId, UUID studentId) {

@@ -1812,6 +1812,43 @@ export default function FeesPage() {
                     )}
                   </tbody>
                 </table>
+
+                {outstanding.applicants.length > 0 && (
+                  <>
+                    <h3>Applicants — {inr(outstanding.applicantsOutstanding)}</h3>
+                    <p className="hint">
+                      Admission fees owed by families who have applied and are not students yet. Not in the
+                      totals above, which are about children on the register. Collected from the Admissions
+                      screen, at the stage each application stands in.
+                    </p>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Application no.</th>
+                          <th>Applicant</th>
+                          <th>Applying to</th>
+                          <th>Stage</th>
+                          <th>Invoice</th>
+                          <th>Due</th>
+                          <th>Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {outstanding.applicants.map((a) => (
+                          <tr key={a.applicationId}>
+                            <td>{a.applicationNo}</td>
+                            <td>{a.name}</td>
+                            <td>{a.gradeCode ?? "—"}</td>
+                            <td>{a.state.replace(/_/g, " ")}</td>
+                            <td>{a.invoiceNo}</td>
+                            <td>{a.dueOn}</td>
+                            <td>{inr(a.balance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
               </>
             )}
           </div>

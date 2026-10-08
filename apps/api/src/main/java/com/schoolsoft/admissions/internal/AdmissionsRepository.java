@@ -7,6 +7,7 @@ import com.schoolsoft.admissions.api.AdmissionFeeDto;
 import com.schoolsoft.admissions.api.AdmissionFunnelSummaryDto;
 import com.schoolsoft.admissions.api.AdmissionPolicyDto;
 import com.schoolsoft.admissions.api.AdmissionSearchResultDto;
+import com.schoolsoft.admissions.api.GuardianLoginDto;
 import com.schoolsoft.enrolment.api.RollNumbers;
 import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.NotFoundException;
@@ -225,7 +226,7 @@ public class AdmissionsRepository {
         STATES.forEach(state -> byState.put(state, new java.util.ArrayList<>()));
         jdbc.query(
             "SELECT from_state, to_state FROM admission_transition "
-            + "WHERE requires_entrance_test IS NULL OR requires_entrance_test = ? "
+            + "WHERE (requires_entrance_test IS NULL OR requires_entrance_test = ?) AND to_state <> 'enrolled' "
             + "ORDER BY from_state, note, to_state",
             rs -> {
                 var moves = byState.get(rs.getString("from_state"));
@@ -419,6 +420,10 @@ public class AdmissionsRepository {
         return jdbc.query(
             "SELECT to_state FROM admission_transition "
             + "WHERE from_state = ? AND (requires_entrance_test IS NULL OR requires_entrance_test = ?) "
+            // Not offered as a move: a seat is confirmed by enrolling into a
+            // section, which creates the child. The row stays in the table
+            // because it is where that step's permission is written down.
+            + "  AND to_state <> 'enrolled' "
             + "ORDER BY note, to_state",
             (rs, i) -> rs.getString("to_state"), fromState, schoolTests);
     }
@@ -604,10 +609,22 @@ public class AdmissionsRepository {
                 "INSERT INTO guardian (id, school_id, first_name, last_name, phone, email) " +
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 guardianId, schoolId, first, last, guardianPhone, guardianEmail);
-            jdbc.update(
-                "INSERT INTO user_account (id, school_id, subject_type, subject_id, phone, email) " +
-                "VALUES (?, ?, 'guardian', ?, ?, ?)",
-                UUID.randomUUID(), schoolId, guardianId, guardianPhone, guardianEmail);
+        }
+        if (!hasLogin(guardianId)) {
+            // The guardian is the family's record at this school; the login is
+            // a separate thing and may not be available. A number or address
+            // signs one account in across the whole chain, so a parent with a
+            // child at a sister school, or one who works here, has theirs
+            // taken. That used to fail the whole conversion with a constraint
+            // name. Now the child is admitted, the login takes whichever of the
+            // two is free, and if neither is the office is told to ask the
+            // family for another (see guardianLoginFor).
+            String email = guardianEmail == null || guardianEmail.isBlank() ? null : guardianEmail.trim();
+            if (!createLogin(schoolId, guardianId, guardianPhone, email) && email != null) {
+                if (!createLogin(schoolId, guardianId, guardianPhone, null)) {
+                    createLogin(schoolId, guardianId, null, email);
+                }
+            }
         }
 
         boolean firstChild = jdbc.queryForObject(
@@ -616,5 +633,51 @@ public class AdmissionsRepository {
             "INSERT INTO guardian_student (guardian_id, student_id, relation, is_primary) " +
             "VALUES (?, ?, 'guardian', ?) ON CONFLICT DO NOTHING",
             guardianId, studentId, firstChild);
+    }
+
+    private boolean hasLogin(UUID guardianId) {
+        Integer n = jdbc.queryForObject(
+            "SELECT count(*) FROM user_account WHERE subject_type = 'guardian' AND subject_id = ?",
+            Integer.class, guardianId);
+        return n != null && n > 0;
+    }
+
+    /**
+     * Tries to take {@code phone} / {@code email} as the guardian's sign-in.
+     * False when either is already somebody's.
+     *
+     * <p>Written as an insert that does nothing on conflict rather than a
+     * look-then-insert, and not only for the race: the account in the way may
+     * belong to another school in the chain, which row-level security hides
+     * from this session. A SELECT would say the number is free; only the
+     * unique index knows it is not.</p>
+     */
+    private boolean createLogin(UUID schoolId, UUID guardianId, String phone, String email) {
+        if (phone == null && email == null) return false;
+        return jdbc.update(
+            "INSERT INTO user_account (id, school_id, subject_type, subject_id, phone, email) " +
+            "VALUES (?, ?, 'guardian', ?, ?, ?) ON CONFLICT DO NOTHING",
+            UUID.randomUUID(), schoolId, guardianId, phone, email) == 1;
+    }
+
+    /** The primary guardian of the child an application became, and whether they can sign in. */
+    public Optional<GuardianLoginDto> guardianLoginFor(UUID applicationId) {
+        return jdbc.query(
+            "SELECT g.id, trim(concat_ws(' ', g.first_name, g.last_name)) AS name, g.phone, g.email, " +
+            "       ua.id AS account_id, ua.phone AS sign_in_phone, ua.email AS sign_in_email " +
+            "FROM admission_application a " +
+            "JOIN guardian_student gs ON gs.student_id = a.converted_student_id " +
+            "JOIN guardian g ON g.id = gs.guardian_id " +
+            "LEFT JOIN user_account ua ON ua.subject_type = 'guardian' AND ua.subject_id = g.id " +
+            "WHERE a.id = ? ORDER BY gs.is_primary DESC LIMIT 1",
+            (rs, i) -> new GuardianLoginDto(UUID.fromString(rs.getString("id")), rs.getString("name"),
+                rs.getString("account_id") != null, rs.getString("sign_in_phone"), rs.getString("sign_in_email"),
+                rs.getString("phone"), rs.getString("email")),
+            applicationId).stream().findFirst();
+    }
+
+    /** Gives a guardian who has no login one, on an address or number the office has now been given. */
+    public boolean createGuardianLogin(UUID schoolId, UUID guardianId, String phone, String email) {
+        return createLogin(schoolId, guardianId, phone, email);
     }
 }

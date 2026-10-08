@@ -3,6 +3,8 @@ package com.schoolsoft.admissions.internal;
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.admissions.api.AdmissionFeeDto;
+import com.schoolsoft.admissions.api.AdmissionFeeOwingDto;
+import com.schoolsoft.admissions.api.GuardianLoginDto;
 import com.schoolsoft.admissions.api.AdmissionPolicyDto;
 import com.schoolsoft.admissions.api.PublicAdmissions;
 import com.schoolsoft.fees.api.AdmissionFeeStatusDto;
@@ -17,6 +19,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +53,17 @@ public class AdmissionsService implements PublicAdmissions {
         "enrolled", "admission_enrolled",
         "lapsed", "admission_lapsed"
     );
+
+    /**
+     * Where an application may go while its admission fee is owed: back to be
+     * corrected, or out. Everything else is progress, and progress waits for
+     * the fee — at the fee stage, and after it too, because a cheque can come
+     * back once the file has moved on.
+     */
+    private static final Set<String> OPEN_WHILE_FEE_IS_OWED = Set.of(
+        "fee_pending", "document_pending", "application_started", "rejected", "lapsed");
+
+    private static final Set<String> CLOSED = Set.of("rejected", "lapsed");
 
     private final AdmissionsRepository repo;
     private final SchoolClock clock;
@@ -155,13 +169,15 @@ public class AdmissionsService implements PublicAdmissions {
      *
      * <p>{@code fee_pending} is the one stage with something to settle
      * (ADM-13). Arriving there raises the admission fee the school charges for
-     * the applicant's grade, if it charges one; leaving it for {@code review}
-     * is refused until that invoice is paid in full. Nothing advances the
-     * application when the money lands — the move stays somebody's deliberate
-     * act — so a cheque that bounces before the move leaves the application
-     * exactly where it was, owing again. The exits and the step back to
-     * {@code document_pending} are not gated: a family that withdraws does not
-     * have to pay first.</p>
+     * the applicant's grade, if it charges one, and no move forward is allowed
+     * while that invoice is owed. Nothing advances the application when the
+     * money lands — the move stays somebody's deliberate act — so a cheque
+     * that bounces before the move leaves the application exactly where it
+     * was, owing again; one that bounces after it stops the next step, which
+     * is how admissions finds out. The exits and the steps back are not gated:
+     * a family that withdraws does not have to pay first. Closing an
+     * application cancels a bill nothing was paid on, and leaves a paid one
+     * for the school to refund or keep.</p>
      */
     @Transactional
     public AdmissionApplicationDto transition(UUID id, String toState, UUID actorUserId,
@@ -180,6 +196,16 @@ public class AdmissionsService implements PublicAdmissions {
                 + move.requiresPerm() + ".");
         }
 
+        // `accepted -> enrolled` is in the machine, and is not made here. It is
+        // the one move that creates something — a student, an enrolment, a
+        // guardian — and it needs a section to do it. Taken as a plain move it
+        // left an application marked enrolled with no child behind it.
+        if ("enrolled".equals(toState)) {
+            throw new ConflictException(
+                "A seat is confirmed by enrolling the application into a section, which creates the student. "
+                + "Use Enrol on the accepted application rather than moving it.");
+        }
+
         // An offer that carries no expiry is one nothing can ever lapse, and
         // the family is shown no deadline. The date is the school's offer
         // window from today, unless the caller names one — which is how an
@@ -190,14 +216,7 @@ public class AdmissionsService implements PublicAdmissions {
                 : clock.today(current.schoolId()).plusDays(policy.offerValidityDays());
         }
 
-        if ("fee_pending".equals(current.state()) && "review".equals(toState)) {
-            admissionFees.statusFor(id).filter(fee -> !fee.settled()).ifPresent(fee -> {
-                throw new ConflictException(
-                    "The admission fee on " + fee.invoiceNo() + " is not paid in full — "
-                    + String.format("%.2f of %.2f", fee.outstanding(), fee.total())
-                    + " is outstanding. Record the payment, then move the application on.");
-            });
-        }
+        if (!OPEN_WHILE_FEE_IS_OWED.contains(toState)) refuseWhileFeeIsOwed(id);
 
         if (!repo.transitionFrom(id, current.state(), toState, actorUserId, expiry)) {
             var now = repo.find(id).orElseThrow(() -> new NotFoundException("Application not found: " + id));
@@ -209,6 +228,8 @@ public class AdmissionsService implements PublicAdmissions {
                 + "it is no longer in '" + current.state() + "'.");
         }
         AdmissionApplicationDto moved = repo.find(id).orElseThrow();
+
+        if (CLOSED.contains(toState)) admissionFees.applicationClosed(id);
 
         if ("fee_pending".equals(toState)) {
             repo.admissionFee(moved.schoolId(), moved.academicYearId(), moved.gradeId()).ifPresent(fee ->
@@ -288,8 +309,19 @@ public class AdmissionsService implements PublicAdmissions {
      * own state, and a refusal partway — a full section, an application that
      * left {@code accepted} — must leave none of them behind (ADM-10).</p>
      */
+    private void refuseWhileFeeIsOwed(UUID applicationId) {
+        admissionFees.statusFor(applicationId).filter(AdmissionFeeStatusDto::owing).ifPresent(fee -> {
+            throw new ConflictException(
+                "The admission fee on " + fee.invoiceNo() + " is not paid in full — "
+                + String.format("%.2f of %.2f", fee.outstanding(), fee.total())
+                + " is outstanding. Record the payment, then move the application on.");
+        });
+    }
+
     @Transactional
     public UUID enrol(UUID applicationId, UUID sectionId, String rollNo, String overCapacityReason) {
+        // A seat is not confirmed on a fee that came back unpaid.
+        refuseWhileFeeIsOwed(applicationId);
         UUID studentId = repo.convertToStudent(applicationId, sectionId, rollNo, overCapacityReason);
         // The fee the family paid as applicants is the child's from here on, so
         // it shows on their account and in their guardian's app.
@@ -312,6 +344,79 @@ public class AdmissionsService implements PublicAdmissions {
         if (amount < 0) throw new IllegalArgumentException("An admission fee cannot be negative.");
         repo.saveAdmissionFee(schoolId, academicYearId, gradeId, amount);
         return repo.admissionFees(schoolId, academicYearId);
+    }
+
+    /**
+     * Applications that have left the fee stage and owe the fee anyway. At the
+     * fee stage owing is the ordinary state of things and the stage's own
+     * column shows it; anywhere later it means money that was counted and then
+     * came back.
+     */
+    public List<AdmissionFeeOwingDto> admissionFeesOwing(UUID schoolId) {
+        return admissionFees.owed(schoolId).stream()
+            .flatMap(owed -> repo.find(owed.applicationId()).stream()
+                .filter(app -> !"fee_pending".equals(app.state()) && !CLOSED.contains(app.state()))
+                .map(app -> new AdmissionFeeOwingDto(app.id(), app.applicationNo(),
+                    displayName(app.applicantFirstName(), app.applicantLastName()), app.state(),
+                    owed.invoiceId(), owed.invoiceNo(), owed.outstanding())))
+            .toList();
+    }
+
+    /**
+     * Pays the admission fee back on an application the school has closed.
+     * Deliberately not automatic: some schools keep a processing fee, and a
+     * rejection must not move money on its own. An open application's fee is
+     * not refunded from here — while the family is still in the funnel the fee
+     * is still owed.
+     */
+    @Transactional
+    public AdmissionFeeStatusDto refundAdmissionFee(UUID applicationId, String reason) {
+        var application = repo.find(applicationId).orElseThrow(
+            () -> new NotFoundException("Application not found: " + applicationId));
+        if (!CLOSED.contains(application.state())) {
+            throw new ConflictException(
+                "This application is still '" + application.state() + "'. An admission fee is refunded once the "
+                + "application is rejected or has lapsed.");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("A refund needs a reason — it is somebody's decision.");
+        }
+        return admissionFees.refund(application.schoolId(), applicationId, reason.trim());
+    }
+
+    // ------------------------------------------------------- the family's login
+
+    public Optional<GuardianLoginDto> guardianLoginFor(UUID applicationId) {
+        repo.find(applicationId).orElseThrow(
+            () -> new NotFoundException("Application not found: " + applicationId));
+        return repo.guardianLoginFor(applicationId);
+    }
+
+    /**
+     * Gives the family of an admitted child a way in, on an address or number
+     * the office has now been given, after the one on the application turned
+     * out to be somebody's already.
+     */
+    @Transactional
+    public GuardianLoginDto setGuardianLogin(UUID applicationId, String identifier) {
+        var application = repo.find(applicationId).orElseThrow(
+            () -> new NotFoundException("Application not found: " + applicationId));
+        GuardianLoginDto guardian = repo.guardianLoginFor(applicationId).orElseThrow(() -> new ConflictException(
+            "This application has not been enrolled, so there is no guardian to give a login to."));
+        if (guardian.hasLogin()) {
+            throw new ConflictException(guardian.guardianName() + " already has a login.");
+        }
+        String value = identifier == null ? "" : identifier.trim();
+        boolean email = value.contains("@");
+        if (email ? !EMAIL.matcher(value).matches() : value.replaceAll("[\\s()+-]", "").length() < 7) {
+            throw new IllegalArgumentException("Enter an email address or a phone number the family can sign in with.");
+        }
+        if (!repo.createGuardianLogin(application.schoolId(), guardian.guardianId(),
+                email ? null : value, email ? value : null)) {
+            throw new ConflictException(
+                "That " + (email ? "address" : "number") + " already signs somebody in. Ask the family for another.");
+        }
+        return repo.guardianLoginFor(applicationId).orElseThrow();
     }
 
     public Optional<AdmissionFeeStatusDto> admissionFeeFor(UUID applicationId) {

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   AcademicYearDto,
   AdmissionApplicationDto,
+  AdmissionFeeOwingDto,
   AdmissionFeeStatusDto,
   AdmissionFunnelSummaryDto,
   AdmissionPolicyDto,
@@ -16,21 +17,27 @@ import {
   enrolAdmissionApplication,
   getAdmissionFeeStatus,
   getAdmissionPolicy,
+  getGuardianLogin,
+  GuardianLoginDto,
   getAdmissionSummary,
   getSession,
   GradeDto,
   hasScreen,
   listAcademicYears,
   listAdmissionApplications,
+  listAdmissionFeesOwing,
   listGrades,
   listSections,
   recordPayment,
+  refundAdmissionFee,
   searchAdmissionApplications,
+  setGuardianLogin,
   SectionDto,
   Session,
   transitionAdmissionApplication,
 } from "@/lib/api";
 import { todayIso } from "@/lib/format";
+import { ReasonField } from "@schoolsoft/ui";
 
 const SOURCES = ["website", "walkin", "referral", "ad"];
 
@@ -138,6 +145,12 @@ export default function AdmissionsPage() {
   // for an application its school charges nothing.
   const [feeByApp, setFeeByApp] = useState<Record<string, AdmissionFeeStatusDto | null>>({});
   const [payment, setPayment] = useState<Record<string, { amount: string; method: string }>>({});
+  // Applications that left the fee stage and owe the fee anyway.
+  const [owing, setOwing] = useState<AdmissionFeeOwingDto[]>([]);
+  const [refunding, setRefunding] = useState<string | null>(null);
+  // The enrolled stage's own column: can each family sign in.
+  const [loginByApp, setLoginByApp] = useState<Record<string, GuardianLoginDto | null>>({});
+  const [loginDraft, setLoginDraft] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const s = getSession();
@@ -176,7 +189,11 @@ export default function AdmissionsPage() {
   }, []);
 
   useEffect(() => {
-    if (session) refreshSummary(session.schoolId);
+    if (!session) return;
+    refreshSummary(session.schoolId);
+    listAdmissionFeesOwing(session.schoolId)
+      .then(setOwing)
+      .catch((err) => setError(describeError(err)));
   }, [session, refreshSummary]);
 
   const loadStage = useCallback((schoolId: string, state: string, nextOffset: number) => {
@@ -189,7 +206,10 @@ export default function AdmissionsPage() {
       .then(([page, allowed]) => {
         setRows(page);
         setMoves(allowed);
-        if (state === "fee_pending") loadFees(page);
+        // Every stage, not only the fee stage: a fee that came back unpaid
+        // follows the application to wherever it now stands.
+        loadFees(page);
+        if (state === "enrolled") loadLogins(page);
       })
       .catch((err) => setError(describeError(err)))
       .finally(() => setLoadingRows(false));
@@ -199,6 +219,55 @@ export default function AdmissionsPage() {
     Promise.all(page.map((a) => getAdmissionFeeStatus(a.id).then((fee) => [a.id, fee ?? null] as const)))
       .then((pairs) => setFeeByApp(Object.fromEntries(pairs)))
       .catch((err) => setError(describeError(err)));
+  }
+
+  function loadLogins(page: AdmissionApplicationDto[]) {
+    Promise.all(page.map((a) => getGuardianLogin(a.id).then((login) => [a.id, login ?? null] as const)))
+      .then((pairs) => setLoginByApp(Object.fromEntries(pairs)))
+      .catch((err) => setError(describeError(err)));
+  }
+
+  function refreshOwing(schoolId: string) {
+    listAdmissionFeesOwing(schoolId)
+      .then(setOwing)
+      .catch((err) => setError(describeError(err)));
+  }
+
+  async function onRefundFee(app: AdmissionApplicationDto, reason: string) {
+    setBusyId(app.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const fee = await refundAdmissionFee(app.id, reason);
+      setRefunding(null);
+      setFeeByApp((f) => ({ ...f, [app.id]: fee }));
+      setNotice(`${inr(fee.refunded)} refunded to ${app.guardianName} for ${app.applicantFirstName}.`);
+    } catch (err) {
+      setError(describeRefundError(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onGiveLogin(app: AdmissionApplicationDto) {
+    const identifier = (loginDraft[app.id] ?? "").trim();
+    if (!identifier) return;
+    setBusyId(app.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const login = await setGuardianLogin(app.id, identifier);
+      setLoginByApp((l) => ({ ...l, [app.id]: login }));
+      setLoginDraft((d) => {
+        const { [app.id]: _typed, ...rest } = d;
+        return rest;
+      });
+      setNotice(`${login.guardianName} can now sign in to the parent app with ${identifier}.`);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function onRecordFee(app: AdmissionApplicationDto, fee: AdmissionFeeStatusDto) {
@@ -227,6 +296,7 @@ export default function AdmissionsPage() {
       });
       setNotice(`${inr(amount)} recorded against ${fee.invoiceNo} for ${app.applicantFirstName}.`);
       if (rows) loadFees(rows);
+      refreshOwing(session.schoolId);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -296,6 +366,7 @@ export default function AdmissionsPage() {
   function afterChange() {
     if (!session) return;
     refreshSummary(session.schoolId);
+    refreshOwing(session.schoolId);
     if (selected) loadStage(session.schoolId, selected, offset);
     if (results) runSearch(searchOffset);
   }
@@ -360,7 +431,14 @@ export default function AdmissionsPage() {
     setBusyId(app.id);
     setError(null);
     try {
-      await enrolAdmissionApplication(app.id, sectionId);
+      const enrolled = await enrolAdmissionApplication(app.id, sectionId);
+      setNotice(
+        enrolled.guardianHasLogin
+          ? `${app.applicantFirstName} is enrolled, and ${app.guardianName} can sign in to the parent app.`
+          : `${app.applicantFirstName} is enrolled, but ${app.guardianName} has no parent-app login yet: ` +
+              `${app.guardianPhone} already signs somebody in — at another school in the chain, or as a member of ` +
+              `staff. Open Enrolled to give them one on a different number or email.`
+      );
       afterChange();
     } catch (err) {
       setError(describeError(err));
@@ -390,6 +468,12 @@ export default function AdmissionsPage() {
     () => (policy?.entranceTestRequired === false ? LANES.filter((l) => l.key !== "assessment") : LANES),
     [policy]
   );
+
+  // The fee stage and the two closed stages always say what became of the fee.
+  // Any other stage grows the column only when somebody on the page owes.
+  const showFeeColumn =
+    selected !== null &&
+    (FEE_STAGES.includes(selected) || (rows ?? []).some((a) => isOwing(feeByApp[a.id])));
 
   const selectedCount = selected ? countOf[selected] ?? 0 : 0;
   const pageFrom = selectedCount === 0 ? 0 : offset + 1;
@@ -628,6 +712,25 @@ export default function AdmissionsPage() {
         </div>
       )}
 
+      {owing.length > 0 && (
+        <div className="warn-banner">
+          <strong>{owing.length}</strong> application{owing.length === 1 ? "" : "s"} past the fee stage{" "}
+          {owing.length === 1 ? "owes its" : "owe their"} admission fee — a payment that was taken and came
+          back. Nothing moves forward until it is settled.
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {owing.map((o) => (
+              <li key={o.applicationId}>
+                {o.applicantName} <span className="hint">({o.applicationNo})</span> — {inr(o.outstanding)} on{" "}
+                {o.invoiceNo}, now in{" "}
+                <button type="button" className="tab" onClick={() => selected !== o.state && onPickStage(o.state)}>
+                  {STATE_LABEL[o.state] ?? o.state}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="panel">
         <div className="funnel-lanes">
           {lanes.map((lane) => (
@@ -812,7 +915,8 @@ export default function AdmissionsPage() {
                     <th>Grade</th>
                     <th>Guardian</th>
                     {selected === "offered" && <th>Offer expires</th>}
-                    {selected === "fee_pending" && <th>Admission fee</th>}
+                    {showFeeColumn && <th>Admission fee</th>}
+                    {selected === "enrolled" && <th>Parent login</th>}
                     <th>Move to</th>
                     {selected === "accepted" && <th>Enrol</th>}
                   </tr>
@@ -835,14 +939,29 @@ export default function AdmissionsPage() {
                           {a.offerExpiresOn ?? <span className="hint">not set</span>}
                         </td>
                       )}
-                      {selected === "fee_pending" && (
+                      {showFeeColumn && (
                         <td>
                           <FeeCell
                             fee={feeByApp[a.id]}
+                            stage={selected}
                             entry={payment[a.id]}
                             busy={busyId === a.id}
+                            refunding={refunding === a.id}
                             onEntry={(next) => setPayment((p) => ({ ...p, [a.id]: next }))}
                             onRecord={(fee) => onRecordFee(a, fee)}
+                            onAskRefund={(asking) => setRefunding(asking ? a.id : null)}
+                            onRefund={(reason) => onRefundFee(a, reason)}
+                          />
+                        </td>
+                      )}
+                      {selected === "enrolled" && (
+                        <td>
+                          <LoginCell
+                            login={loginByApp[a.id]}
+                            draft={loginDraft[a.id] ?? ""}
+                            busy={busyId === a.id}
+                            onDraft={(value) => setLoginDraft((d) => ({ ...d, [a.id]: value }))}
+                            onGive={() => onGiveLogin(a)}
                           />
                         </td>
                       )}
@@ -928,26 +1047,82 @@ function outstandingOf(fee: AdmissionFeeStatusDto): number {
   return Math.max(0, Math.round((fee.total - fee.paid) * 100) / 100);
 }
 
+const FEE_STAGES = ["fee_pending", "rejected", "lapsed"];
+const CLOSED_STAGES = ["rejected", "lapsed"];
+
+function isOwing(fee: AdmissionFeeStatusDto | null | undefined): boolean {
+  return !!fee && fee.status !== "cancelled" && fee.status !== "refunded" && outstandingOf(fee) > 0;
+}
+
 /**
- * What one application owes at the fee stage, and the counter to take it at.
- * The move to Review is refused by the server until this reads paid, so the
- * cell says so rather than leaving the office to find out from an error.
+ * What became of one application's admission fee, and the counter to act on it
+ * at. Open and owing: take the payment — forward moves are refused by the
+ * server until it is settled, so the cell says so rather than leaving the
+ * office to find out from an error. Closed and paid: the refund, which is a
+ * decision and so asks for its reason.
  */
 function FeeCell({
   fee,
+  stage,
   entry,
   busy,
+  refunding,
   onEntry,
   onRecord,
+  onAskRefund,
+  onRefund,
 }: {
   fee: AdmissionFeeStatusDto | null | undefined;
+  stage: string;
   entry: { amount: string; method: string } | undefined;
   busy: boolean;
+  refunding: boolean;
   onEntry: (next: { amount: string; method: string }) => void;
   onRecord: (fee: AdmissionFeeStatusDto) => void;
+  onAskRefund: (asking: boolean) => void;
+  onRefund: (reason: string) => void;
 }) {
   if (fee === undefined) return <span className="hint">&hellip;</span>;
   if (fee === null) return <span className="hint">Nothing to pay</span>;
+  if (fee.status === "cancelled") {
+    return <span className="hint">Bill {fee.invoiceNo} cancelled — nothing had been paid</span>;
+  }
+  if (fee.status === "refunded") {
+    return (
+      <>
+        <span className="badge">Refunded</span>{" "}
+        <span className="hint">
+          {inr(fee.refunded)} · {fee.invoiceNo}
+        </span>
+      </>
+    );
+  }
+  if (CLOSED_STAGES.includes(stage)) {
+    if (fee.paid <= 0) return <span className="hint">Nothing was paid</span>;
+    return (
+      <>
+        <div>
+          {inr(fee.paid)} paid <span className="hint">· {fee.invoiceNo}</span>
+        </div>
+        {refunding ? (
+          <ReasonField
+            placeholder="Why it is being paid back"
+            confirmLabel={`Refund ${inr(fee.paid)}`}
+            busy={busy}
+            onConfirm={onRefund}
+            onCancel={() => onAskRefund(false)}
+          />
+        ) : (
+          <>
+            <button type="button" className="tab" disabled={busy} onClick={() => onAskRefund(true)}>
+              Refund&hellip;
+            </button>
+            <div className="hint">Kept unless refunded. Refunding needs accounts.</div>
+          </>
+        )}
+      </>
+    );
+  }
   const outstanding = outstandingOf(fee);
   if (outstanding === 0) {
     return (
@@ -990,8 +1165,70 @@ function FeeCell({
           Record
         </button>
       </div>
-      <span className="hint">Review opens once this is paid in full.</span>
+      <span className="hint">
+        {stage === "fee_pending"
+          ? "Review opens once this is paid in full."
+          : "A payment came back. Nothing moves forward until this is settled."}
+      </span>
     </>
+  );
+}
+
+/**
+ * Whether an enrolled child's family can sign in, and the fix when they
+ * cannot. The number on the application was already somebody's login — a
+ * parent with a child at another of the chain's schools, or a member of staff
+ * — so the office asks for another and types it here.
+ */
+function LoginCell({
+  login,
+  draft,
+  busy,
+  onDraft,
+  onGive,
+}: {
+  login: GuardianLoginDto | null | undefined;
+  draft: string;
+  busy: boolean;
+  onDraft: (value: string) => void;
+  onGive: () => void;
+}) {
+  if (login === undefined) return <span className="hint">&hellip;</span>;
+  // Marked enrolled without ever being enrolled into a section — the plain
+  // move the server now refuses. There is no child, so nobody to give a login.
+  if (login === null) return <span className="hint">No student record behind this application</span>;
+  if (login.hasLogin) {
+    return (
+      <span className="hint">
+        Signs in with {[login.signInPhone, login.signInEmail].filter(Boolean).join(" or ")}
+      </span>
+    );
+  }
+  return (
+    <div style={{ maxWidth: 300, whiteSpace: "normal" }}>
+      <div>
+        <span className="badge badge-suspended">No login</span>
+      </div>
+      <span className="hint">
+        {[login.contactPhone, login.contactEmail].filter(Boolean).join(" and ")} already sign
+        {login.contactPhone && login.contactEmail ? "" : "s"} somebody in — at another school in the chain, or as
+        staff.
+      </span>
+      <div className="form-row" style={{ gap: 4, margin: "4px 0 0" }}>
+        <input
+          aria-label={`Another email or phone for ${login.guardianName}`}
+          placeholder="Another email or phone"
+          value={draft}
+          onChange={(e) => onDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onGive();
+          }}
+        />
+        <button type="button" disabled={busy || draft.trim() === ""} onClick={onGive}>
+          Give login
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1002,6 +1239,14 @@ function expiryClass(on: string | null): string {
   if (on < today) return "expiry-past";
   const week = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
   return on <= week ? "expiry-soon" : "";
+}
+
+/** A registrar may reject; paying money back is accounts'. Say whose job it is rather than "forbidden". */
+function describeRefundError(err: unknown): string {
+  if (err instanceof ApiError && err.status === 403) {
+    return "Refunding a fee is for accounts — it needs fee.adjustment.manage. Ask the accountant to refund it from this screen.";
+  }
+  return describeError(err);
 }
 
 function describeError(err: unknown): string {

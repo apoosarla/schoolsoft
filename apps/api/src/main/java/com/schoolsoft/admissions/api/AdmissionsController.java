@@ -222,6 +222,48 @@ public class AdmissionsController {
             .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
+    /** Applications past the fee stage that owe the fee anyway — a payment that came back. */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/fees/owing")
+    public List<AdmissionFeeOwingDto> admissionFeesOwing(@RequestParam UUID schoolId) {
+        return applications.admissionFeesOwing(schoolId);
+    }
+
+    public record RefundRequest(@NotBlank String reason) {}
+
+    /**
+     * Pays the admission fee back on a rejected or lapsed application. Money
+     * leaving the school answers to the fee module's permission, not to
+     * admissions': the registrar who rejects an application does not thereby
+     * get to refund it. Audited by the adjustment it writes.
+     */
+    @PreAuthorize("@perm.can('fee.adjustment.manage')")
+    @PostMapping("/applications/{id}/fee/refund")
+    public com.schoolsoft.fees.api.AdmissionFeeStatusDto refundAdmissionFee(
+        @PathVariable UUID id, @RequestBody RefundRequest req
+    ) {
+        return applications.refundAdmissionFee(id, req.reason());
+    }
+
+    // -------------------------------------------------------- the family's login
+
+    /** Whether the family of the child this application became can sign in. 204 until it is enrolled. */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/applications/{id}/guardian-login")
+    public ResponseEntity<GuardianLoginDto> guardianLogin(@PathVariable UUID id) {
+        return applications.guardianLoginFor(id).map(ResponseEntity::ok)
+            .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    public record GuardianLoginRequest(@NotBlank String identifier) {}
+
+    /** Finishes what enrolment could not: a login on an address or number that is free. */
+    @PreAuthorize("@perm.can('admission.enrol')")
+    @PutMapping("/applications/{id}/guardian-login")
+    public GuardianLoginDto setGuardianLogin(@PathVariable UUID id, @RequestBody GuardianLoginRequest req) {
+        return applications.setGuardianLogin(id, req.identifier());
+    }
+
     /**
      * The moves this application may make from where it stands. The board reads
      * it so a lane it cannot drop into is disabled rather than refused after
@@ -246,8 +288,11 @@ public class AdmissionsController {
 
     @PreAuthorize("@perm.can('admission.enrol')")
     @PostMapping("/applications/{id}/enrol")
-    public Map<String, UUID> enrol(@PathVariable UUID id, @RequestBody ConvertRequest req) {
+    public Map<String, Object> enrol(@PathVariable UUID id, @RequestBody ConvertRequest req) {
         UUID studentId = applications.enrol(id, req.sectionId(), req.rollNo(), req.overCapacityReason());
-        return Map.of("studentId", studentId);
+        // Whether the family can sign in is part of the answer: a login that
+        // could not be created is the office's next job, not a silent gap.
+        boolean guardianHasLogin = applications.guardianLoginFor(id).map(GuardianLoginDto::hasLogin).orElse(false);
+        return Map.of("studentId", studentId, "guardianHasLogin", guardianHasLogin);
     }
 }

@@ -282,7 +282,12 @@ Worth knowing before trusting a green build:
   invoice), or an admission application — the admission fee, raised when the
   application reaches `fee_pending` and handed to the student at conversion
   (`fees/api/AdmissionFees`). A read that joins `student` does not see the
-  third kind.
+  third kind. No forward move in the funnel is allowed while it is owed;
+  closing the application cancels it if unpaid and never refunds it by itself.
+- A sign-in address or number is unique across the chain, and RLS hides
+  another school's `user_account` rows. So "is this identifier free?" cannot
+  be a SELECT — insert with `ON CONFLICT DO NOTHING` and read the row count
+  (`AdmissionsRepository.createLogin`).
 - A generation run that names its period pro-rates a mid-year joiner by whole
   months, recurring heads only (`fees/internal/ProRata`). "Joined" is the first
   day of the child's first enrolment that year, not of the enrolment they hold

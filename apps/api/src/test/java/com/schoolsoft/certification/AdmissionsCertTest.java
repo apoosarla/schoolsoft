@@ -205,14 +205,19 @@ class AdmissionsCertTest extends AbstractCertificationTest {
         }
         long seatsBefore = count("SELECT count(*) FROM enrolment WHERE section_id = ?", section);
 
-        // Somebody else already signs in with this number, so the family's
-        // login cannot be written. That is the last thing conversion writes
-        // before the link, which makes it the refusal that would leave the most
-        // behind if the conversion were not one transaction.
-        UUID blocker = UUID.randomUUID();
-        inChainDo(jdbc -> jdbc.update(
-            "INSERT INTO user_account (id, school_id, subject_type, subject_id, phone) "
-            + "VALUES (?, ?, 'staff', ?, ?)", blocker, cbse().id(), UUID.randomUUID(), phone));
+        // The link between guardian and child is the last row conversion writes
+        // before the application's own state, which makes a refusal there the
+        // one that would leave the most behind if the conversion were not one
+        // transaction. Nothing in the product refuses it, so the scenario does:
+        // a trigger that fires for this applicant only.
+        inChainDo(jdbc -> {
+            jdbc.execute("CREATE OR REPLACE FUNCTION adm10_refuse_link() RETURNS trigger AS $$ BEGIN "
+                + "IF EXISTS (SELECT 1 FROM student WHERE id = NEW.student_id AND first_name = '" + marker + "') "
+                + "THEN RAISE EXCEPTION 'ADM-10 refuses this link' USING ERRCODE = '23514'; END IF; "
+                + "RETURN NEW; END $$ LANGUAGE plpgsql");
+            jdbc.execute("CREATE TRIGGER adm10_refuse_link BEFORE INSERT ON guardian_student "
+                + "FOR EACH ROW EXECUTE FUNCTION adm10_refuse_link()");
+        });
 
         try {
             var refused = post("/v1/admissions/applications/" + applicationId + "/enrol",
@@ -222,6 +227,7 @@ class AdmissionsCertTest extends AbstractCertificationTest {
             // Nothing of the half-made family survives the refusal.
             assertThat(count("SELECT count(*) FROM student WHERE first_name = ?", marker)).isZero();
             assertThat(count("SELECT count(*) FROM guardian WHERE phone = ?", phone)).isZero();
+            assertThat(count("SELECT count(*) FROM user_account WHERE phone = ?", phone)).isZero();
             assertThat(count("SELECT count(*) FROM enrolment WHERE section_id = ?", section))
                 .isEqualTo(seatsBefore);
             assertThat(queryOne("SELECT state FROM admission_application WHERE id = ?", String.class,
@@ -232,7 +238,7 @@ class AdmissionsCertTest extends AbstractCertificationTest {
                 + "AND to_state = 'enrolled'", applicationId)).isZero();
 
             // And the application is still confirmable once the obstacle is gone.
-            inChainDo(jdbc -> jdbc.update("DELETE FROM user_account WHERE id = ?", blocker));
+            dropAdm10Trigger();
             var confirmed = post("/v1/admissions/applications/" + applicationId + "/enrol",
                 Map.of("sectionId", section), token);
             assertThat(confirmed.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -283,8 +289,9 @@ class AdmissionsCertTest extends AbstractCertificationTest {
             assertThat(count("SELECT count(*) FROM student WHERE first_name = ?", marker)).isEqualTo(1);
             assertThat(count("SELECT count(*) FROM guardian WHERE phone = ?", phone)).isEqualTo(1);
         } finally {
+            dropAdm10Trigger();
             inChainDo(jdbc -> {
-                jdbc.update("DELETE FROM user_account WHERE id = ? OR phone = ?", blocker, phone);
+                jdbc.update("DELETE FROM user_account WHERE phone = ?", phone);
                 jdbc.update("DELETE FROM guardian_student WHERE student_id IN "
                     + "(SELECT id FROM student WHERE first_name = ?)", marker);
                 jdbc.update("DELETE FROM guardian WHERE phone = ?", phone);
@@ -297,6 +304,13 @@ class AdmissionsCertTest extends AbstractCertificationTest {
                 jdbc.update("DELETE FROM admission_application WHERE id = ?", applicationId);
             });
         }
+    }
+
+    private void dropAdm10Trigger() {
+        inChainDo(jdbc -> {
+            jdbc.execute("DROP TRIGGER IF EXISTS adm10_refuse_link ON guardian_student");
+            jdbc.execute("DROP FUNCTION IF EXISTS adm10_refuse_link()");
+        });
     }
 
     @Test @Tag("P1")
@@ -516,7 +530,8 @@ class AdmissionsCertTest extends AbstractCertificationTest {
                 jdbc.update("DELETE FROM fee_invoice_line WHERE fee_invoice_id IN "
                     + "(SELECT id FROM fee_invoice WHERE admission_application_id = ?)", applicationId);
                 jdbc.update("DELETE FROM fee_invoice WHERE admission_application_id = ?", applicationId);
-                jdbc.update("DELETE FROM fee_head WHERE school_id = ? AND code = 'ADMISSION'", cbse().id());
+                jdbc.update("DELETE FROM fee_head h WHERE h.school_id = ? AND h.code = 'ADMISSION' AND NOT EXISTS "
+                + "(SELECT 1 FROM fee_invoice_line l WHERE l.fee_head_id = h.id)", cbse().id());
                 jdbc.update("DELETE FROM user_account WHERE phone = ?", phone);
                 jdbc.update("DELETE FROM guardian_student WHERE student_id IN "
                     + "(SELECT id FROM student WHERE first_name = ?)", marker);

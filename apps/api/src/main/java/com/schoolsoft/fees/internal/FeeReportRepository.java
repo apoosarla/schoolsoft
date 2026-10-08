@@ -148,7 +148,45 @@ public class FeeReportRepository {
         report.put("studentsWithDues", students.size());
         report.put("byGrade", byGrade);
         report.put("students", students);
+
+        // An applicant owes the school too, and is not a student: the joins
+        // above cannot see them. Reported beside the students rather than among
+        // them, because nothing here has a section and the totals a principal
+        // reads by grade are about children on the register. A section filter
+        // excludes them — an applicant is in no section.
+        List<Map<String, Object>> applicants = sectionId != null ? List.of() : applicantsOwing(
+            schoolId, academicYearId, gradeId);
+        report.put("applicants", applicants);
+        report.put("applicantsOutstanding",
+            round(applicants.stream().mapToDouble(row -> (Double) row.get("balance")).sum()));
         return report;
+    }
+
+    private List<Map<String, Object>> applicantsOwing(UUID schoolId, UUID academicYearId, UUID gradeId) {
+        StringBuilder sql = new StringBuilder(
+            "SELECT a.id, a.application_no, a.state, g.code AS grade_code, fi.invoice_no, fi.due_on, " +
+            "       (a.applicant_first_name || ' ' || COALESCE(a.applicant_last_name, '')) AS name, " +
+            "       (fi.total - fi.paid) AS balance " +
+            "FROM fee_invoice fi JOIN admission_application a ON a.id = fi.admission_application_id " +
+            "LEFT JOIN grade g ON g.id = a.grade_id " +
+            "WHERE fi.school_id = ? AND fi.student_id IS NULL " +
+            "  AND fi.status IN ('open','partial','overdue') AND fi.total > fi.paid");
+        List<Object> args = new java.util.ArrayList<>(List.of(schoolId));
+        if (academicYearId != null) { sql.append(" AND a.academic_year_id = ?"); args.add(academicYearId); }
+        if (gradeId != null) { sql.append(" AND a.grade_id = ?"); args.add(gradeId); }
+        sql.append(" ORDER BY fi.due_on, a.application_no");
+        return jdbc.query(sql.toString(), (rs, i) -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("applicationId", rs.getString("id"));
+            row.put("applicationNo", rs.getString("application_no"));
+            row.put("name", rs.getString("name").trim());
+            row.put("state", rs.getString("state"));
+            row.put("gradeCode", rs.getString("grade_code"));
+            row.put("invoiceNo", rs.getString("invoice_no"));
+            row.put("balance", round(rs.getDouble("balance")));
+            row.put("dueOn", rs.getDate("due_on").toLocalDate().toString());
+            return row;
+        }, args.toArray());
     }
 
     /** Does this student owe anything? The predicate year-end clearance asks. */

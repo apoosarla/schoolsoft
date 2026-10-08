@@ -527,8 +527,59 @@ export type AdmissionFeeStatusDto = {
   invoiceNo: string;
   total: number;
   paid: number;
+  /** The invoice's own status. `cancelled`: nobody paid and the application closed. `refunded`: the money went back. */
   status: string;
+  refunded: number;
 };
+
+/** An application past the fee stage that owes its fee anyway — a payment that came back. */
+export type AdmissionFeeOwingDto = {
+  applicationId: string;
+  applicationNo: string;
+  applicantName: string;
+  state: string;
+  invoiceId: string;
+  invoiceNo: string;
+  outstanding: number;
+};
+
+export function listAdmissionFeesOwing(schoolId: string): Promise<AdmissionFeeOwingDto[]> {
+  return apiFetch<AdmissionFeeOwingDto[]>(`/v1/admissions/fees/owing?schoolId=${schoolId}`);
+}
+
+/** Pays a closed application's fee back. Needs fee.adjustment.manage — accounts, not admissions. */
+export function refundAdmissionFee(applicationId: string, reason: string): Promise<AdmissionFeeStatusDto> {
+  return apiFetch<AdmissionFeeStatusDto>(`/v1/admissions/applications/${applicationId}/fee/refund`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+/**
+ * Whether an admitted child's family can sign in. A number or address signs in
+ * one account across the whole chain, so `hasLogin` is false when the one on
+ * the application was already somebody's.
+ */
+export type GuardianLoginDto = {
+  guardianId: string;
+  guardianName: string;
+  hasLogin: boolean;
+  signInPhone?: string;
+  signInEmail?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+};
+
+export function getGuardianLogin(applicationId: string): Promise<GuardianLoginDto | undefined> {
+  return apiFetch<GuardianLoginDto | undefined>(`/v1/admissions/applications/${applicationId}/guardian-login`);
+}
+
+export function setGuardianLogin(applicationId: string, identifier: string): Promise<GuardianLoginDto> {
+  return apiFetch<GuardianLoginDto>(`/v1/admissions/applications/${applicationId}/guardian-login`, {
+    method: "PUT",
+    body: JSON.stringify({ identifier }),
+  });
+}
 
 /** The invoice an application's fee sits on; undefined (204) when it was never billed. */
 export function getAdmissionFeeStatus(applicationId: string): Promise<AdmissionFeeStatusDto | undefined> {
@@ -544,8 +595,8 @@ export function enrolAdmissionApplication(
   id: string,
   sectionId: string,
   rollNo?: string
-): Promise<{ studentId: string }> {
-  return apiFetch<{ studentId: string }>(`/v1/admissions/applications/${id}/enrol`, {
+): Promise<{ studentId: string; guardianHasLogin: boolean }> {
+  return apiFetch<{ studentId: string; guardianHasLogin: boolean }>(`/v1/admissions/applications/${id}/enrol`, {
     method: "POST",
     body: JSON.stringify({ sectionId, rollNo }),
   });
@@ -2745,6 +2796,18 @@ export type OutstandingReportDto = {
     invoices: number;
     oldestDueOn: string;
   }[];
+  /** Applicants who owe an admission fee. Not students, so reported beside them and not in the totals above. */
+  applicants: {
+    applicationId: string;
+    applicationNo: string;
+    name: string;
+    state: string;
+    gradeCode: string | null;
+    invoiceNo: string;
+    balance: number;
+    dueOn: string;
+  }[];
+  applicantsOutstanding: number;
 };
 
 export function feeOutstanding(
