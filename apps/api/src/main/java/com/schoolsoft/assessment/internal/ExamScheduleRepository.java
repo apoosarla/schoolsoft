@@ -94,13 +94,29 @@ public class ExamScheduleRepository {
             .stream().findFirst().orElseThrow(() -> new NotFoundException("Exam schedule not found: " + id));
     }
 
-    public List<ExamScheduleDto> schedules(UUID schoolId, UUID academicYearId) {
+    /**
+     * A draft is the exams officer's working copy — papers that may still
+     * clash, in rooms not yet booked. A caller holding only
+     * {@code exam.view.own} is answered as though it did not exist: 404 rather
+     * than 403, so the refusal does not announce that an exam week is being
+     * planned.
+     */
+    public ExamScheduleDto schedule(UUID id, boolean publishedOnly) {
+        ExamScheduleDto schedule = schedule(id);
+        if (publishedOnly && !"published".equals(schedule.status())) {
+            throw new NotFoundException("Exam schedule not found: " + id);
+        }
+        return schedule;
+    }
+
+    public List<ExamScheduleDto> schedules(UUID schoolId, UUID academicYearId, boolean publishedOnly) {
+        String published = publishedOnly ? "AND es.status = 'published' " : "";
         if (academicYearId == null) {
             return jdbc.query("SELECT " + SCHEDULE_COLS + " FROM exam_schedule es WHERE es.school_id = ? " +
-                "ORDER BY es.starts_on DESC", SCHEDULE_MAPPER, schoolId);
+                published + "ORDER BY es.starts_on DESC", SCHEDULE_MAPPER, schoolId);
         }
         return jdbc.query("SELECT " + SCHEDULE_COLS + " FROM exam_schedule es " +
-            "WHERE es.school_id = ? AND es.academic_year_id = ? ORDER BY es.starts_on DESC",
+            "WHERE es.school_id = ? AND es.academic_year_id = ? " + published + "ORDER BY es.starts_on DESC",
             SCHEDULE_MAPPER, schoolId, academicYearId);
     }
 
@@ -177,6 +193,11 @@ public class ExamScheduleRepository {
             .stream().findFirst().orElseThrow(() -> new NotFoundException("Exam session not found: " + id));
     }
 
+    public List<ExamSessionDto> sessions(UUID scheduleId, boolean publishedOnly) {
+        schedule(scheduleId, publishedOnly);
+        return sessions(scheduleId);
+    }
+
     public List<ExamSessionDto> sessions(UUID scheduleId) {
         return jdbc.query("SELECT " + SESSION_COLS + " FROM exam_session s " +
             "JOIN subject sub ON sub.id = s.subject_id WHERE s.exam_schedule_id = ? " +
@@ -215,6 +236,11 @@ public class ExamScheduleRepository {
     }
 
     /** The papers one student sits, filtered to their own subject set. */
+    public List<ExamSessionDto> sessionsForStudent(UUID scheduleId, UUID studentId, boolean publishedOnly) {
+        schedule(scheduleId, publishedOnly);
+        return sessionsForStudent(scheduleId, studentId);
+    }
+
     public List<ExamSessionDto> sessionsForStudent(UUID scheduleId, UUID studentId) {
         ExamScheduleDto schedule = schedule(scheduleId);
         Set<UUID> studied = new java.util.LinkedHashSet<>();
@@ -330,6 +356,15 @@ public class ExamScheduleRepository {
             tickets.add(hallTicket(scheduleId, studentId));
         }
         return tickets;
+    }
+
+    /**
+     * A ticket lists the papers of the schedule it was issued against, so a
+     * family stops seeing it while that schedule is taken back to draft.
+     */
+    public HallTicketDto hallTicket(UUID scheduleId, UUID studentId, boolean publishedOnly) {
+        schedule(scheduleId, publishedOnly);
+        return hallTicket(scheduleId, studentId);
     }
 
     public HallTicketDto hallTicket(UUID scheduleId, UUID studentId) {

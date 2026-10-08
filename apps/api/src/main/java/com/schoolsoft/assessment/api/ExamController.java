@@ -2,6 +2,7 @@ package com.schoolsoft.assessment.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.assessment.internal.ExamScheduleRepository;
+import com.schoolsoft.iam.api.PermissionChecker;
 import com.schoolsoft.iam.api.SelfScope;
 import com.schoolsoft.platform.security.Perm;
 import jakarta.validation.constraints.NotBlank;
@@ -21,23 +22,33 @@ public class ExamController {
 
     private final ExamScheduleRepository repo;
     private final SelfScope selfScope;
+    private final PermissionChecker perms;
 
-    public ExamController(ExamScheduleRepository repo, SelfScope selfScope) {
+    public ExamController(ExamScheduleRepository repo, SelfScope selfScope, PermissionChecker perms) {
         this.repo = repo;
         this.selfScope = selfScope;
+        this.perms = perms;
+    }
+
+    /**
+     * {@code exam.view.own} is a family's permission, and a family reads what
+     * the school has published. Every read gated on it passes this down.
+     */
+    private boolean publishedOnly() {
+        return !perms.holdsUnrestricted(Perm.EXAM_VIEW);
     }
 
     @PreAuthorize("@perm.canAny('exam.view', 'exam.view.own')")
     @GetMapping("/schedules")
     public List<ExamScheduleDto> schedules(@RequestParam UUID schoolId,
                                            @RequestParam(required = false) UUID academicYearId) {
-        return repo.schedules(schoolId, academicYearId);
+        return repo.schedules(schoolId, academicYearId, publishedOnly());
     }
 
     @PreAuthorize("@perm.canAny('exam.view', 'exam.view.own')")
     @GetMapping("/schedules/{id}")
     public ExamScheduleDto schedule(@PathVariable UUID id) {
-        return repo.schedule(id);
+        return repo.schedule(id, publishedOnly());
     }
 
     public record CreateScheduleRequest(
@@ -69,7 +80,7 @@ public class ExamController {
     @PreAuthorize("@perm.canAny('exam.view', 'exam.view.own')")
     @GetMapping("/schedules/{id}/sessions")
     public List<ExamSessionDto> sessions(@PathVariable UUID id) {
-        return repo.sessions(id);
+        return repo.sessions(id, publishedOnly());
     }
 
     /**
@@ -120,7 +131,9 @@ public class ExamController {
     @GetMapping("/schedules/{id}/hall-tickets/{studentId}")
     public HallTicketDto hallTicket(@PathVariable UUID id, @PathVariable UUID studentId) {
         selfScope.requireStudent(studentId, Perm.HALL_TICKET_VIEW);
-        return repo.hallTicket(id, studentId);
+        // Keyed on the ticket's own permission: the office that issues tickets
+        // reads one against a schedule it has taken back to draft.
+        return repo.hallTicket(id, studentId, !perms.holdsUnrestricted(Perm.HALL_TICKET_VIEW));
     }
 
     /** The papers one student sits, out of the whole schedule. */
@@ -128,7 +141,7 @@ public class ExamController {
     @GetMapping("/schedules/{id}/students/{studentId}/sessions")
     public List<ExamSessionDto> sessionsForStudent(@PathVariable UUID id, @PathVariable UUID studentId) {
         selfScope.requireStudent(studentId, Perm.EXAM_VIEW);
-        return repo.sessionsForStudent(id, studentId);
+        return repo.sessionsForStudent(id, studentId, publishedOnly());
     }
 
     /** What a grade sits on one date — the list that replaces the class timetable (TT-09). */
