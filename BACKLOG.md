@@ -1620,9 +1620,20 @@ several are security-relevant.
   `application.yml` still defaults it to `000000` — production must set
   `SCHOOLSOFT_DEV_OTP_CODE` empty.
 
-- **GAP-34 — Platform-admin actions are unaudited.** `audit_log` lives in the
-  chain schema and `ChainAdminController` writes nothing, so chain provisioning
-  and cross-chain reads leave no trail (SEC-06).
+- **GAP-34 — Platform-admin actions are unaudited.** *Closed.* Every request
+  made as a `platform_admin` is a row in `platform.operator_audit_log` (V007):
+  who, the route, the path as asked, the chain it reached into, the body, and
+  the status it ended with. `OperatorAuditInterceptor` writes it by asking who
+  is calling, not which endpoint was marked, so reads into a chain are there
+  beside the writes and a new operator endpoint is audited by existing. The
+  operator's sign-in is a row too. `GET /v1/platform-admin/audit` reads it.
+  SEC-06 enabled 2026-10-08. Original finding: `audit_log` lives in the chain
+  schema and `ChainAdminController` wrote nothing, so chain provisioning and
+  cross-chain reads left no trail. What remains: the table refuses UPDATE and
+  DELETE but is not hash-chained the way a chain's `audit_log` is, the row is
+  written after the act (a failed write is logged, not fatal — the same trade
+  `AuditInterceptor` makes), the customer cannot see the operator's *reads* of
+  their chain from inside it, and platform-web has no screen for the trail.
 
 ### Correctness
 

@@ -1,6 +1,7 @@
 package com.schoolsoft.certification;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.schoolsoft.certification.support.AbstractCertificationTest;
@@ -223,11 +224,117 @@ class SecurityCertTest extends AbstractCertificationTest {
         assertThat(get("/v1/tenancy/schools", otherChainToken).getBody()).isEmpty();
     }
 
+    /**
+     * The operator's door is its own, and everything that comes through it is
+     * written down.
+     *
+     * <p>Separately authenticated: the account is a {@code platform_user}, not
+     * a {@code user_account} in anybody's chain, and neither door opens for
+     * the other's people. Fully audited: a row per request in
+     * {@code platform.operator_audit_log}, written by an interceptor that asks
+     * who is calling rather than which endpoint was marked — so the reads into
+     * a customer's chain are there beside the writes, and so is the request
+     * that was refused.</p>
+     */
     @Test @Tag("P1")
-    @Disabled("Platform-admin actions authenticate separately (platform.platform_user + its own OTP flow) "
-        + "but write no audit trail: audit_log lives in the chain schema and ChainAdminController records "
-        + "nothing. New gap found in Phase 0 — security-relevant.")
     void cert_SEC_06_platformAdminActionsAreSeparatelyAuthenticatedAndAudited() {
+        String operatorEmail = "admin@schoolsoft.dev";
+        UUID operatorId = platformJdbc.queryForObject(
+            "SELECT id FROM platform.platform_user WHERE email = ?", UUID.class, operatorEmail);
+        long before = platformJdbc.queryForObject(
+            "SELECT COALESCE(max(id), 0) FROM platform.operator_audit_log", Long.class);
+
+        // A school's head holds every permission inside their school and
+        // nothing above it; nor does the chain's own HQ.
+        for (String chainToken : List.of(principalToken(cbse()), chainAdminToken())) {
+            assertThat(get("/v1/platform-admin/chains", chainToken).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(get("/v1/platform-admin/audit", chainToken).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        }
+
+        // Neither door opens for the other's people, even holding a good code.
+        String chainEmail = queryOne("SELECT email FROM user_account WHERE email IS NOT NULL AND is_active "
+            + "ORDER BY email LIMIT 1", String.class);
+        var chainPersonAtPlatformDoor = post("/v1/auth/platform-admin/otp/verify",
+            Map.of("email", chainEmail, "code", otps.issueForPlatformAdmin(chainEmail)), null);
+        assertThat(chainPersonAtPlatformDoor.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        var operatorAtChainDoor = verifyOtp(operatorEmail, otps.issue(operatorEmail, seed.chainSlug()));
+        assertThat(operatorAtChainDoor.getStatusCode().is2xxSuccessful()).isFalse();
+
+        // Through the operator's own door, with a code issued for it.
+        var signedIn = post("/v1/auth/platform-admin/otp/verify",
+            Map.of("email", operatorEmail, "code", otps.issueForPlatformAdmin(operatorEmail)), null);
+        assertThat(signedIn.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String operator = signedIn.getBody().get("accessToken").asText();
+
+        // A read above every chain, a read into one, a write, a write that is
+        // refused, and a read of a chain that is not there.
+        String base = "/v1/platform-admin/chains";
+        UUID nowhere = UUID.randomUUID();
+        assertThat(get(base, operator).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(get(base + "/" + seed.chainId() + "/stats", operator).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        var provisioned = post(base, Map.of("slug", OTHER_CHAIN, "name", "Other Chain", "planCode", "starter"),
+            operator);
+        assertThat(provisioned.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID otherChainId = UUID.fromString(provisioned.getBody().get("chainId").asText());
+        assertThat(post(base + "/" + seed.chainId() + "/admins",
+            Map.of("email", "sec06.second.hq@oakridge.test"), operator).getStatusCode())
+            .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(get(base + "/" + nowhere + "/stats", operator).getStatusCode())
+            .isEqualTo(HttpStatus.NOT_FOUND);
+
+        // Each of them is a row: who, what, about which chain, and how it ended.
+        var trail = platformJdbc.queryForList(
+            "SELECT action, path, chain_id, status, request_payload::text AS payload "
+                + "FROM platform.operator_audit_log WHERE id > ? AND actor_user_id = ? ORDER BY id",
+            before, operatorId);
+        assertThat(trail).extracting(r -> r.get("action") + " -> " + r.get("status")).containsExactly(
+            "POST /v1/auth/platform-admin/otp/verify -> 200",
+            "GET /v1/platform-admin/chains -> 200",
+            "GET /v1/platform-admin/chains/{id}/stats -> 200",
+            "POST /v1/platform-admin/chains -> 200",
+            "POST /v1/platform-admin/chains/{id}/admins -> 409",
+            "GET /v1/platform-admin/chains/{id}/stats -> 404");
+        assertThat(trail).extracting(r -> r.get("chain_id")).containsExactly(
+            null, null, seed.chainId(), otherChainId, seed.chainId(), nowhere);
+        // The path as asked, so the row says which chain without a join.
+        assertThat((String) trail.get(2).get("path")).endsWith("/chains/" + seed.chainId() + "/stats");
+        // What was asked for is kept; the one-time code that opened the door is not.
+        assertThat((String) trail.get(3).get("payload")).contains(OTHER_CHAIN);
+        assertThat((String) trail.get(4).get("payload")).contains("sec06.second.hq@oakridge.test");
+        assertThat(trail.get(0).get("payload")).isNull();
+
+        // Nobody else's requests are in it: the refusals above had no operator to name.
+        assertThat(platformJdbc.queryForObject(
+            "SELECT count(*) FROM platform.operator_audit_log WHERE id > ?", Long.class, before))
+            .isEqualTo(trail.size());
+
+        // An operator can read the trail of one chain, named by who did it —
+        // and reading it is itself an act.
+        var read = get("/v1/platform-admin/audit?chainId=" + seed.chainId(), operator);
+        assertThat(read.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<String> readBack = new ArrayList<>();
+        read.getBody().forEach(e -> {
+            if (e.get("id").asLong() > before) readBack.add(e.get("action").asText());
+            assertThat(e.get("chainId").asText()).isEqualTo(seed.chainId().toString());
+        });
+        assertThat(readBack).containsExactly(
+            "POST /v1/platform-admin/chains/{id}/admins", "GET /v1/platform-admin/chains/{id}/stats");
+        assertThat(read.getBody().get(0).get("actorEmail").asText()).isEqualTo(operatorEmail);
+        assertThat(platformJdbc.queryForObject(
+            "SELECT action FROM platform.operator_audit_log ORDER BY id DESC LIMIT 1", String.class))
+            .isEqualTo("GET /v1/platform-admin/audit");
+
+        // And it stays written: no row is edited, none is removed.
+        long firstRow = before + 1;
+        assertThatThrownBy(() -> platformJdbc.update(
+            "UPDATE platform.operator_audit_log SET status = 200 WHERE id > ?", before))
+            .hasMessageContaining("append-only");
+        assertThatThrownBy(() -> platformJdbc.update(
+            "DELETE FROM platform.operator_audit_log WHERE id = ?", firstRow))
+            .hasMessageContaining("append-only");
     }
 
     @Test @Tag("P1")

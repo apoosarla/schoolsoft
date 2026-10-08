@@ -440,6 +440,21 @@ class RbacEnforcementTest extends AbstractCertificationTest {
     }
 
     /**
+     * The operators' trail says who at Schoolsoft looked at which customer. It
+     * is Schoolsoft's to read; a customer's own log is {@code /v1/audit}.
+     */
+    @Test
+    @DisplayName("the operators' audit trail is platform-admin only")
+    void operatorTrailIsPlatformAdminOnly() {
+        assertThat(get("/v1/platform-admin/audit", platformAdminToken()).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/platform-admin/audit", chainAdminToken()).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/platform-admin/audit", principalToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /**
      * The chain's HQ accounts are the chain admin's to manage, and nobody
      * else's. A school's head holds every permission inside their school and
      * nothing above it; an operator hands a chain over once, through their own

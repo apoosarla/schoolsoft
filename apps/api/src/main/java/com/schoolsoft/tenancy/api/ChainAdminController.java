@@ -1,6 +1,7 @@
 package com.schoolsoft.tenancy.api;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import com.schoolsoft.audit.api.OperatorTrail;
 import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.tenancy.internal.ChainHandoverService;
@@ -30,6 +31,11 @@ import org.springframework.web.bind.annotation.RestController;
  * resolved {@link TenantContext}. There is no per-chain scoping here by
  * design — this controller operates above any single chain, against the
  * shared {@code platform} schema, never a {@code chain_X} schema.
+ *
+ * <p>Every request here lands in {@code platform.operator_audit_log}, reads
+ * included — {@link OperatorTrail} — without any method asking for it. What a
+ * method does say is which chain it reached into, and {@link #inChain} says
+ * that for all of them.</p>
  */
 @RestController
 @RequestMapping("/v1/platform-admin/chains")
@@ -101,6 +107,8 @@ public class ChainAdminController {
     public ResponseEntity<ProvisionChainResponse> provision(@RequestBody ProvisionChainRequest req) {
         requirePlatformAdmin();
         var result = provisioningService.provision(req.slug(), req.name(), req.planCode());
+        // The id exists only now; the path of this request names no chain.
+        OperatorTrail.about(result.id());
         return ResponseEntity.ok(new ProvisionChainResponse(result.id(), result.schemaName(), result.created()));
     }
 
@@ -246,6 +254,9 @@ public class ChainAdminController {
      * method on it is platform-admin only.</p>
      */
     private <T> T inChain(UUID chainId, java.util.function.Function<JdbcTemplate, T> body) {
+        // Before the lookup, so a request for a chain that does not exist
+        // still says which one was asked for.
+        OperatorTrail.about(chainId);
         String schemaName = platformJdbc.query(
             "SELECT schema_name FROM platform.chain WHERE id = ?",
             (rs, i) -> rs.getString("schema_name"), chainId

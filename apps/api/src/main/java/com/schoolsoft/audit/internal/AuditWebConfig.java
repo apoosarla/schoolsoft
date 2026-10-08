@@ -8,11 +8,16 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class AuditWebConfig implements WebMvcConfigurer {
 
     private final AuditInterceptor interceptor;
+    private final OperatorAuditInterceptor operators;
 
-    public AuditWebConfig(AuditInterceptor interceptor) { this.interceptor = interceptor; }
+    public AuditWebConfig(AuditInterceptor interceptor, OperatorAuditInterceptor operators) {
+        this.interceptor = interceptor;
+        this.operators = operators;
+    }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(interceptor).addPathPatterns("/v1/**");
+        registry.addInterceptor(operators).addPathPatterns("/v1/**");
     }
 }

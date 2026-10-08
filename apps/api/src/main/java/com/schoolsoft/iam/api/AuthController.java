@@ -45,9 +45,12 @@ public class AuthController {
     private final UserLookupService lookup;
     private final JwtService jwt;
     private final com.schoolsoft.iam.internal.RefreshTokenLedger refreshTokens;
+    private final com.schoolsoft.audit.api.OperatorTrail operators;
 
     public AuthController(OtpStore otpStore, OtpThrottle throttle, UserLookupService lookup, JwtService jwt,
-                          com.schoolsoft.iam.internal.RefreshTokenLedger refreshTokens) {
+                          com.schoolsoft.iam.internal.RefreshTokenLedger refreshTokens,
+                          com.schoolsoft.audit.api.OperatorTrail operators) {
+        this.operators = operators;
         this.otpStore = otpStore;
         this.throttle = throttle;
         this.refreshTokens = refreshTokens;
@@ -159,6 +162,8 @@ public class AuthController {
         }
         var resolved = lookup.resolvePlatformAdmin(req.email())
             .orElseThrow(() -> new NotFoundException("No platform-admin account for " + req.email()));
+
+        operators.signedIn(resolved.userAccountId(), http);
 
         String access = jwt.issueAccess(resolved.userAccountId(), "platform", "platform", null, "platform_admin");
         String refresh = jwt.issueRefresh(resolved.userAccountId(), "platform", "platform");

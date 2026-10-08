@@ -403,6 +403,16 @@ Worth knowing before trusting a green build:
   there to expose. `TRUNCATE` restarts it cleanly and is what a fixture should
   use.
 
+- **An operator's every request is on the record.** A `platform_admin`
+  stands in the `platform` schema, which has no `audit_log`, so theirs is a
+  separate one: `platform.operator_audit_log`, written by
+  `OperatorAuditInterceptor` for every request made as that subject type —
+  reads included, refusals included, with the status it ended on. Nothing opts
+  in; a new operator endpoint is audited by existing. A handler that reaches
+  into a chain says which with `OperatorTrail.about(chainId)` —
+  `ChainAdminController.inChain` does it for all of its own. The table refuses
+  UPDATE and DELETE. `SEC-06` is the worked example.
+
 ## Known gaps
 
 `BACKLOG.md` is the live list. Two structural ones worth knowing up front:
