@@ -167,7 +167,6 @@ function humanize(code: string): string {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
   const [session, setSessionState] = useState<Session | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -177,12 +176,46 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setDrawerOpen(false);
   }, [pathname]);
 
-  if (!session || pathname.startsWith("/login")) return <>{children}</>;
+  const signedIn = session !== null && !pathname.startsWith("/login") ? session : null;
 
+  // The page keeps one place in the tree whether or not the chrome is drawn.
+  // Returned bare before the session is read and wrapped after, it was
+  // remounted, and every fetch in its mount effect ran a second time.
+  return (
+    <div className={signedIn ? "app" : "app-bare"}>
+      {signedIn && (
+        <Sidebar session={signedIn} pathname={pathname} open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      )}
+      <div className={signedIn ? undefined : "app-bare"}>
+        {signedIn && (
+        <header className="topbar">
+          <button type="button" className="hamburger" aria-label="Open menu" onClick={() => setDrawerOpen(true)}>
+            <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
+              <path d="M2 4.5H16M2 9H16M2 13.5H16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+          <h1>{screensFor(signedIn).find((s) => s.path === pathname)?.label ?? "Schoolsoft"}</h1>
+        </header>
+        )}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function screensFor(session: Session) {
+  return isChainAdmin(session) ? CHAIN_SCREENS : SCREEN_DEFS;
+}
+
+function Sidebar({ session, pathname, open, onClose }: {
+  session: Session;
+  pathname: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const router = useRouter();
   const chainAdmin = isChainAdmin(session);
-  const screens = chainAdmin ? CHAIN_SCREENS : SCREEN_DEFS;
   const visible = chainAdmin ? CHAIN_SCREENS : SCREEN_DEFS.filter((s) => hasScreen(session, s.key));
-  const current = screens.find((s) => s.path === pathname);
   const roleLabel = session.roleCodes.length > 0 ? session.roleCodes.map(humanize).join(" · ") : humanize(session.subjectType);
 
   function signOut() {
@@ -191,10 +224,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app">
-      <div className={"scrim" + (drawerOpen ? " open" : "")} onClick={() => setDrawerOpen(false)} />
+    <>
+      <div className={"scrim" + (open ? " open" : "")} onClick={onClose} />
 
-      <aside className={"sidebar" + (drawerOpen ? " open" : "")}>
+      <aside className={"sidebar" + (open ? " open" : "")}>
         <div className="brand">
           <svg className="crest" width="28" height="28" viewBox="0 0 30 30" fill="none">
             <path
@@ -240,18 +273,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </aside>
-
-      <div>
-        <header className="topbar">
-          <button type="button" className="hamburger" aria-label="Open menu" onClick={() => setDrawerOpen(true)}>
-            <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
-              <path d="M2 4.5H16M2 9H16M2 13.5H16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
-          <h1>{current?.label ?? "Schoolsoft"}</h1>
-        </header>
-        {children}
-      </div>
-    </div>
+    </>
   );
 }

@@ -61,7 +61,7 @@ Left open on 2026-09-27, fixed 2026-10-08:
   page bare before the session was read and wrapped afterwards, so the page was
   remounted and its mount effect fetched again — in a production build too. The
   page now keeps one place in the tree. teacher-app, driver-app and school-web
-  have the same early return in their shells and are not changed.
+  had the same early return in their shells and got the same fix.
 - The office DOB fields (new application, advanced search) carry `max` = today.
 - The legacy `day_of_week = 0` slot. The column's check still said 0..6 while
   the API takes ISO 1..7, so a Sunday slot was refused by the database. `V044`
@@ -70,9 +70,8 @@ Left open on 2026-09-27, fixed 2026-10-08:
 Found on 2026-10-08 while re-running BUG-29, not fixed:
 - A credit note or waiver has no upper bound and its ledger legs can disagree
   with the invoice — see the first entry under "Open items" in `BACKLOG.md`.
-  The probe that found it is still in the dev DB: a ₹99,999,999 credit note on
-  INV-0002 ("Browser check: should be refused"), which took the invoice from
-  ₹5,250 / partial to ₹2,000 / paid.
+  The probe that found it (a ₹99,999,999 credit note on INV-0002) was removed
+  from the dev DB by hand the same day; INV-0002 is back at ₹5,250 / partial.
 
 Found in a full browser pass over all six apps (school-web, platform-web,
 parent-app, teacher-app, driver-app, public-site) plus curl probes of the API.

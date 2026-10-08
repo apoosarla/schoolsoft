@@ -75,15 +75,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setSessionState(getSession());
   }, [pathname]);
 
-  if (!session || pathname === "/login") return <>{children}</>;
+  const chrome = session !== null && pathname !== "/login";
 
   function signOut() {
     clearSession();
     router.replace("/login");
   }
 
+  // The page keeps one place in the tree whether or not the chrome is drawn.
+  // Returned bare before the session is read and wrapped after, it was
+  // remounted, and every fetch in its mount effect ran a second time.
   return (
-    <div className="app">
+    <div className={chrome ? "app" : "app-bare"}>
+      {chrome && (
       <header className="topbar">
         <div>
           <h1>{TITLES[pathname] ?? "Schoolsoft"}</h1>
@@ -97,9 +101,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </svg>
         </button>
       </header>
+      )}
 
       {children}
 
+      {chrome && (
       <nav className="tabbar">
         {TABS.map((t) => (
           <Link key={t.href} href={t.href} className={"tab-link" + (pathname === t.href ? " active" : "")}>
@@ -108,6 +114,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         ))}
       </nav>
+      )}
     </div>
   );
 }
