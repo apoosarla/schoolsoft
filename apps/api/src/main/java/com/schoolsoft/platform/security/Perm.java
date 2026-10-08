@@ -186,7 +186,11 @@ public enum Perm {
     FEATURE_FLAG_MANAGE("feature_flag.manage", "Toggle feature flags"),
     DASHBOARD_VIEW("dashboard.view", "Read the school dashboard"),
     FILE_UPLOAD("file.upload", "Request an upload ticket"),
-    FILE_DOWNLOAD("file.download", "Request a download ticket");
+    FILE_DOWNLOAD("file.download", "Request a download ticket"),
+
+    // ===== privacy =====
+    PRIVACY_MANAGE("privacy.manage", "Record consent for any family, and serve or refuse their data requests"),
+    PRIVACY_OWN("privacy.own", "Give or withdraw consent for your children, and ask for their data or its erasure");
 
     private static final Map<String, Perm> BY_CODE =
             Arrays.stream(values()).collect(Collectors.toMap(Perm::code, Function.identity()));

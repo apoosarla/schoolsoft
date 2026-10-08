@@ -443,6 +443,36 @@ class RbacEnforcementTest extends AbstractCertificationTest {
      * The operators' trail says who at Schoolsoft looked at which customer. It
      * is Schoolsoft's to read; a customer's own log is {@code /v1/audit}.
      */
+    /**
+     * A family may ask; only the head and the registrar may answer. Serving
+     * an erasure removes a person from the record, so it is not handed to
+     * whoever happens to hold a read of the student list.
+     */
+    @Test
+    @DisplayName("data requests are the family's to file and the registrar's to serve")
+    void dataRequestsAreServedByTheOfficeOnly() {
+        UUID studentId = queryOne("SELECT student_id FROM enrolment WHERE section_id = ? ORDER BY roll_no "
+            + "LIMIT 1", UUID.class, currentFocusSection(cbse()));
+        String guardian = guardianTokenFor(cbse(), studentId);
+        UUID nobody = UUID.randomUUID();
+
+        assertThat(get("/v1/privacy/requests", registrarToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/privacy/requests", principalToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/privacy/students/" + studentId + "/consents", guardian).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+
+        assertThat(get("/v1/privacy/requests", accountantToken(cbse())).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/privacy/students/" + studentId + "/consents", teacherToken(cbse(), 1))
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/privacy/requests/" + nobody + "/fulfil", body("reason", "rbac"), guardian)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post("/v1/privacy/requests/" + nobody + "/refuse", body("reason", "rbac"), guardian)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
     @Test
     @DisplayName("the operators' audit trail is platform-admin only")
     void operatorTrailIsPlatformAdminOnly() {

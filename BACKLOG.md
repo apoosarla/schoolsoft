@@ -1522,8 +1522,24 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   clean — the documented choice ENR-09 asks for. ENR-09 now runs.
   **Still open:** no import for staff (there is no staff-write surface at all
   yet — no `staff.manage`, no create endpoint — so it is its own piece of
-  work) and none for marks. `consent_record` exists but there is no export,
-  erasure, or retention job behind it. Still blocks SEC-09.
+  work) and none for marks.
+  **DPDP lifecycle closed 2026-10-08:** the `privacy` module (V048). A family
+  gives and withdraws consent per purpose and both dates are kept; an access
+  request is served as it is filed, with an export of every table that hangs
+  a row off the child, found at run time; an erasure request carries a
+  `due_on` fixed at filing (`schoolsoft.privacy.request-window-days`, 30),
+  waits for the head or the registrar, is refused while the child has an
+  enrolment that has not ended, and when served blanks the child, a parent who
+  was here for them alone, their logins and the admission form — and keeps the
+  ledger, the register, the marks and the certificates. SEC-09 now runs.
+  **Still open under it:** nothing reads a consent before acting on it (the
+  gallery, biometrics and WhatsApp marketing are not gated on
+  `consent_record`); no retention job deletes anything on a timer; staff are
+  not data subjects here; files in object storage, message bodies and
+  `audit_log` snapshots still hold what an erasure removed from the row; an
+  erasure with fees outstanding is not refused; nobody is notified when a
+  request is filed, nears its date or is decided; the 30-day window is a
+  default, not legal advice; and no frontend has a screen for any of it.
 
 _(No GAP-28: session expiry / token refresh is already an Open item above and
 is referenced by scenario SEC-02 rather than duplicated here.)_

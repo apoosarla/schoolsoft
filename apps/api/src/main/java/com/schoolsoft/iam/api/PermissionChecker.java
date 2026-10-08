@@ -65,6 +65,7 @@ public class PermissionChecker {
         Perm.HALL_TICKET_VIEW_OWN,
         Perm.FEE_INVOICE_VIEW_OWN,
         Perm.CERTIFICATE_VIEW_OWN,
+        Perm.PRIVACY_OWN,
         Perm.LEAVE_APPLY,
         Perm.ANNOUNCEMENT_VIEW,
         Perm.MESSAGE_PARTICIPATE,

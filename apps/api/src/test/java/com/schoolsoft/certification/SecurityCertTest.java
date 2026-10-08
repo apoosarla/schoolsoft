@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -453,10 +452,184 @@ class SecurityCertTest extends AbstractCertificationTest {
             .isEqualTo(1);
     }
 
+    /**
+     * What the DPDP Act gives a family over their child's data, end to end.
+     *
+     * <p>Consent is given and taken back, and both dates are kept. A copy of
+     * everything held is served the moment it is asked for. An erasure waits
+     * for the office and carries a deadline fixed when it was filed; it is
+     * refused while the child is on a register, and when it is served it
+     * removes who the child and their family were while leaving the rows the
+     * school must keep.</p>
+     */
     @Test @Tag("P1")
-    @Disabled("GAP-23 — consent_record exists, but there is no export, erasure or retention path to serve "
-        + "a DPDP request (Phase 8).")
     void cert_SEC_09_dpdpConsentExportAndErasureAreServable() {
+        String registrar = registrarToken(cbse());
+        List<UUID> cohort = queryList("SELECT student_id FROM enrolment WHERE section_id = ? "
+            + "ORDER BY roll_no OFFSET 8 LIMIT 2", UUID.class, currentFocusSection(cbse()));
+        UUID child = cohort.get(0);
+        String parent = guardianTokenFor(cbse(), child);
+        String otherParent = guardianTokenFor(cbse(), cohort.get(1));
+        String consents = "/v1/privacy/students/" + child + "/consents";
+
+        // --- consent: given, given again, withdrawn ---
+        var given = post(consents, body("purpose", "photo_publish", "granted", true, "source", "parent_app"),
+            parent);
+        assertThat(given.getStatusCode()).isEqualTo(HttpStatus.OK);
+        post(consents, body("purpose", "photo_publish", "granted", true, "source", "parent_app"), parent);
+        assertThat(count("SELECT count(*) FROM consent_record WHERE subject_id = ? "
+            + "AND purpose = 'photo_publish' AND revoked_at IS NULL", child))
+            .as("granting twice is a retry, not a second consent").isEqualTo(1);
+        assertThat(get(consents, parent).getBody().get(0).get("standing").asBoolean()).isTrue();
+
+        var withdrawn = post(consents, body("purpose", "photo_publish", "granted", false), parent);
+        assertThat(withdrawn.getBody()).hasSize(1);
+        assertThat(withdrawn.getBody().get(0).get("standing").asBoolean()).isFalse();
+        // Both dates survive: when they agreed, and when they stopped.
+        assertThat(withdrawn.getBody().get(0).get("grantedAt").asText()).isNotBlank();
+        assertThat(withdrawn.getBody().get(0).get("revokedAt").asText()).isNotBlank();
+
+        // Somebody else's child is not theirs to answer for, or to read.
+        assertThat(get(consents, otherParent).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(post(consents, body("purpose", "photo_publish", "granted", true), otherParent)
+            .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // --- access: asked and served in one step, with a copy of everything ---
+        var access = post("/v1/privacy/requests", body("studentId", child, "kind", "access"), parent);
+        assertThat(access.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(access.getBody().get("status").asText()).isEqualTo("fulfilled");
+        String accessId = access.getBody().get("id").asText();
+
+        var export = get("/v1/privacy/requests/" + accessId + "/export", parent);
+        assertThat(export.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(export.getBody().get("student").get("id").asText()).isEqualTo(child.toString());
+        assertThat(export.getBody().get("guardians")).isNotEmpty();
+        assertThat(export.getBody().get("consents")).hasSize(1);
+        // Found by what hangs off the child, not from a list somebody maintains.
+        JsonNode records = export.getBody().get("records");
+        assertThat(records.get("enrolment")).isNotEmpty();
+        assertThat(records.get("attendance_record")).isNotEmpty();
+        assertThat(records.get("data_request")).isNotEmpty();
+        assertThat(export.getBody().get("student").has("encrypted_payload")).isFalse();
+        assertThat(get("/v1/privacy/requests/" + accessId + "/export", otherParent).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // --- erasure of a child still at the school: filed, on the clock, refused ---
+        var asked = post("/v1/privacy/requests",
+            body("studentId", child, "kind", "erasure", "note", "Please remove our details"), parent);
+        assertThat(asked.getBody().get("status").asText()).isEqualTo("open");
+        String erasureId = asked.getBody().get("id").asText();
+        LocalDate filedOn = LocalDate.parse(asked.getBody().get("requestedOn").asText());
+        assertThat(LocalDate.parse(asked.getBody().get("dueOn").asText())).isEqualTo(filedOn.plusDays(30));
+        // Asking again while it is open is the same request.
+        assertThat(post("/v1/privacy/requests", body("studentId", child, "kind", "erasure"), parent)
+            .getBody().get("id").asText()).isEqualTo(erasureId);
+
+        try {
+            // The office's queue; a teacher has no business in it, and a
+            // parent sees their own and nobody else's.
+            assertThat(get("/v1/privacy/requests?status=open", teacherToken(cbse(), 1)).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(get("/v1/privacy/requests", otherParent).getBody()).isEmpty();
+            assertThat(get("/v1/privacy/requests", parent).getBody()).hasSize(2);
+            assertThat(post("/v1/privacy/requests/" + erasureId + "/fulfil",
+                body("reason", "I would like it gone"), parent).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+            var queue = get("/v1/privacy/requests?status=open", registrar);
+            assertThat(queue.getBody()).extracting(r -> r.get("id").asText()).contains(erasureId);
+            assertThat(get("/v1/privacy/requests/" + erasureId, registrar).getBody().get("overdue").asBoolean())
+                .isFalse();
+
+            // Past the window it is overdue, and says so.
+            try {
+                clock.pin(Instant.now().plus(Duration.ofDays(31)));
+                assertThat(get("/v1/privacy/requests/" + erasureId, registrar).getBody()
+                    .get("overdue").asBoolean()).isTrue();
+            } finally {
+                clock.release();
+            }
+
+            assertThat(post("/v1/privacy/requests/" + erasureId + "/fulfil", Map.of(), registrar)
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            var tooSoon = post("/v1/privacy/requests/" + erasureId + "/fulfil",
+                body("reason", "Family asked in writing"), registrar);
+            assertThat(tooSoon.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(queryOne("SELECT first_name FROM student WHERE id = ?", String.class, child))
+                .isNotEqualTo("Erased");
+            assertThat(get("/v1/privacy/requests/" + erasureId, parent).getBody().get("status").asText())
+                .isEqualTo("open");
+        } finally {
+            // The family is told no, with the reason the office gave.
+            var refused = post("/v1/privacy/requests/" + erasureId + "/refuse",
+                body("reason", "Child is enrolled; ask again on leaving"), registrar);
+            assertThat(refused.getBody().get("status").asText()).isEqualTo("refused");
+        }
+        assertThat(get("/v1/privacy/requests/" + erasureId, parent).getBody().get("decisionReason").asText())
+            .isEqualTo("Child is enrolled; ask again on leaving");
+
+        // --- erasure of a child who has left: served, and what it leaves behind ---
+        String suffix = UUID.randomUUID().toString().substring(0, 6);
+        String admissionNo = "SEC09-" + suffix;
+        String leaverEmail = "sec09-" + suffix + "@cert.test";
+        UUID leaver = UUID.fromString(post("/v1/people/students", body(
+            "schoolId", cbse().id(), "admissionNo", admissionNo, "firstName", "Sec09",
+            "lastName", "Leaver-" + suffix, "dob", "2015-05-05", "gender", "female"),
+            principalToken(cbse())).getBody().get("id").asText());
+        UUID leaverGuardian = UUID.randomUUID();
+        inChainDo(jdbc -> {
+            jdbc.update("INSERT INTO guardian (id, school_id, first_name, last_name, phone, email) "
+                + "VALUES (?, ?, 'Sec09', 'Parent', ?, ?)",
+                leaverGuardian, cbse().id(), "+9188" + Math.abs(suffix.hashCode()), leaverEmail);
+            jdbc.update("INSERT INTO guardian_student (guardian_id, student_id, relation, is_primary) "
+                + "VALUES (?, ?, 'mother', TRUE)", leaverGuardian, leaver);
+            jdbc.update("INSERT INTO user_account (school_id, subject_type, subject_id, email) "
+                + "VALUES (?, 'guardian', ?, ?)", cbse().id(), leaverGuardian, leaverEmail);
+        });
+        String leaverParent = guardianTokenFor(cbse(), leaver);
+        post("/v1/privacy/students/" + leaver + "/consents",
+            body("purpose", "biometric", "granted", true, "source", "parent_app"), leaverParent);
+
+        UUID goId = UUID.fromString(post("/v1/privacy/requests",
+            body("studentId", leaver, "kind", "erasure"), leaverParent).getBody().get("id").asText());
+        var served = post("/v1/privacy/requests/" + goId + "/fulfil",
+            body("reason", "Left the school; identity verified at the counter"), registrar);
+        assertThat(served.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(served.getBody().get("status").asText()).isEqualTo("fulfilled");
+
+        // The person is gone from the row; the row, and its key, are not.
+        var row = inChain(jdbc -> jdbc.queryForMap(
+            "SELECT first_name, last_name, dob, gender, admission_no, erased_at FROM student WHERE id = ?",
+            leaver));
+        assertThat(row.get("first_name")).isEqualTo("Erased");
+        assertThat(row.get("last_name")).isNull();
+        assertThat(row.get("dob")).isNull();
+        assertThat(row.get("gender")).isNull();
+        assertThat(row.get("admission_no")).isEqualTo(admissionNo);
+        assertThat(row.get("erased_at")).isNotNull();
+
+        // A parent who was here for this child alone goes with them, and so
+        // does their way in; the address is free for whoever holds it next.
+        var parentRow = inChain(jdbc -> jdbc.queryForMap(
+            "SELECT first_name, phone, email, erased_at FROM guardian WHERE id = ?", leaverGuardian));
+        assertThat(parentRow.get("first_name")).isEqualTo("Erased");
+        assertThat(parentRow.get("phone")).isNull();
+        assertThat(parentRow.get("email")).isNull();
+        assertThat(count("SELECT count(*) FROM user_account WHERE email = ?", leaverEmail)).isZero();
+        assertThat(count("SELECT count(*) FROM user_account WHERE subject_id = ? AND is_active",
+            leaverGuardian)).isZero();
+        assertThat(count("SELECT count(*) FROM consent_record WHERE subject_id = ? AND revoked_at IS NULL",
+            leaver)).isZero();
+        // A token still in the parent's browser opens nothing.
+        assertThat(get("/v1/privacy/students/" + leaver + "/consents", leaverParent).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Who served it and why is on the school's own record, and serving it
+        // again is the same answer rather than an error.
+        assertAudited("privacy.request_fulfilled", goId, cbse().registrarUserId(),
+            "Left the school; identity verified at the counter");
+        assertThat(post("/v1/privacy/requests/" + goId + "/fulfil",
+            body("reason", "Retry after a timeout"), registrar).getBody().get("status").asText())
+            .isEqualTo("fulfilled");
     }
 
     @Test @Tag("P1")

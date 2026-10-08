@@ -108,7 +108,7 @@ Each bounded context is `com.schoolsoft.<module>`, split in two:
 Modules: `admissions`, `assessment`, `attendance`, `audit`, `boardintegration`,
 `certificate`, `comms`, `curriculum`, `dashboard`, `device`, `enrolment`,
 `eventbus`, `featureflags`, `fees`, `file`, `iam`, `jobs`, `library`, `lms`,
-`notification`, `people`, `publicsite`, `rollover`, `schoolcalendar`, `search`,
+`notification`, `people`, `privacy`, `publicsite`, `rollover`, `schoolcalendar`, `search`,
 `tenancy`, `theming`, `timetable`, `transport`.
 
 `package-info.java` in each declares the Modulith module and, more usefully,
@@ -412,6 +412,16 @@ Worth knowing before trusting a green build:
   into a chain says which with `OperatorTrail.about(chainId)` —
   `ChainAdminController.inChain` does it for all of its own. The table refuses
   UPDATE and DELETE. `SEC-06` is the worked example.
+
+- **An erasure removes the person, not the record.** A served erasure
+  (`privacy/internal/Erasure`) blanks who the child and their family were and
+  stamps `erased_at`; it deletes no row, because the ledger, the register and
+  the certificates hang off the student's id and the school must keep them. It
+  is refused while any enrolment has not ended. A new table that stores a
+  name, a number or an address about a child or parent outside `student` and
+  `guardian` needs a line in `Erasure` — the export finds a new table by
+  itself (anything with a `student_id`), the erasure does not. `SEC-09` is the
+  worked example.
 
 ## Known gaps
 
