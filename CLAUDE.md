@@ -26,10 +26,11 @@ Six Next.js apps in one npm workspace: `school-web`, `platform-web`,
 `public-site`, `parent-app`, `teacher-app`, `driver-app`.
 
 Two shared packages sit beside them: `@schoolsoft/api-client` (transport,
-error type, the 401 → refresh → replay dance) and `@schoolsoft/ui`, which so
-far holds one piece — `CodeStep`, the six-box sign-in code input, extracted
-before the second surface copied it. Both are source-exported and listed in
-each app's `transpilePackages`.
+error type, the 401 → refresh → replay dance) and `@schoolsoft/ui`, which
+holds three pieces — `CodeStep`, the six-box sign-in code input; `ReasonField`,
+the inline field an audited act asks its reason in; and `SyncConflicts`, the
+list a register's overtaken marks are decided from. Both are source-exported,
+and an app that uses one lists it in its `transpilePackages`.
 
 `school-web` (:3001) is the school's own: the office's screens, and — on
 `/chain`, for a `chain_admin` — the chain HQ that opens a school and watches
@@ -292,6 +293,19 @@ Worth knowing before trusting a green build:
   months, recurring heads only (`fees/internal/ProRata`). "Joined" is the first
   day of the child's first enrolment that year, not of the enrolment they hold
   now — a section change is not a late start.
+- **A gate read is evidence, a mark is a decision.** A biometric or RFID
+  event goes through `AttendanceMarking.gateRead`, never `mark`: it fills a
+  day nobody has recorded and changes nothing on one somebody has — not the
+  status, not `marked_at` — and it is never refused for what is already there,
+  because a bridge retries a refusal. What the device saw is kept in
+  `gate_seen_at` either way. A person may overwrite a device's mark; the
+  reverse never happens.
+- **A register is saved against what was read.** Both registers send each
+  mark with the `markedAt` they loaded (`POST /v1/attendance/mark/sync`), and
+  the write is conditional on it in one statement. A mark somebody overtook
+  comes back as a conflict with both values instead of winning by arriving
+  last; it is never an HTTP error, because one child must not cost the
+  register. `ATT-09` is the worked example.
 - High-risk mutations carry `@Audited(action, targetType, idParam, snapshot)`.
   `requireReason` defaults true. The interceptor is a **web** interceptor, so it
   runs ahead of method security: an audited endpoint called without a reason

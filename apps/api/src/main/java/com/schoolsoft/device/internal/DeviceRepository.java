@@ -99,7 +99,7 @@ public class DeviceRepository {
     /** Biometric or RFID event for a student — writes a day-level {@code attendance_record}. */
     public DeviceDto ingestStudentEvent(UUID deviceId, UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate, String source) {
         DeviceDto device = touchAndGet(deviceId);
-        attendance.markDay(schoolId, studentId, sectionId, onDate, "present", source);
+        attendance.gateRead(schoolId, studentId, sectionId, onDate, source);
         return device;
     }
 

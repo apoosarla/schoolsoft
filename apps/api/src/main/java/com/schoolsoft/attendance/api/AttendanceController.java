@@ -85,6 +85,74 @@ public class AttendanceController {
             .toList();
     }
 
+    public record SyncEntry(
+        @NotNull UUID studentId, @NotBlank String status, String notes,
+        /** The {@code markedAt} the sender read for this student; null if they saw no record. */
+        java.time.Instant seenMarkedAt
+    ) {}
+
+    public record SyncRequest(
+        @NotNull UUID schoolId, @NotNull UUID sectionId, @NotNull LocalDate onDate, Integer periodNo,
+        @NotNull List<SyncEntry> entries
+    ) {}
+
+    /**
+     * Saves a register from a sender that may have been out of touch (ATT-09).
+     * Each mark lands only if the record is still what the sender last read;
+     * one that is not comes back as a conflict carrying both values, and the
+     * rest of the register is saved regardless. A phone that was offline for
+     * the first period must not lose thirty marks to one disagreement, and
+     * must not win that disagreement without anybody seeing it.
+     */
+    @PreAuthorize("@perm.can('attendance.mark')")
+    @PostMapping("/mark/sync")
+    public AttendanceSyncResultDto sync(@RequestBody SyncRequest req) {
+        authorizer.requireMayMark(req.sectionId(), req.onDate(), req.periodNo());
+        UUID markedBy = authz.currentStaffId();
+        List<AttendanceRecordDto> applied = new java.util.ArrayList<>();
+        List<AttendanceSyncResultDto.Conflict> conflicts = new java.util.ArrayList<>();
+        for (SyncEntry e : req.entries()) {
+            try {
+                var synced = marking.markIfUnchanged(req.schoolId(), e.studentId(), req.sectionId(), req.onDate(),
+                    req.periodNo(), e.status(), markedBy, e.notes(), e.seenMarkedAt());
+                if (synced.applied()) {
+                    applied.add(synced.record());
+                } else {
+                    conflicts.add(new AttendanceSyncResultDto.Conflict(
+                        e.studentId(), "changed", e.status(), synced.record(), null));
+                }
+            } catch (com.schoolsoft.platform.web.ConflictException | IllegalArgumentException refused) {
+                // One child the register cannot take — signed off, or a day the
+                // school was shut — is that child's problem, not the batch's.
+                conflicts.add(new AttendanceSyncResultDto.Conflict(e.studentId(), "refused", e.status(),
+                    repo.find(e.studentId(), req.onDate(), req.periodNo()).orElse(null), refused.getMessage()));
+            }
+        }
+        return new AttendanceSyncResultDto(applied, conflicts);
+    }
+
+    /**
+     * Days where a gate device saw a student the register has down as not
+     * there. A teacher sees their own sections; the office sees the school.
+     */
+    @PreAuthorize("@perm.can('attendance.view')")
+    @GetMapping("/gate-disagreements")
+    public List<GateDisagreementDto> gateDisagreements(
+        @RequestParam UUID schoolId, @RequestParam LocalDate from, @RequestParam LocalDate to,
+        @RequestParam(required = false) UUID sectionId
+    ) {
+        if (to.isBefore(from)) throw new IllegalArgumentException("The range ends before it starts");
+        if (from.plusDays(92).isBefore(to)) {
+            throw new IllegalArgumentException("Ask for three months or less at a time");
+        }
+        if (sectionId != null) {
+            teacherScope.requireSection(sectionId);
+            return repo.gateDisagreements(schoolId, from, to, List.of(sectionId));
+        }
+        var scope = teacherScope.ofCurrentUser();
+        return repo.gateDisagreements(schoolId, from, to, scope.unrestricted() ? null : scope.sectionIds());
+    }
+
     @PreAuthorize("@perm.can('attendance.view')")
     @GetMapping
     public List<AttendanceRecordDto> forSection(@RequestParam UUID sectionId, @RequestParam LocalDate onDate) {

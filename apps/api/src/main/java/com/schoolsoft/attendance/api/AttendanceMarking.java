@@ -17,7 +17,8 @@ import org.springframework.stereotype.Service;
  * so they land through here rather than through their own INSERT. That is what
  * keeps one rule in one place: the closed-year refusal and the working-day
  * check (GAP-01) apply to a biometric punch exactly as they apply to a class
- * teacher's mark.
+ * teacher's mark. What differs is precedence, and that is here too: a punch
+ * never changes what a person recorded (ATT-08).
  *
  * <p>Telling the family is part of that same rule (ATT-03), which is why it
  * lives here and not in the controller: a gate that reads a card at 08:02 and
@@ -35,11 +36,16 @@ public class AttendanceMarking {
         this.notifications = notifications;
     }
 
-    /** Marks a day-level record, upserting on (student, date). */
-    public AttendanceRecordDto markDay(
-        UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate, String status, String source
+    /**
+     * A gate device saw the student on {@code onDate}. Fills a day nobody has
+     * marked and leaves alone one somebody has — see
+     * {@link AttendanceRepository#recordGateRead}. No absence alert can follow:
+     * a punch only ever says present.
+     */
+    public AttendanceRecordDto gateRead(
+        UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate, String source
     ) {
-        return mark(schoolId, studentId, sectionId, onDate, null, status, source, null, null);
+        return repo.recordGateRead(schoolId, studentId, sectionId, onDate, source);
     }
 
     public AttendanceRecordDto mark(
@@ -50,6 +56,23 @@ public class AttendanceMarking {
             schoolId, studentId, sectionId, onDate, periodNo, status, source, markedByStaffId, notes);
         if ("absent".equals(status)) notifyAbsence(schoolId, studentId, onDate, periodNo, source, record);
         return record;
+    }
+
+    /**
+     * A mark from a sender that may have been out of touch: written only if
+     * the record is still what they last saw. The alert follows a mark that
+     * landed, exactly as it follows any other.
+     */
+    public AttendanceRepository.Synced markIfUnchanged(
+        UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate, Integer periodNo,
+        String status, UUID markedByStaffId, String notes, java.time.Instant seenMarkedAt
+    ) {
+        AttendanceRepository.Synced synced = repo.markIfUnchanged(
+            schoolId, studentId, sectionId, onDate, periodNo, status, markedByStaffId, notes, seenMarkedAt);
+        if (synced.applied() && "absent".equals(status)) {
+            notifyAbsence(schoolId, studentId, onDate, periodNo, "manual", synced.record());
+        }
+        return synced;
     }
 
     /**

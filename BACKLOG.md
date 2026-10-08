@@ -1809,9 +1809,41 @@ several are security-relevant.
 - **GAP-39 — Attendance accepts impossible dates.** ⚠️ **Partly closed
   2026-08-12 (Phase 1):** the write now refuses a future date (in the school's
   own timezone) and a date outside the student's enrolment window (ATT-12).
-  Still open: a replayed device backlog overwrites a manual correction because
-  no source precedence rule exists (ATT-08), and offline teacher marking has no
-  conflict surface at all (ATT-09).
+  **Source precedence closed 2026-10-08 (ATT-08):** a gate punch went through
+  the same upsert as a teacher's mark, so a device replaying a day's backlog
+  wrote `present` over a teacher's `absent` or an approved leave inside the
+  edit window, and was answered 409 outside it — which a bridge retries
+  forever. Device events now go through `AttendanceRepository.recordGateRead`:
+  one statement that fills a day nobody has marked and changes nothing on one
+  somebody has, not even `marked_at`, since touching that would reopen a
+  signed-off register. The punch is kept on the record regardless
+  (`gate_seen_at`, `gate_source`, V047), and the register in school-web and
+  teacher-app says so beside the child — as a warning when the status chosen
+  is absent or leave. A device event's `source` must be `biometric` or `rfid`.
+  The disagreements are also a read of their own —
+  `GET /v1/attendance/gate-disagreements`, a range, confined to a teacher's
+  own sections — behind the "Gate checks" tab on school-web's Attendance
+  screen, each row opening the register it is on.
+
+  **Offline marking closed 2026-10-08 (ATT-09).** A register save was a blind
+  upsert of the whole roster, so a teacher saving a stale screen — a phone
+  that was out of range for a period, or simply a tab left open — replaced a
+  leave the office had recorded in the meantime, and nobody was told.
+  `POST /v1/attendance/mark/sync` takes each mark with the `markedAt` the
+  sender last read and writes it only if the record has not moved
+  (`AttendanceRepository.markIfUnchanged`, one conditional statement). A mark
+  that has been overtaken comes back as a conflict carrying both values; the
+  rest of the register is saved; a signed-off day is reported per child
+  rather than failing the send. A device-only record yields to the teacher,
+  and a record that already agrees is left untouched. Both registers save
+  through it. teacher-app keeps a register it could not send in an outbox on
+  the device (per account, since staffroom tablets are shared), says so until
+  it has gone, and sends it on reconnect; conflicts are decided from a shared
+  `SyncConflicts` list in `@schoolsoft/ui` — use mine, or keep theirs.
+  Not built: the old `/mark/bulk` is still there and still blind (nothing in
+  the repo calls it now); the outbox holds registers only, so opening a
+  roster that was never loaded still needs a connection; parent-app and
+  driver-app have no offline path.
 
 - **GAP-40 — Timetable reads ignore effective dates.** ⚠️ **Partly closed.**
   Every read now applies the slot's window (`TimetableRepository.IN_FORCE`), a

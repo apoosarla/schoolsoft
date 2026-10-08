@@ -79,11 +79,15 @@ public class AttendanceRepository {
         (Integer) rs.getObject("period_no"),
         rs.getString("status"),
         rs.getString("source"),
-        rs.getString("notes")
+        rs.getString("notes"),
+        rs.getTimestamp("gate_seen_at") == null ? null : rs.getTimestamp("gate_seen_at").toInstant(),
+        rs.getString("gate_source"),
+        rs.getTimestamp("marked_at").toInstant()
     );
 
     private static final String RECORD_COLS =
-        "id, school_id, student_id, section_id, on_date, period_no, status, source, notes";
+        "id, school_id, student_id, section_id, on_date, period_no, status, source, notes, " +
+        "gate_seen_at, gate_source, marked_at";
 
     /**
      * Upserts on {@code (student_id, on_date, period_no)}. Period-level marks
@@ -96,28 +100,7 @@ public class AttendanceRepository {
         UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate, Integer periodNo,
         String status, String source, UUID markedByStaffId, String notes
     ) {
-        academicYears.requireOpenOn(schoolId, onDate);
-
-        // Attendance is a record of something that happened. A date the school
-        // has not reached yet, or one outside the student's own enrolment
-        // window, is a mis-keyed form rather than a fact (ATT-12).
-        LocalDate today = clock.today(schoolId);
-        if (onDate.isAfter(today)) {
-            throw new IllegalArgumentException(
-                "Attendance cannot be marked for a future date: " + onDate + " (today is " + today + ")");
-        }
-        requireEnrolledOn(studentId, sectionId, onDate);
-
-        // A day the school is not open on has no attendance to take, and letting
-        // one through would corrupt every percentage computed off the same
-        // calendar (GAP-01).
-        SectionScope scope = scopeOf(sectionId);
-        var day = workingDays.statusOf(schoolId, onDate, scope.gradeId(), scope.campusId());
-        if (!day.working()) {
-            throw new IllegalArgumentException(
-                "Attendance cannot be marked on " + onDate + ": " + day.reason());
-        }
-
+        requireMarkable(schoolId, studentId, sectionId, onDate);
         requireInsideMarkingWindow(schoolId, studentId, onDate, periodNo, status);
 
         UUID id = UUID.randomUUID();
@@ -139,14 +122,183 @@ public class AttendanceRepository {
         );
     }
 
+    /** What {@link #markIfUnchanged} did: wrote the mark, or found the record had moved. */
+    public record Synced(boolean applied, AttendanceRecordDto record) {}
+
+    /**
+     * Marks, but only if the record is still what the sender last saw
+     * (ATT-09).
+     *
+     * <p>{@code seenMarkedAt} is the {@code markedAt} the sender read, or null
+     * if they saw no record at all. A teacher who marked a register on a phone
+     * with no signal sends it an hour later; in that hour the office may have
+     * recorded a leave for one of the children. Written blind, the stale
+     * 'absent' replaces the leave and nobody is told. Here the write is
+     * conditional on the token still matching, in the same statement, so there
+     * is no gap between checking and writing for a third save to land in.</p>
+     *
+     * <p>Two things are not conflicts. A record a device filled in and nobody
+     * has touched since yields to the teacher, by the same precedence that
+     * stops the device overwriting the teacher. And a record that already says
+     * what the sender wants is left exactly as it is — agreeing with somebody
+     * is not a reason to take their name off the mark.</p>
+     */
+    public Synced markIfUnchanged(
+        UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate, Integer periodNo,
+        String status, UUID markedByStaffId, String notes, java.time.Instant seenMarkedAt
+    ) {
+        requireMarkable(schoolId, studentId, sectionId, onDate);
+        requireInsideMarkingWindow(schoolId, studentId, onDate, periodNo, status);
+
+        String conflictClause = periodNo == null
+            ? "ON CONFLICT (student_id, on_date) WHERE period_no IS NULL AND voided_at IS NULL DO UPDATE SET "
+            : "ON CONFLICT (student_id, on_date, period_no) WHERE period_no IS NOT NULL AND voided_at IS NULL DO UPDATE SET ";
+        int written = jdbc.update(
+            "INSERT INTO attendance_record (id, school_id, student_id, section_id, on_date, period_no, status, source, marked_by_staff_id, notes) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?) " +
+            conflictClause +
+            "  status = EXCLUDED.status, source = EXCLUDED.source, marked_by_staff_id = EXCLUDED.marked_by_staff_id, " +
+            "  marked_at = now(), notes = EXCLUDED.notes " +
+            "WHERE attendance_record.status <> EXCLUDED.status AND (" +
+            "    attendance_record.marked_at = ? " +
+            "    OR (attendance_record.source IN ('biometric','rfid') AND attendance_record.status = 'present' " +
+            "        AND attendance_record.leave_application_id IS NULL))",
+            UUID.randomUUID(), schoolId, studentId, sectionId, Date.valueOf(onDate), periodNo, status,
+            markedByStaffId, notes, seenMarkedAt == null ? null : java.sql.Timestamp.from(seenMarkedAt));
+        AttendanceRecordDto now = jdbc.queryForObject(
+            "SELECT " + RECORD_COLS + " FROM attendance_record WHERE student_id = ? AND on_date = ? " +
+            "  AND period_no IS NOT DISTINCT FROM ? AND voided_at IS NULL",
+            RECORD_MAPPER, studentId, Date.valueOf(onDate), periodNo);
+        return new Synced(written == 1 || now.status().equals(status), now);
+    }
+
+    /** The record as it stands, for telling a sender what their mark ran into. */
+    public java.util.Optional<AttendanceRecordDto> find(UUID studentId, LocalDate onDate, Integer periodNo) {
+        return jdbc.query(
+            "SELECT " + RECORD_COLS + " FROM attendance_record WHERE student_id = ? AND on_date = ? " +
+            "  AND period_no IS NOT DISTINCT FROM ? AND voided_at IS NULL",
+            RECORD_MAPPER, studentId, Date.valueOf(onDate), periodNo).stream().findFirst();
+    }
+
+    /**
+     * Days in a range where a gate device reported a student the register has
+     * down as not there. {@code sectionIds} null means every section the
+     * school has; a list confines the read to those, which is how a teacher
+     * sees their own classes and no others.
+     */
+    public List<com.schoolsoft.attendance.api.GateDisagreementDto> gateDisagreements(
+        UUID schoolId, LocalDate from, LocalDate to, List<UUID> sectionIds
+    ) {
+        if (sectionIds != null && sectionIds.isEmpty()) return List.of();
+        StringBuilder sql = new StringBuilder(
+            "SELECT ar.id, ar.on_date, ar.student_id, ar.section_id, ar.status, ar.source, ar.gate_source, " +
+            "       ar.gate_seen_at, st.admission_no, " +
+            "       trim(concat_ws(' ', st.first_name, st.last_name)) AS student_name, " +
+            "       (g.name || '-' || sec.code) AS section_label " +
+            "FROM attendance_record ar " +
+            "JOIN student st ON st.id = ar.student_id " +
+            "JOIN section sec ON sec.id = ar.section_id JOIN grade g ON g.id = sec.grade_id " +
+            "WHERE ar.school_id = ? AND ar.on_date BETWEEN ? AND ? AND ar.period_no IS NULL " +
+            "  AND ar.voided_at IS NULL AND ar.gate_seen_at IS NOT NULL " +
+            "  AND ar.status IN ('absent','leave','excused')");
+        List<Object> args = new java.util.ArrayList<>(List.of(schoolId, Date.valueOf(from), Date.valueOf(to)));
+        if (sectionIds != null) {
+            sql.append(" AND ar.section_id IN (")
+                .append(String.join(",", java.util.Collections.nCopies(sectionIds.size(), "?"))).append(")");
+            args.addAll(sectionIds);
+        }
+        sql.append(" ORDER BY ar.on_date DESC, section_label, student_name");
+        return jdbc.query(sql.toString(), (rs, i) -> new com.schoolsoft.attendance.api.GateDisagreementDto(
+            UUID.fromString(rs.getString("id")), rs.getDate("on_date").toLocalDate(),
+            UUID.fromString(rs.getString("student_id")), rs.getString("student_name"), rs.getString("admission_no"),
+            UUID.fromString(rs.getString("section_id")), rs.getString("section_label"),
+            rs.getString("status"), rs.getString("source"), rs.getString("gate_source"),
+            rs.getTimestamp("gate_seen_at").toInstant()), args.toArray());
+    }
+
+    private static final java.util.Set<String> GATE_SOURCES = java.util.Set.of("biometric", "rfid");
+
+    /**
+     * A device reporting that it saw the student on {@code onDate} (ATT-07,
+     * ATT-08).
+     *
+     * <p>Not {@link #mark}, because a punch is evidence and a mark is a
+     * decision. On a day nobody has recorded, the evidence is all there is and
+     * it becomes the record: present, by the device. On a day somebody has —
+     * a teacher's absent, an approved leave, an amendment — the record is
+     * theirs and stays exactly as it is, status, author and timestamp. A
+     * replayed backlog rewriting {@code marked_at} would reopen a signed-off
+     * register for editing, which is the amendment workflow's whole point
+     * undone by a device coming back online.</p>
+     *
+     * <p>One statement, so there is no window between looking and writing for
+     * a teacher's save to fall into. And never a refusal for what is already
+     * there: a bridge whose replay is rejected retries it, and a backlog must
+     * drain. The punch is kept either way in {@code gate_seen_at}, first one
+     * wins, so a child the register calls absent and the gate saw arrive is
+     * visible as that.</p>
+     */
+    public AttendanceRecordDto recordGateRead(
+        UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate, String source
+    ) {
+        if (source == null || !GATE_SOURCES.contains(source)) {
+            // The source decides who owns the record. A bridge that could send
+            // 'manual' could write a mark no later replay would ever yield to.
+            throw new IllegalArgumentException(
+                "A device event comes from 'biometric' or 'rfid', not '" + source + "'");
+        }
+        requireMarkable(schoolId, studentId, sectionId, onDate);
+
+        jdbc.update(
+            "INSERT INTO attendance_record (id, school_id, student_id, section_id, on_date, period_no, status, " +
+            "  source, gate_seen_at, gate_source) VALUES (?, ?, ?, ?, ?, NULL, 'present', ?, now(), ?) " +
+            "ON CONFLICT (student_id, on_date) WHERE period_no IS NULL AND voided_at IS NULL DO UPDATE SET " +
+            "  gate_seen_at = COALESCE(attendance_record.gate_seen_at, EXCLUDED.gate_seen_at), " +
+            "  gate_source = COALESCE(attendance_record.gate_source, EXCLUDED.gate_source)",
+            UUID.randomUUID(), schoolId, studentId, sectionId, Date.valueOf(onDate), source, source);
+        return jdbc.queryForObject(
+            "SELECT " + RECORD_COLS + " FROM attendance_record WHERE student_id = ? AND on_date = ? " +
+            "  AND period_no IS NULL AND voided_at IS NULL",
+            RECORD_MAPPER, studentId, Date.valueOf(onDate));
+    }
+
+    /**
+     * What has to hold for any attendance to be written against this student
+     * and date, whoever is writing it — a teacher or a gate.
+     */
+    private void requireMarkable(UUID schoolId, UUID studentId, UUID sectionId, LocalDate onDate) {
+        academicYears.requireOpenOn(schoolId, onDate);
+
+        // Attendance is a record of something that happened. A date the school
+        // has not reached yet, or one outside the student's own enrolment
+        // window, is a mis-keyed form rather than a fact (ATT-12).
+        LocalDate today = clock.today(schoolId);
+        if (onDate.isAfter(today)) {
+            throw new IllegalArgumentException(
+                "Attendance cannot be marked for a future date: " + onDate + " (today is " + today + ")");
+        }
+        requireEnrolledOn(studentId, sectionId, onDate);
+
+        // A day the school is not open on has no attendance to take, and letting
+        // one through would corrupt every percentage computed off the same
+        // calendar (GAP-01).
+        SectionScope scope = scopeOf(sectionId);
+        var day = workingDays.statusOf(schoolId, onDate, scope.gradeId(), scope.campusId());
+        if (!day.working()) {
+            throw new IllegalArgumentException(
+                "Attendance cannot be marked on " + onDate + ": " + day.reason());
+        }
+    }
+
     /**
      * A mark that changes a register the school has already signed off is an
      * amendment, not a correction (ATT-06). Inside the window the teacher who
      * mistyped it fixes it; outside, the upsert refuses and points at the
      * workflow that keeps the prior value.
      *
-     * Re-marking the same status is always allowed — a device replaying its
-     * backlog is not changing anything.
+     * Re-marking the same status is always allowed. A device never reaches
+     * this: its events go through {@link #recordGateRead}, which changes
+     * nothing a person wrote and so has nothing to be refused for.
      */
     private void requireInsideMarkingWindow(UUID schoolId, UUID studentId, LocalDate onDate,
                                             Integer periodNo, String status) {

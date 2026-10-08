@@ -39,6 +39,11 @@ export type AttendanceRecordDto = {
   status: string;
   source: string;
   notes: string | null;
+  /** When a gate device first reported this student for the day; absent when none did. */
+  gateSeenAt?: string;
+  gateSource?: string;
+  /** When the record was last decided. Sent back with a later mark as "what I was looking at". */
+  markedAt: string;
 };
 
 export type LeaveApplicationDto = {

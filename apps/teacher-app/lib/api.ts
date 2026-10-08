@@ -221,6 +221,11 @@ export type AttendanceRecordDto = {
   status: string;
   source: string;
   notes: string | null;
+  /** When a gate device first reported this student for the day; absent when none did. */
+  gateSeenAt?: string;
+  gateSource?: string;
+  /** When the record was last decided. Sent back with a later mark as "what I was looking at". */
+  markedAt: string;
 };
 
 export function attendanceForSectionOnDate(sectionId: string, onDate: string): Promise<AttendanceRecordDto[]> {
@@ -239,6 +244,42 @@ export function markAttendanceBulk(
   return apiFetch<AttendanceRecordDto[]>("/v1/attendance/mark/bulk", {
     method: "POST",
     body: JSON.stringify({ schoolId, sectionId, onDate, source: "manual", entries }),
+  });
+}
+
+export type AttendanceSyncEntry = {
+  studentId: string;
+  status: string;
+  /** The `markedAt` read for this student when the register was loaded; omitted if there was no record. */
+  seenMarkedAt?: string;
+};
+
+export type AttendanceSyncConflictDto = {
+  studentId: string;
+  kind: "changed" | "refused";
+  yours: string;
+  theirs?: AttendanceRecordDto;
+  message?: string;
+};
+
+export type AttendanceSyncResultDto = {
+  applied: AttendanceRecordDto[];
+  conflicts: AttendanceSyncConflictDto[];
+};
+
+/**
+ * Saves a register against what was read. A mark whose record has moved since
+ * comes back as a conflict instead of overwriting it; the rest are saved.
+ */
+export function syncAttendance(
+  schoolId: string,
+  sectionId: string,
+  onDate: string,
+  entries: AttendanceSyncEntry[]
+): Promise<AttendanceSyncResultDto> {
+  return apiFetch<AttendanceSyncResultDto>("/v1/attendance/mark/sync", {
+    method: "POST",
+    body: JSON.stringify({ schoolId, sectionId, onDate, entries }),
   });
 }
 

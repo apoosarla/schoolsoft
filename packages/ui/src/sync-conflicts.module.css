@@ -1,0 +1,48 @@
+/* A short list of disagreements, each with both values and the two ways out.
+   Colours are the host app's tokens. */
+
+.list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.item {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+
+.who {
+  font-weight: 600;
+}
+
+.where {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.values {
+  margin: 4px 0 8px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.secondary {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border-strong);
+  box-shadow: none;
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}

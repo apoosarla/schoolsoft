@@ -306,3 +306,39 @@ button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 }
 .panel-btn:hover { background: none; }
 .panel-btn:active { transform: none; }
+
+/* A gate read that contradicts the register: one of the two is wrong. */
+.gate-disagrees {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--warning);
+}
+
+/* A register that has not reached the school yet. Stays until it has. */
+.outbox-banner {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--warning);
+  background: var(--warning-wash);
+  font-size: 13px;
+}
+
+.conflict-panel {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+}
+
+.link-button {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  min-height: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
