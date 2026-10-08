@@ -446,7 +446,7 @@ public class FeesRepository {
     public List<FeeScheduleRunDto> listScheduleRuns(UUID schoolId, UUID academicYearId) {
         String sql =
             "SELECT r.id, r.school_id, r.academic_year_id, r.cycle_label, r.grade_id, g.code AS grade_code, " +
-            "       r.due_on, r.state, r.invoices_created, r.students_skipped, r.total_billed, " +
+            "       r.due_on, r.period_start, r.period_end, r.state, r.invoices_created, r.students_skipped, r.total_billed, " +
             "       r.run_by_staff_id, r.created_at " +
             "FROM fee_schedule_run r LEFT JOIN grade g ON g.id = r.grade_id " +
             "WHERE r.school_id = ?" + (academicYearId == null ? "" : " AND r.academic_year_id = ?") +
@@ -461,6 +461,8 @@ public class FeesRepository {
             rs.getString("grade_id") == null ? null : UUID.fromString(rs.getString("grade_id")),
             rs.getString("grade_code"),
             rs.getDate("due_on").toLocalDate(),
+            rs.getDate("period_start") == null ? null : rs.getDate("period_start").toLocalDate(),
+            rs.getDate("period_end") == null ? null : rs.getDate("period_end").toLocalDate(),
             rs.getString("state"),
             rs.getInt("invoices_created"),
             rs.getInt("students_skipped"),

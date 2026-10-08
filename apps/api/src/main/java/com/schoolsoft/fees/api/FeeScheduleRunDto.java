@@ -19,6 +19,9 @@ public record FeeScheduleRunDto(
     UUID gradeId,
     String gradeCode,
     LocalDate dueOn,
+    /** The months the cycle covers; null on a run that named none and so billed everyone whole. */
+    LocalDate periodStart,
+    LocalDate periodEnd,
     String state,
     int invoicesCreated,
     int studentsSkipped,

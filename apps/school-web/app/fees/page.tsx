@@ -168,7 +168,7 @@ export default function FeesPage() {
 
   // ---- generation
   const [runs, setRuns] = useState<FeeScheduleRunDto[] | null>(null);
-  const [runForm, setRunForm] = useState({ gradeId: "", cycleLabel: "", dueOn: todayIso() });
+  const [runForm, setRunForm] = useState({ gradeId: "", cycleLabel: "", dueOn: todayIso(), periodStart: "", periodEnd: "" });
   const [lastRun, setLastRun] = useState<FeeRunResultDto | null>(null);
 
   // ---- dunning
@@ -1397,14 +1397,36 @@ export default function FeesPage() {
                 value={runForm.cycleLabel}
                 onChange={(e) => setRunForm((f) => ({ ...f, cycleLabel: e.target.value }))}
               />
-              <input
-                type="date"
-                value={runForm.dueOn}
-                onChange={(e) => setRunForm((f) => ({ ...f, dueOn: e.target.value }))}
-              />
+              <label>
+                Due on{" "}
+                <input
+                  type="date"
+                  value={runForm.dueOn}
+                  onChange={(e) => setRunForm((f) => ({ ...f, dueOn: e.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="form-row">
+              <label>
+                Covers{" "}
+                <input
+                  type="date"
+                  value={runForm.periodStart}
+                  onChange={(e) => setRunForm((f) => ({ ...f, periodStart: e.target.value }))}
+                />
+              </label>
+              <label>
+                to{" "}
+                <input
+                  type="date"
+                  value={runForm.periodEnd}
+                  min={runForm.periodStart || undefined}
+                  onChange={(e) => setRunForm((f) => ({ ...f, periodEnd: e.target.value }))}
+                />
+              </label>
               <button
                 type="button"
-                disabled={busy || !yearId || !runForm.cycleLabel}
+                disabled={busy || !yearId || !runForm.cycleLabel || !runForm.periodStart !== !runForm.periodEnd}
                 onClick={() =>
                   run(async () => {
                     const result = await generateInvoices({
@@ -1413,6 +1435,8 @@ export default function FeesPage() {
                       gradeId: runForm.gradeId || undefined,
                       cycleLabel: runForm.cycleLabel,
                       dueOn: runForm.dueOn,
+                      periodStart: runForm.periodStart || undefined,
+                      periodEnd: runForm.periodEnd || undefined,
                       runByStaffId: staffId || undefined,
                     });
                     setLastRun(result);
@@ -1428,6 +1452,11 @@ export default function FeesPage() {
                 Run generation
               </button>
             </div>
+            <p className="hint">
+              Say which months the cycle covers and a child who joined partway through is billed from their
+              joining month — recurring heads only, with the share written on the line. Leave both dates
+              empty to bill everyone the whole amount.
+            </p>
             {lastRun && (
               <p className="hint">
                 Due dates land on the next working day, so a cycle due on a holiday does not turn a family
@@ -1443,6 +1472,7 @@ export default function FeesPage() {
                 <tr>
                   <th>Cycle</th>
                   <th>Cohort</th>
+                  <th>Covers</th>
                   <th>Due</th>
                   <th>Invoices</th>
                   <th>Skipped</th>
@@ -1456,6 +1486,7 @@ export default function FeesPage() {
                   <tr key={r.id}>
                     <td>{r.cycleLabel}</td>
                     <td>{r.gradeCode ?? "whole school"}</td>
+                    <td>{r.periodStart && r.periodEnd ? `${r.periodStart} to ${r.periodEnd}` : "—"}</td>
                     <td>{r.dueOn}</td>
                     <td>{r.invoicesCreated}</td>
                     <td>{r.studentsSkipped}</td>
@@ -1468,7 +1499,7 @@ export default function FeesPage() {
                 ))}
                 {runs?.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="hint">
+                    <td colSpan={9} className="hint">
                       Nothing billed for this year yet.
                     </td>
                   </tr>

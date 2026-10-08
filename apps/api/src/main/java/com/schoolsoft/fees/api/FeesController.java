@@ -203,14 +203,16 @@ public class FeesController {
 
     public record GenerateRequest(
         @NotNull UUID schoolId, @NotNull UUID academicYearId, UUID gradeId, @NotBlank String cycleLabel,
-        @NotNull LocalDate dueOn, UUID runByStaffId
+        @NotNull LocalDate dueOn, UUID runByStaffId,
+        /** The months the cycle covers. Optional; with them, a mid-year joiner is billed from their joining month. */
+        LocalDate periodStart, LocalDate periodEnd
     ) {}
 
     @PreAuthorize("@perm.can('fee.invoice.manage')")
     @PostMapping("/generate")
     public FeeGenerationService.RunResult generate(@RequestBody GenerateRequest req) {
         return generation.generate(req.schoolId(), req.academicYearId(), req.gradeId(), req.cycleLabel(),
-            req.dueOn(), req.runByStaffId());
+            req.dueOn(), req.runByStaffId(), req.periodStart(), req.periodEnd());
     }
 
     /** What has been billed already, newest first — the answer to "did October run?". */

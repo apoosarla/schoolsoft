@@ -35,6 +35,11 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * GST is computed per head from {@code fee_head.gst_rate_pct} on the net amount
  * after discounts (FEE-13).
+ *
+ * A run that names the period its cycle covers bills a child who joined partway
+ * through for the months from their joining month on, recurring heads only
+ * (ADM-16, {@link ProRata}). The concessions then come off that reduced amount,
+ * so a 25% scholarship is 25% of what the child was actually charged.
  */
 @Service
 public class FeeGenerationService {
@@ -61,7 +66,14 @@ public class FeeGenerationService {
      */
     @Transactional
     public RunResult generate(UUID schoolId, UUID academicYearId, UUID gradeId, String cycleLabel,
-                              LocalDate dueOn, UUID runByStaffId) {
+                              LocalDate dueOn, UUID runByStaffId, LocalDate periodStart, LocalDate periodEnd) {
+        if ((periodStart == null) != (periodEnd == null)) {
+            throw new IllegalArgumentException(
+                "A billing period needs both its first and its last day, or neither");
+        }
+        if (periodStart != null && periodEnd.isBefore(periodStart)) {
+            throw new IllegalArgumentException("The billing period ends before it starts");
+        }
         var existing = jdbc.query(
             "SELECT id, invoices_created, students_skipped, total_billed FROM fee_schedule_run " +
             "WHERE school_id = ? AND academic_year_id = ? AND cycle_label = ? " +
@@ -76,10 +88,13 @@ public class FeeGenerationService {
         UUID runId = UUID.randomUUID();
         jdbc.update(
             "INSERT INTO fee_schedule_run (id, school_id, academic_year_id, cycle_label, grade_id, due_on, " +
-            "  state, run_by_staff_id) VALUES (?, ?, ?, ?, ?, ?, 'running', ?) " +
+            "  state, run_by_staff_id, period_start, period_end) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?) " +
             "ON CONFLICT (school_id, academic_year_id, cycle_label, grade_id) DO UPDATE SET " +
-            "  state = 'running', due_on = EXCLUDED.due_on, created_at = now()",
-            runId, schoolId, academicYearId, cycleLabel, gradeId, Date.valueOf(due), runByStaffId);
+            "  state = 'running', due_on = EXCLUDED.due_on, period_start = EXCLUDED.period_start, " +
+            "  period_end = EXCLUDED.period_end, created_at = now()",
+            runId, schoolId, academicYearId, cycleLabel, gradeId, Date.valueOf(due), runByStaffId,
+            periodStart == null ? null : Date.valueOf(periodStart),
+            periodEnd == null ? null : Date.valueOf(periodEnd));
         runId = jdbc.queryForObject(
             "SELECT id FROM fee_schedule_run WHERE school_id = ? AND academic_year_id = ? " +
             "  AND cycle_label = ? AND grade_id IS NOT DISTINCT FROM ?",
@@ -97,7 +112,12 @@ public class FeeGenerationService {
                 skipped++;
                 continue;
             }
-            double total = createInvoiceFor(student, schoolId, academicYearId, cycleLabel, due, runId);
+            ProRata.Share share = ProRata.months(periodStart, periodEnd, student.admittedOn());
+            if (share.nothing()) {
+                skipped++;                                  // joined after this cycle was over
+                continue;
+            }
+            double total = createInvoiceFor(student, schoolId, academicYearId, cycleLabel, due, runId, share);
             if (total < 0) {
                 skipped++;                                  // no structure for their grade
             } else {
@@ -121,11 +141,18 @@ public class FeeGenerationService {
      * three weeks before the last working day used to take the child off the
      * bill the day the form was signed, so the term they actually attended went
      * uninvoiced.
+     *
+     * <p>{@code admittedOn} is the first day of the child's first enrolment this
+     * year, not of the one they hold today: a move from 6-A to 6-B in November
+     * opens a new enrolment, and reading that as a November joiner would hand
+     * every child who changes section a discount.</p>
      */
     private List<Enrolled> enrolledStudents(UUID schoolId, UUID academicYearId, UUID gradeId) {
         LocalDate today = clock.today(schoolId);
         StringBuilder sql = new StringBuilder(
-            "SELECT st.id AS student_id, sec.grade_id, st.family_id, e.starts_on " +
+            "SELECT st.id AS student_id, sec.grade_id, st.family_id, " +
+            "  (SELECT min(first.starts_on) FROM enrolment first WHERE first.student_id = e.student_id " +
+            "     AND first.academic_year_id = e.academic_year_id) AS starts_on " +
             "FROM enrolment e JOIN section sec ON sec.id = e.section_id " +
             "JOIN student st ON st.id = e.student_id " +
             "WHERE e.school_id = ? AND e.academic_year_id = ? AND " + EnrolmentActivity.activeOn("e"));
@@ -145,14 +172,18 @@ public class FeeGenerationService {
 
     /** Returns the invoice total, or -1 when the grade has no structure to bill from. */
     private double createInvoiceFor(Enrolled student, UUID schoolId, UUID academicYearId,
-                                    String cycleLabel, LocalDate dueOn, UUID runId) {
+                                    String cycleLabel, LocalDate dueOn, UUID runId, ProRata.Share share) {
         var structureLines = jdbc.query(
-            "SELECT l.fee_head_id, h.code, h.name, l.amount, h.gst_rate_pct " +
+            "SELECT l.fee_head_id, h.code, h.name, l.amount, h.gst_rate_pct, h.is_recurring " +
             "FROM fee_structure s JOIN fee_structure_line l ON l.fee_structure_id = s.id " +
             "JOIN fee_head h ON h.id = l.fee_head_id " +
             "WHERE s.school_id = ? AND s.grade_id = ? AND s.academic_year_id = ? ORDER BY h.code",
-            (rs, i) -> new Charge(UUID.fromString(rs.getString("fee_head_id")), rs.getString("code"),
-                rs.getString("name"), rs.getDouble("amount"), rs.getDouble("gst_rate_pct"), "structure"),
+            (rs, i) -> rs.getBoolean("is_recurring") && !share.whole()
+                ? new Charge(UUID.fromString(rs.getString("fee_head_id")), rs.getString("code"),
+                    rs.getString("name") + " (" + share.label() + ")", share.of(rs.getDouble("amount")),
+                    rs.getDouble("gst_rate_pct"), "structure")
+                : new Charge(UUID.fromString(rs.getString("fee_head_id")), rs.getString("code"),
+                    rs.getString("name"), rs.getDouble("amount"), rs.getDouble("gst_rate_pct"), "structure"),
             schoolId, student.gradeId(), academicYearId);
         if (structureLines.isEmpty()) return -1;
 
