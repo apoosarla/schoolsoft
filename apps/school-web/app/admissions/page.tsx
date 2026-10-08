@@ -27,6 +27,7 @@ import {
   Session,
   transitionAdmissionApplication,
 } from "@/lib/api";
+import { todayIso } from "@/lib/format";
 
 const SOURCES = ["website", "walkin", "referral", "ad"];
 
@@ -402,6 +403,7 @@ export default function AdmissionsPage() {
             />
             <input
               type="date"
+              max={todayIso()}
               value={form.applicantDob}
               onChange={(e) => setForm((f) => ({ ...f, applicantDob: e.target.value }))}
             />
@@ -494,6 +496,7 @@ export default function AdmissionsPage() {
               <span>Date of birth</span>
               <input
                 type="date"
+                max={todayIso()}
                 value={adv.dob}
                 onChange={(e) => setAdv((a) => ({ ...a, dob: e.target.value }))}
               />
