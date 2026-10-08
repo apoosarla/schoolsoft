@@ -2,8 +2,11 @@ package com.schoolsoft.admissions.internal;
 
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.platform.time.SchoolClock;
+import com.schoolsoft.admissions.api.AdmissionFeeDto;
 import com.schoolsoft.admissions.api.AdmissionPolicyDto;
 import com.schoolsoft.admissions.api.PublicAdmissions;
+import com.schoolsoft.fees.api.AdmissionFeeStatusDto;
+import com.schoolsoft.fees.api.AdmissionFees;
 import com.schoolsoft.iam.api.PermissionChecker;
 import com.schoolsoft.notification.api.Notice;
 import com.schoolsoft.notification.api.NotificationService;
@@ -11,6 +14,7 @@ import com.schoolsoft.platform.web.ConflictException;
 import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.platform.web.NotFoundException;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -51,13 +55,15 @@ public class AdmissionsService implements PublicAdmissions {
     private final SchoolClock clock;
     private final NotificationService notifications;
     private final PermissionChecker permissions;
+    private final AdmissionFees admissionFees;
 
     public AdmissionsService(AdmissionsRepository repo, NotificationService notifications,
-                             PermissionChecker permissions, SchoolClock clock) {
+                             PermissionChecker permissions, SchoolClock clock, AdmissionFees admissionFees) {
         this.repo = repo;
         this.notifications = notifications;
         this.permissions = permissions;
         this.clock = clock;
+        this.admissionFees = admissionFees;
     }
 
     @Override
@@ -146,6 +152,16 @@ public class AdmissionsService implements PublicAdmissions {
      * {@code oncePer} key would have suppressed a second message anyway, but
      * not writing a second {@code admission_event} row matters to the
      * time-in-stage figures that trail feeds.</p>
+     *
+     * <p>{@code fee_pending} is the one stage with something to settle
+     * (ADM-13). Arriving there raises the admission fee the school charges for
+     * the applicant's grade, if it charges one; leaving it for {@code review}
+     * is refused until that invoice is paid in full. Nothing advances the
+     * application when the money lands — the move stays somebody's deliberate
+     * act — so a cheque that bounces before the move leaves the application
+     * exactly where it was, owing again. The exits and the step back to
+     * {@code document_pending} are not gated: a family that withdraws does not
+     * have to pay first.</p>
      */
     @Transactional
     public AdmissionApplicationDto transition(UUID id, String toState, UUID actorUserId,
@@ -174,6 +190,15 @@ public class AdmissionsService implements PublicAdmissions {
                 : clock.today(current.schoolId()).plusDays(policy.offerValidityDays());
         }
 
+        if ("fee_pending".equals(current.state()) && "review".equals(toState)) {
+            admissionFees.statusFor(id).filter(fee -> !fee.settled()).ifPresent(fee -> {
+                throw new ConflictException(
+                    "The admission fee on " + fee.invoiceNo() + " is not paid in full — "
+                    + String.format("%.2f of %.2f", fee.outstanding(), fee.total())
+                    + " is outstanding. Record the payment, then move the application on.");
+            });
+        }
+
         if (!repo.transitionFrom(id, current.state(), toState, actorUserId, expiry)) {
             var now = repo.find(id).orElseThrow(() -> new NotFoundException("Application not found: " + id));
             // Two people made the same move at once. The second one has nothing
@@ -184,6 +209,12 @@ public class AdmissionsService implements PublicAdmissions {
                 + "it is no longer in '" + current.state() + "'.");
         }
         AdmissionApplicationDto moved = repo.find(id).orElseThrow();
+
+        if ("fee_pending".equals(toState)) {
+            repo.admissionFee(moved.schoolId(), moved.academicYearId(), moved.gradeId()).ifPresent(fee ->
+                admissionFees.raise(moved.schoolId(), id, moved.applicationNo(),
+                    displayName(moved.applicantFirstName(), moved.applicantLastName()), fee.amount()));
+        }
 
         String template = OUTCOME_TEMPLATES.get(toState);
         if (template != null) {
@@ -259,7 +290,34 @@ public class AdmissionsService implements PublicAdmissions {
      */
     @Transactional
     public UUID enrol(UUID applicationId, UUID sectionId, String rollNo, String overCapacityReason) {
-        return repo.convertToStudent(applicationId, sectionId, rollNo, overCapacityReason);
+        UUID studentId = repo.convertToStudent(applicationId, sectionId, rollNo, overCapacityReason);
+        // The fee the family paid as applicants is the child's from here on, so
+        // it shows on their account and in their guardian's app.
+        admissionFees.attachToStudent(applicationId, studentId);
+        return studentId;
+    }
+
+    // ------------------------------------------------------- the admission fee
+
+    public List<AdmissionFeeDto> admissionFees(UUID schoolId, UUID academicYearId) {
+        return repo.admissionFees(schoolId, academicYearId);
+    }
+
+    /**
+     * Sets what a grade's applications are charged; zero takes the fee away.
+     * It applies to applications that reach {@code fee_pending} from now on —
+     * one already billed keeps the invoice it was given.
+     */
+    public List<AdmissionFeeDto> saveAdmissionFee(UUID schoolId, UUID academicYearId, UUID gradeId, double amount) {
+        if (amount < 0) throw new IllegalArgumentException("An admission fee cannot be negative.");
+        repo.saveAdmissionFee(schoolId, academicYearId, gradeId, amount);
+        return repo.admissionFees(schoolId, academicYearId);
+    }
+
+    public Optional<AdmissionFeeStatusDto> admissionFeeFor(UUID applicationId) {
+        repo.find(applicationId).orElseThrow(
+            () -> new NotFoundException("Application not found: " + applicationId));
+        return admissionFees.statusFor(applicationId);
     }
 
     private static String displayName(String first, String last) {

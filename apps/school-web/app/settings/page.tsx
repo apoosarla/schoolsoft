@@ -3,11 +3,18 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AcademicYearDto,
+  AdmissionFeeDto,
   AdmissionPolicyDto,
   ApiError,
   getAdmissionPolicy,
   getSession,
+  GradeDto,
   hasScreen,
+  listAcademicYears,
+  listAdmissionFees,
+  listGrades,
+  saveAdmissionFee,
   saveAdmissionPolicy,
   Session,
 } from "@/lib/api";
@@ -26,6 +33,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [years, setYears] = useState<AcademicYearDto[]>([]);
+  const [grades, setGrades] = useState<GradeDto[]>([]);
+  const [feeYear, setFeeYear] = useState("");
+  // What the server holds, and what is typed in each box until it is saved.
+  const [fees, setFees] = useState<AdmissionFeeDto[]>([]);
+  const [feeDraft, setFeeDraft] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const s = getSession();
@@ -44,7 +57,60 @@ export default function SettingsPage() {
         setDays(String(p.offerValidityDays));
       })
       .catch((err) => setError(describeError(err)));
+    Promise.all([listAcademicYears(s.schoolId), listGrades(s.schoolId)])
+      .then(([ys, gs]) => {
+        setYears(ys);
+        setGrades([...gs].sort((a, b) => a.sortOrder - b.sortOrder));
+        setFeeYear((ys.find((y) => y.isCurrent) ?? ys[0])?.id ?? "");
+      })
+      .catch((err) => setError(describeError(err)));
   }, [router]);
+
+  useEffect(() => {
+    if (!session || !feeYear) return;
+    setFeeDraft({});
+    listAdmissionFees(session.schoolId, feeYear)
+      .then(setFees)
+      .catch((err) => setError(describeError(err)));
+  }, [session, feeYear]);
+
+  function feeOf(gradeId: string): number {
+    return fees.find((f) => f.gradeId === gradeId)?.amount ?? 0;
+  }
+
+  async function saveFee(grade: GradeDto) {
+    if (!session) return;
+    const typed = feeDraft[grade.id];
+    if (typed === undefined) return;
+    const amount = typed.trim() === "" ? 0 : Number(typed);
+    const discard = () =>
+      setFeeDraft((d) => {
+        const { [grade.id]: _typed, ...rest } = d;
+        return rest;
+      });
+    if (!Number.isFinite(amount) || amount < 0) {
+      discard();
+      setError("An admission fee is an amount of zero or more.");
+      return;
+    }
+    if (amount === feeOf(grade.id)) {
+      discard();
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSaved(null);
+    try {
+      setFees(await saveAdmissionFee({ schoolId: session.schoolId, academicYearId: feeYear, gradeId: grade.id, amount }));
+      setSaved(amount === 0 ? `${grade.name} no longer charges an admission fee.` : `Admission fee for ${grade.name} saved.`);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      // Either way the box goes back to showing what the server holds.
+      discard();
+      setSaving(false);
+    }
+  }
 
   async function save(next: AdmissionPolicyDto, what: string) {
     setSaving(true);
@@ -84,7 +150,7 @@ export default function SettingsPage() {
       <div className="panel">
         <h2>School settings</h2>
         <p className="hint" style={{ margin: 0 }}>
-          These apply to the whole school, not to one academic year or one grade.
+          How this school runs. Each setting applies to the whole school unless it says otherwise.
         </p>
       </div>
 
@@ -161,6 +227,59 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="panel">
+        <div className="form-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>Admission fee</h3>
+          <select aria-label="Academic year" value={feeYear} onChange={(e) => setFeeYear(e.target.value)}>
+            {years.map((y) => (
+              <option key={y.id} value={y.id}>
+                {y.code}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="hint">
+          Charged when an application reaches the fee stage, for the grade and year it applies to. The
+          application cannot move on to review until it is paid in full, and the payment goes onto the
+          child&apos;s account when the seat is confirmed. Leave a grade empty to charge nothing. A change
+          applies to applications that reach the fee stage from now on.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Grade</th>
+              <th>Fee (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {grades.map((g) => (
+              <tr key={g.id}>
+                <td>
+                  <label htmlFor={`admission-fee-${g.id}`}>{g.name}</label>
+                </td>
+                <td>
+                  <input
+                    id={`admission-fee-${g.id}`}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="None"
+                    disabled={saving}
+                    style={{ width: 120 }}
+                    value={feeDraft[g.id] ?? (feeOf(g.id) === 0 ? "" : String(feeOf(g.id)))}
+                    onChange={(e) => setFeeDraft((d) => ({ ...d, [g.id]: e.target.value }))}
+                    onBlur={() => saveFee(g)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </main>
   );

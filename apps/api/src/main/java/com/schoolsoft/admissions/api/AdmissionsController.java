@@ -189,6 +189,39 @@ public class AdmissionsController {
         return applications.savePolicy(req.schoolId(), req.entranceTestRequired(), req.offerValidityDays());
     }
 
+    // --------------------------------------------------------- admission fee
+
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/fees")
+    public List<AdmissionFeeDto> admissionFees(@RequestParam UUID schoolId, @RequestParam UUID academicYearId) {
+        return applications.admissionFees(schoolId, academicYearId);
+    }
+
+    public record AdmissionFeeRequest(
+        @NotNull UUID schoolId, @NotNull UUID academicYearId, @NotNull UUID gradeId, double amount) {}
+
+    /**
+     * What a grade's applications are charged at {@code fee_pending}; zero
+     * removes the fee. A setup action like the funnel itself, and gated the
+     * same way — pricing admission is not a step in working it.
+     */
+    @PreAuthorize("@perm.can('admission.policy.manage')")
+    @PutMapping("/fees")
+    public List<AdmissionFeeDto> saveAdmissionFee(@RequestBody AdmissionFeeRequest req) {
+        return applications.saveAdmissionFee(req.schoolId(), req.academicYearId(), req.gradeId(), req.amount());
+    }
+
+    /**
+     * The invoice this application's fee sits on, for the office to collect
+     * against. 204 when the application was never billed.
+     */
+    @PreAuthorize("@perm.can('admission.view')")
+    @GetMapping("/applications/{id}/fee")
+    public ResponseEntity<com.schoolsoft.fees.api.AdmissionFeeStatusDto> admissionFee(@PathVariable UUID id) {
+        return applications.admissionFeeFor(id).map(ResponseEntity::ok)
+            .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
     /**
      * The moves this application may make from where it stands. The board reads
      * it so a lane it cannot drop into is disabled rather than refused after

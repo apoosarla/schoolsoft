@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   AcademicYearDto,
   AdmissionApplicationDto,
+  AdmissionFeeStatusDto,
   AdmissionFunnelSummaryDto,
   AdmissionPolicyDto,
   admissionMovesByState,
@@ -13,6 +14,7 @@ import {
   ApiError,
   createAdmissionApplication,
   enrolAdmissionApplication,
+  getAdmissionFeeStatus,
   getAdmissionPolicy,
   getAdmissionSummary,
   getSession,
@@ -22,6 +24,7 @@ import {
   listAdmissionApplications,
   listGrades,
   listSections,
+  recordPayment,
   searchAdmissionApplications,
   SectionDto,
   Session,
@@ -131,6 +134,10 @@ export default function AdmissionsPage() {
   const [searching, setSearching] = useState(false);
   const [movesByState, setMovesByState] = useState<Record<string, string[]>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  // The fee stage's own column: what each application on the page owes. Null
+  // for an application its school charges nothing.
+  const [feeByApp, setFeeByApp] = useState<Record<string, AdmissionFeeStatusDto | null>>({});
+  const [payment, setPayment] = useState<Record<string, { amount: string; method: string }>>({});
 
   useEffect(() => {
     const s = getSession();
@@ -182,10 +189,50 @@ export default function AdmissionsPage() {
       .then(([page, allowed]) => {
         setRows(page);
         setMoves(allowed);
+        if (state === "fee_pending") loadFees(page);
       })
       .catch((err) => setError(describeError(err)))
       .finally(() => setLoadingRows(false));
   }, []);
+
+  function loadFees(page: AdmissionApplicationDto[]) {
+    Promise.all(page.map((a) => getAdmissionFeeStatus(a.id).then((fee) => [a.id, fee ?? null] as const)))
+      .then((pairs) => setFeeByApp(Object.fromEntries(pairs)))
+      .catch((err) => setError(describeError(err)));
+  }
+
+  async function onRecordFee(app: AdmissionApplicationDto, fee: AdmissionFeeStatusDto) {
+    if (!session) return;
+    const entry = payment[app.id] ?? { amount: String(outstandingOf(fee)), method: "cash" };
+    const amount = Number(entry.amount);
+    if (!(amount > 0)) {
+      setError("Enter the amount received.");
+      return;
+    }
+    setBusyId(app.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await recordPayment({
+        schoolId: session.schoolId,
+        feeInvoiceId: fee.invoiceId,
+        amount,
+        gateway: entry.method,
+        method: entry.method,
+        idempotencyKey: `adm-${fee.invoiceId}-${crypto.randomUUID()}`,
+      });
+      setPayment((p) => {
+        const { [app.id]: _done, ...rest } = p;
+        return rest;
+      });
+      setNotice(`${inr(amount)} recorded against ${fee.invoiceNo} for ${app.applicantFirstName}.`);
+      if (rows) loadFees(rows);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   function onPickStage(state: string) {
     if (!session) return;
@@ -765,6 +812,7 @@ export default function AdmissionsPage() {
                     <th>Grade</th>
                     <th>Guardian</th>
                     {selected === "offered" && <th>Offer expires</th>}
+                    {selected === "fee_pending" && <th>Admission fee</th>}
                     <th>Move to</th>
                     {selected === "accepted" && <th>Enrol</th>}
                   </tr>
@@ -785,6 +833,17 @@ export default function AdmissionsPage() {
                       {selected === "offered" && (
                         <td className={expiryClass(a.offerExpiresOn)}>
                           {a.offerExpiresOn ?? <span className="hint">not set</span>}
+                        </td>
+                      )}
+                      {selected === "fee_pending" && (
+                        <td>
+                          <FeeCell
+                            fee={feeByApp[a.id]}
+                            entry={payment[a.id]}
+                            busy={busyId === a.id}
+                            onEntry={(next) => setPayment((p) => ({ ...p, [a.id]: next }))}
+                            onRecord={(fee) => onRecordFee(a, fee)}
+                          />
                         </td>
                       )}
                       <td>
@@ -858,6 +917,81 @@ export default function AdmissionsPage() {
         </div>
       )}
     </main>
+  );
+}
+
+function inr(n: number): string {
+  return n.toLocaleString(undefined, { style: "currency", currency: "INR", maximumFractionDigits: 2 });
+}
+
+function outstandingOf(fee: AdmissionFeeStatusDto): number {
+  return Math.max(0, Math.round((fee.total - fee.paid) * 100) / 100);
+}
+
+/**
+ * What one application owes at the fee stage, and the counter to take it at.
+ * The move to Review is refused by the server until this reads paid, so the
+ * cell says so rather than leaving the office to find out from an error.
+ */
+function FeeCell({
+  fee,
+  entry,
+  busy,
+  onEntry,
+  onRecord,
+}: {
+  fee: AdmissionFeeStatusDto | null | undefined;
+  entry: { amount: string; method: string } | undefined;
+  busy: boolean;
+  onEntry: (next: { amount: string; method: string }) => void;
+  onRecord: (fee: AdmissionFeeStatusDto) => void;
+}) {
+  if (fee === undefined) return <span className="hint">&hellip;</span>;
+  if (fee === null) return <span className="hint">Nothing to pay</span>;
+  const outstanding = outstandingOf(fee);
+  if (outstanding === 0) {
+    return (
+      <>
+        <span className="badge badge-active">Paid</span> <span className="hint">{inr(fee.total)} · {fee.invoiceNo}</span>
+      </>
+    );
+  }
+  const current = entry ?? { amount: String(outstanding), method: "cash" };
+  return (
+    <>
+      <div>
+        {inr(outstanding)} due{" "}
+        <span className="hint">
+          {fee.paid > 0 ? `of ${inr(fee.total)} · ` : "· "}
+          {fee.invoiceNo}
+        </span>
+      </div>
+      <div className="form-row" style={{ gap: 4, margin: "4px 0 0" }}>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          aria-label="Amount received"
+          value={current.amount}
+          style={{ width: 96 }}
+          onChange={(e) => onEntry({ ...current, amount: e.target.value })}
+        />
+        <select
+          aria-label="How it was paid"
+          value={current.method}
+          onChange={(e) => onEntry({ ...current, method: e.target.value })}
+        >
+          <option value="cash">Cash</option>
+          <option value="cheque">Cheque</option>
+          <option value="upi">UPI</option>
+          <option value="card">Card</option>
+        </select>
+        <button type="button" disabled={busy} onClick={() => onRecord(fee)}>
+          Record
+        </button>
+      </div>
+      <span className="hint">Review opens once this is paid in full.</span>
+    </>
   );
 }
 

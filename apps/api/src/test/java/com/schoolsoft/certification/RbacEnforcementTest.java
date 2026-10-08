@@ -177,6 +177,71 @@ class RbacEnforcementTest extends AbstractCertificationTest {
             .containsExactly(mine.toString());
     }
 
+    /**
+     * {@code exam.view.own} lets a family through the door of every exam read,
+     * and a draft schedule is the exams officer's working copy: papers at hours
+     * that still clash, in rooms not yet booked. A family that reads it plans
+     * around a timetable the school never issued. Publication is what makes a
+     * schedule theirs to see, and unpublishing takes it back.
+     */
+    @Test
+    @DisplayName("a guardian reads an exam schedule only once it is published")
+    void guardianReadsOnlyPublishedExamSchedules() {
+        String principal = principalToken(cbse());
+        UUID student = firstStudentIn(currentFocusSection(cbse()));
+        String guardian = guardianTokenFor(cbse(), student);
+
+        UUID scheduleId = UUID.fromString(post("/v1/exams/schedules", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(),
+            "code", "RBAC-DRAFT", "name", "Draft examinations",
+            "startsOn", "2026-09-21", "endsOn", "2026-09-25"), principal).getBody().get("id").asText());
+        String list = "/v1/exams/schedules?schoolId=" + cbse().id();
+        String one = "/v1/exams/schedules/" + scheduleId;
+        try {
+            post(one + "/sessions", body(
+                "gradeId", gradeOf(cbse(), cbse().focusGradeCode()), "subjectId", subjectOf(cbse(), "SCI"),
+                "name", "Science Paper 1", "onDate", "2026-09-22",
+                "startsAt", "09:30:00", "endsAt", "11:30:00", "room", "Hall B"), principal);
+
+            // The office works on its draft.
+            assertThat(get(list, principal).getBody().findValuesAsText("id")).contains(scheduleId.toString());
+            assertThat(get(one, principal).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(get(one + "/sessions", principal).getBody()).hasSize(1);
+
+            // The family is not told it exists, by any of the four reads.
+            assertThat(get(list, guardian).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(get(list, guardian).getBody().findValuesAsText("id"))
+                .doesNotContain(scheduleId.toString());
+            assertThat(get(one, guardian).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(get(one + "/sessions", guardian).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(get(one + "/students/" + student + "/sessions", guardian).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+            // Published, it is theirs to read.
+            post(one + "/publish", null, principal);
+            post(one + "/hall-tickets", null, principal);
+            assertThat(get(list, guardian).getBody().findValuesAsText("id")).contains(scheduleId.toString());
+            assertThat(get(one, guardian).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(get(one + "/sessions", guardian).getBody()).hasSize(1);
+            assertThat(get(one + "/students/" + student + "/sessions", guardian).getBody()).hasSize(1);
+            assertThat(get(one + "/hall-tickets/" + student, guardian).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+            // Taken back, it is gone again — and so is the ticket that listed its
+            // papers, which the office can still read.
+            post(one + "/unpublish", null, principal);
+            assertThat(get(list, guardian).getBody().findValuesAsText("id"))
+                .doesNotContain(scheduleId.toString());
+            assertThat(get(one + "/sessions", guardian).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(get(one + "/hall-tickets/" + student, guardian).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(get(one + "/hall-tickets/" + student, principal).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        } finally {
+            inChainDo(jdbc -> jdbc.update("DELETE FROM exam_schedule WHERE id = ?", scheduleId));
+        }
+    }
+
     // ===================== staff hold what their job needs, and no more =====================
 
     @Test
@@ -998,6 +1063,18 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         assertThat(put("/v1/admissions/policy", body(
             "schoolId", cbse().id(), "entranceTestRequired", false, "offerValidityDays", 30),
             librarian).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Pricing admission is the same kind of decision, behind the same gate:
+        // read with the funnel, set only by whoever configures it.
+        String fees = "/v1/admissions/fees?schoolId=" + cbse().id() + "&academicYearId="
+            + cbse().currentAy().id();
+        assertThat(get(fees, registrarToken(cbse())).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(get(fees, librarian).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(put("/v1/admissions/fees", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(),
+            "gradeId", gradeOf(cbse(), "1"), "amount", 1.0), librarian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get(fees, registrarToken(cbse())).getBody()).isEmpty();
 
         // Unchanged, so no other scenario's funnel moved under it. Read through
         // the API rather than the table: a school provisioned after the

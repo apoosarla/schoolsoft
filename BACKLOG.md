@@ -75,9 +75,14 @@ entries under **Done** below.
   (harness) is the regression net and each case was confirmed to fail before
   the fix. `role`, `role_perm`, `feature_flag`, `outbox`, `ledger_account` and
   `flyway_schema_history` are chain-global by design and stay unpolicied.
-- **Exam schedule reads do not filter unpublished.** `exam.view.own` lets a
-  family read `/v1/exams/schedules` and the repository does not restrict to
-  published. Pre-existing; the gate did not introduce it.
+- ~~**Exam schedule reads do not filter unpublished.**~~ Fixed 2026-10-08.
+  `exam.view.own` let a family list draft schedules and read their papers by
+  id. A caller without the unrestricted `exam.view` now sees published
+  schedules only: the list omits a draft, and the schedule, its sessions, a
+  child's papers and the hall ticket answer 404 — not 403, so the refusal does
+  not announce an exam week being planned. Unpublishing takes all of it back.
+  `RbacEnforcementTest.guardianReadsOnlyPublishedExamSchedules`, confirmed red
+  before the fix.
 - ~~**Teacher grants are school-wide.**~~ Fixed 2026-09-09. The *grants* are
   still school-wide — `class_teacher` and `subject_teacher` hold
   `attendance.mark` and `mark.enter` across the school, which is what
@@ -955,6 +960,51 @@ are different claims:
 
 ## Open items
 
+- ~~**No admission fee at `fee_pending` (ADM-13).**~~ Built 2026-10-08. A
+  school prices admission per grade per year (`admission_fee`, V046, set from
+  Settings); reaching `fee_pending` raises an ordinary invoice whose payer is
+  the application (`fee_invoice.admission_application_id`, a third payer
+  beside student and family), and `fee_pending → review` is refused until it
+  is paid in full. Nothing advances the application when money lands, so a
+  bounced cheque — a `reversal`, which marks the payment `failed` — leaves it
+  where it was, owing again. Conversion writes the student onto the invoice.
+  The office collects from the fee stage's own column on the Admissions
+  screen. Not built, each a decision first:
+  - **What happens to a paid fee when the application is rejected or lapses.**
+    The exits are not gated and nothing refunds; the invoice stays on the
+    application, paid.
+  - **A cheque that bounces after the application has moved on.** The gate is
+    at the move. A reversal later restores the dues on the invoice and tells
+    nobody in admissions.
+  - **An applicant's unpaid invoice is in no dues report.** Those reports join
+    `student`. It surfaces on the Admissions screen only.
+  - **The fee is not on the public tracking page**, so a family learns the
+    amount from the office.
+
+- ~~**Generation billed a mid-year joiner the whole cycle (ADM-16).**~~ Built
+  2026-10-08. A run may name the months its cycle covers
+  (`fee_schedule_run.period_start/period_end`, V045); with them, a child whose
+  first enrolment of the year starts inside the period is billed recurring
+  heads by whole months from the joining month, joining month included
+  (`fees/internal/ProRata`, unit-tested), the share written on the line. A
+  one-time head (`fee_head.is_recurring = FALSE`) is owed whole, and a child
+  who joined after the period ended is skipped. A run with no period bills
+  whole, as every run did before. Left alone: transport, which is already a
+  monthly rate on its own assignment dates; and a **leaver** — a withdrawal
+  mid-cycle is still a credit note by hand (FEE-11).
+
+- **A family the chain already knows cannot be admitted to a second school.**
+  Found 2026-10-08 writing ADM-10. Conversion looks for an existing guardian by
+  `school_id` and phone, but `user_account` is unique on phone and on email
+  across the whole chain. So a parent with a child at School A applying to
+  School B, or a member of staff admitting their own child on the number or
+  address they sign in with, finds no guardian, tries to create a second login,
+  and `/enrol` answers 409 with the constraint's name — every time, with
+  nothing the office can do but change the phone on the application. The
+  conversion rolls back cleanly, which is what ADM-10 leans on; the refusal
+  itself is the gap. Needs a decision on what one login spanning two schools,
+  or two subject types, means before it needs code.
+
 - ~~**A credit note or waiver is not bounded, and its ledger legs can disagree
   with the invoice.**~~ Found and fixed 2026-10-08. `FeeAdjustmentService`
   wrote the invoice as `total = GREATEST(total - amount, paid)` but posted the
@@ -1763,10 +1813,12 @@ several are security-relevant.
   that already landed is a no-op, not a 409. `/enrol` was the other way around
   the machine: it now confirms a seat from `accepted` only, inside the
   transaction the conversion path never had, so a refusal leaves no orphan
-  student. ADM-05 enabled and passing. Still open: conversion's guardian link is
-  written but ADM-10 wants it proven transactionally end to end, and an
-  applicant still cannot be invoiced at `fee_pending` because
-  `fee_invoice.student_id` is NOT NULL (ADM-13).
+  student. ADM-05 enabled and passing. ADM-10 enabled 2026-10-08: it refuses a
+  conversion at its last write (the family's login collides with a number
+  already in use), asserts no student, guardian, enrolment or state change
+  survives, then confirms the same application and signs the guardian in
+  through the OTP door to find the child. ADM-13 closed the same day — see
+  Open items.
 
 ### Missing surfaces (endpoints the scenarios expect and nothing provides)
 

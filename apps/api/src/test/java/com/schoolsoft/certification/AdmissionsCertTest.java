@@ -184,10 +184,119 @@ class AdmissionsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("Conversion creates the student and the enrolment and links converted_student_id, but no "
-        + "guardian is created or linked, so the family has no login after admission. New gap found in "
-        + "Phase 0.")
     void cert_ADM_10_seatConfirmationCreatesStudentGuardianAndEnrolmentTransactionally() {
+        String token = registrarToken(cbse());
+        String marker = "Adm10" + UUID.randomUUID().toString().substring(0, 6);
+        String phone = "919333" + (100000 + (int) (Math.random() * 800000));
+        UUID section = sectionOf(cbse(), cbse().currentAy().code(), "6", "A");
+
+        UUID applicationId = UUID.fromString(post("/v1/admissions/applications", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(), "gradeId", gradeOf(cbse(), "6"),
+            "applicationNo", "ADM10-" + UUID.randomUUID().toString().substring(0, 8),
+            "applicantFirstName", marker, "applicantLastName", "Kulkarni",
+            "applicantDob", "2015-08-19", "applicantGender", "female",
+            "guardianName", "Asha Kulkarni", "guardianPhone", phone,
+            "guardianEmail", marker.toLowerCase() + "@example.test",
+            "source", "walkin"), token).getBody().get("id").asText());
+        for (String state : List.of("application_started", "document_pending", "fee_pending", "review",
+                "test_scheduled", "test_done", "offered", "accepted")) {
+            post("/v1/admissions/applications/" + applicationId + "/transition",
+                Map.of("toState", state), token);
+        }
+        long seatsBefore = count("SELECT count(*) FROM enrolment WHERE section_id = ?", section);
+
+        // Somebody else already signs in with this number, so the family's
+        // login cannot be written. That is the last thing conversion writes
+        // before the link, which makes it the refusal that would leave the most
+        // behind if the conversion were not one transaction.
+        UUID blocker = UUID.randomUUID();
+        inChainDo(jdbc -> jdbc.update(
+            "INSERT INTO user_account (id, school_id, subject_type, subject_id, phone) "
+            + "VALUES (?, ?, 'staff', ?, ?)", blocker, cbse().id(), UUID.randomUUID(), phone));
+
+        try {
+            var refused = post("/v1/admissions/applications/" + applicationId + "/enrol",
+                Map.of("sectionId", section), token);
+            assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+            // Nothing of the half-made family survives the refusal.
+            assertThat(count("SELECT count(*) FROM student WHERE first_name = ?", marker)).isZero();
+            assertThat(count("SELECT count(*) FROM guardian WHERE phone = ?", phone)).isZero();
+            assertThat(count("SELECT count(*) FROM enrolment WHERE section_id = ?", section))
+                .isEqualTo(seatsBefore);
+            assertThat(queryOne("SELECT state FROM admission_application WHERE id = ?", String.class,
+                applicationId)).isEqualTo("accepted");
+            assertThat(count("SELECT count(*) FROM admission_application WHERE id = ? "
+                + "AND converted_student_id IS NOT NULL", applicationId)).isZero();
+            assertThat(count("SELECT count(*) FROM admission_event WHERE application_id = ? "
+                + "AND to_state = 'enrolled'", applicationId)).isZero();
+
+            // And the application is still confirmable once the obstacle is gone.
+            inChainDo(jdbc -> jdbc.update("DELETE FROM user_account WHERE id = ?", blocker));
+            var confirmed = post("/v1/admissions/applications/" + applicationId + "/enrol",
+                Map.of("sectionId", section), token);
+            assertThat(confirmed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            UUID studentId = UUID.fromString(confirmed.getBody().get("studentId").asText());
+
+            // The student is the applicant, numbered by the school rather than by
+            // the application.
+            assertThat(queryOne("SELECT first_name || ' ' || last_name FROM student WHERE id = ?",
+                String.class, studentId)).isEqualTo(marker + " Kulkarni");
+            assertThat(queryOne("SELECT admission_no FROM student WHERE id = ?", String.class, studentId))
+                .isNotBlank().doesNotStartWith("ADM10-");
+
+            // One open enrolment, in the section the seat was confirmed for.
+            assertThat(queryList("SELECT section_id FROM enrolment WHERE student_id = ? AND ends_on IS NULL",
+                UUID.class, studentId)).containsExactly(section);
+            assertThat(queryOne("SELECT academic_year_id FROM enrolment WHERE student_id = ?", UUID.class,
+                studentId)).isEqualTo(cbse().currentAy().id());
+
+            // The application points at the student it became.
+            assertThat(queryOne("SELECT state FROM admission_application WHERE id = ?", String.class,
+                applicationId)).isEqualTo("enrolled");
+            assertThat(queryOne("SELECT converted_student_id FROM admission_application WHERE id = ?",
+                UUID.class, applicationId)).isEqualTo(studentId);
+
+            // The guardian who applied is this child's primary guardian...
+            UUID guardianId = queryOne("SELECT id FROM guardian WHERE phone = ? AND school_id = ?",
+                UUID.class, phone, cbse().id());
+            assertThat(count("SELECT count(*) FROM guardian_student WHERE guardian_id = ? AND student_id = ? "
+                + "AND is_primary", guardianId, studentId)).isEqualTo(1);
+
+            // ...and can walk in through the ordinary door and find them.
+            post("/v1/auth/otp/start", Map.of("identifier", phone, "chainSlug", seed.chainSlug()), null);
+            var signedIn = post("/v1/auth/otp/verify",
+                Map.of("identifier", phone, "chainSlug", seed.chainSlug(), "code", "000000"), null);
+            assertThat(signedIn.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(signedIn.getBody().get("profile").get("subjectType").asText()).isEqualTo("guardian");
+            var children = get("/v1/people/guardians/" + guardianId + "/students",
+                signedIn.getBody().get("accessToken").asText());
+            assertThat(children.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(children.getBody().findValuesAsText("id")).containsExactly(studentId.toString());
+
+            // Confirming the same seat again answers with the same student and
+            // makes nothing new.
+            var again = post("/v1/admissions/applications/" + applicationId + "/enrol",
+                Map.of("sectionId", section), token);
+            assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(again.getBody().get("studentId").asText()).isEqualTo(studentId.toString());
+            assertThat(count("SELECT count(*) FROM student WHERE first_name = ?", marker)).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM guardian WHERE phone = ?", phone)).isEqualTo(1);
+        } finally {
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM user_account WHERE id = ? OR phone = ?", blocker, phone);
+                jdbc.update("DELETE FROM guardian_student WHERE student_id IN "
+                    + "(SELECT id FROM student WHERE first_name = ?)", marker);
+                jdbc.update("DELETE FROM guardian WHERE phone = ?", phone);
+                jdbc.update("DELETE FROM enrolment WHERE student_id IN "
+                    + "(SELECT id FROM student WHERE first_name = ?)", marker);
+                jdbc.update("UPDATE admission_application SET converted_student_id = NULL WHERE id = ?",
+                    applicationId);
+                jdbc.update("DELETE FROM student WHERE first_name = ?", marker);
+                jdbc.update("DELETE FROM admission_event WHERE application_id = ?", applicationId);
+                jdbc.update("DELETE FROM admission_application WHERE id = ?", applicationId);
+            });
+        }
     }
 
     @Test @Tag("P1")
@@ -276,9 +385,151 @@ class AdmissionsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("An applicant has no student row until conversion and fee_invoice.student_id is NOT NULL, so "
-        + "the admission fee cannot be invoiced at fee_pending. New gap found in Phase 0.")
     void cert_ADM_13_admissionFeeFailureLeavesTheApplicationInFeePending() {
+        String registrar = registrarToken(cbse());
+        String accountant = accountantToken(cbse());
+        UUID gradeId = gradeOf(cbse(), "3");
+        String marker = "Adm13" + UUID.randomUUID().toString().substring(0, 6);
+        String phone = "919444" + (100000 + (int) (Math.random() * 800000));
+
+        // The school prices admission to Grade 3, and to no other grade.
+        var priced = put("/v1/admissions/fees", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(),
+            "gradeId", gradeId, "amount", 2500.0), registrar);
+        assertThat(priced.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(priced.getBody()).hasSize(1);
+        assertThat(priced.getBody().get(0).get("amount").asDouble()).isEqualTo(2500.0);
+
+        UUID applicationId = UUID.fromString(post("/v1/admissions/applications", body(
+            "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(), "gradeId", gradeId,
+            "applicationNo", "ADM13-" + UUID.randomUUID().toString().substring(0, 8),
+            "applicantFirstName", marker, "applicantLastName", "Desai",
+            "applicantDob", "2018-03-14", "applicantGender", "male",
+            "guardianName", "Kiran Desai", "guardianPhone", phone,
+            "source", "walkin"), registrar).getBody().get("id").asText());
+        String move = "/v1/admissions/applications/" + applicationId + "/transition";
+        String fee = "/v1/admissions/applications/" + applicationId + "/fee";
+
+        try {
+            // Nothing is owed until the application reaches the stage.
+            post(move, Map.of("toState", "application_started"), registrar);
+            post(move, Map.of("toState", "document_pending"), registrar);
+            assertThat(get(fee, registrar).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+            // Reaching fee_pending bills the applicant — who is not a student yet.
+            post(move, Map.of("toState", "fee_pending"), registrar);
+            var billed = get(fee, registrar);
+            assertThat(billed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(billed.getBody().get("total").asDouble()).isEqualTo(2500.0);
+            assertThat(billed.getBody().get("paid").asDouble()).isZero();
+            UUID invoiceId = UUID.fromString(billed.getBody().get("invoiceId").asText());
+            assertThat(count("SELECT count(*) FROM fee_invoice WHERE id = ? AND student_id IS NULL "
+                + "AND admission_application_id = ?", invoiceId, applicationId)).isEqualTo(1);
+
+            // Unpaid, the application does not move on, and the refusal says why.
+            var unpaid = post(move, Map.of("toState", "review"), registrar);
+            assertThat(unpaid.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(unpaid.getBody().toString()).contains("admission fee").contains("2500");
+            assertThat(stateOf(applicationId)).isEqualTo("fee_pending");
+
+            // A cheque is taken, and comes back unpaid. The payment is kept as
+            // failed, the fee is owed again, and the application has not moved.
+            UUID cheque = UUID.fromString(post("/v1/fees/payments", body(
+                "schoolId", cbse().id(), "feeInvoiceId", invoiceId, "amount", 2500.0,
+                "gateway", "cheque", "method", "cheque", "idempotencyKey", "adm13-cheque-" + invoiceId),
+                accountant).getBody().get("id").asText());
+            assertThat(get(fee, registrar).getBody().get("status").asText()).isEqualTo("paid");
+            assertThat(post("/v1/fees/invoices/" + invoiceId + "/adjustments", body(
+                "schoolId", cbse().id(), "kind", "reversal", "amount", 2500.0,
+                "reason", "Cheque returned unpaid", "paymentId", cheque,
+                "approvedByStaffId", cbse().accountantStaffId()), accountant).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+            assertThat(queryOne("SELECT status FROM payment WHERE id = ?", String.class, cheque))
+                .isEqualTo("failed");
+            assertThat(stateOf(applicationId)).isEqualTo("fee_pending");
+            assertThat(post(move, Map.of("toState", "review"), registrar).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+
+            // Part of it is not all of it.
+            post("/v1/fees/payments", body(
+                "schoolId", cbse().id(), "feeInvoiceId", invoiceId, "amount", 1000.0,
+                "gateway", "cash", "method", "cash", "idempotencyKey", "adm13-part-" + invoiceId), accountant);
+            assertThat(post(move, Map.of("toState", "review"), registrar).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+            assertThat(stateOf(applicationId)).isEqualTo("fee_pending");
+
+            // Stepping back for a missing document and returning finds the same
+            // bill, with what was paid still on it.
+            post(move, Map.of("toState", "document_pending"), registrar);
+            post(move, Map.of("toState", "fee_pending"), registrar);
+            assertThat(get(fee, registrar).getBody().get("invoiceId").asText()).isEqualTo(invoiceId.toString());
+            assertThat(get(fee, registrar).getBody().get("paid").asDouble()).isEqualTo(1000.0);
+
+            // The family pays the rest, and now the move is allowed.
+            post("/v1/fees/payments", body(
+                "schoolId", cbse().id(), "feeInvoiceId", invoiceId, "amount", 1500.0,
+                "gateway", "cash", "method", "cash", "idempotencyKey", "adm13-rest-" + invoiceId), accountant);
+            var reviewed = post(move, Map.of("toState", "review"), registrar);
+            assertThat(reviewed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(reviewed.getBody().get("state").asText()).isEqualTo("review");
+
+            // When the seat is confirmed, the fee is on the child's account.
+            for (String state : List.of("test_scheduled", "test_done", "offered", "accepted")) {
+                post(move, Map.of("toState", state), registrar);
+            }
+            UUID studentId = UUID.fromString(post("/v1/admissions/applications/" + applicationId + "/enrol",
+                Map.of("sectionId", sectionOf(cbse(), cbse().currentAy().code(), "3", "A")), registrar)
+                .getBody().get("studentId").asText());
+            assertThat(queryOne("SELECT student_id FROM fee_invoice WHERE id = ?", UUID.class, invoiceId))
+                .isEqualTo(studentId);
+            assertThat(get("/v1/fees/invoices?studentId=" + studentId, accountant).getBody()
+                .findValuesAsText("id")).contains(invoiceId.toString());
+
+            // A grade the school does not price passes through with nothing to pay.
+            var free = createApplication("walkin", "ADM13F-" + UUID.randomUUID().toString().substring(0, 8));
+            UUID freeId = UUID.fromString(free.getBody().get("id").asText());
+            for (String state : List.of("application_started", "document_pending", "fee_pending")) {
+                post("/v1/admissions/applications/" + freeId + "/transition", Map.of("toState", state), registrar);
+            }
+            assertThat(get("/v1/admissions/applications/" + freeId + "/fee", registrar).getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
+            assertThat(post("/v1/admissions/applications/" + freeId + "/transition",
+                Map.of("toState", "review"), registrar).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            // Taking the price away takes the row away.
+            assertThat(put("/v1/admissions/fees", body(
+                "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(),
+                "gradeId", gradeId, "amount", 0.0), registrar).getBody()).isEmpty();
+        } finally {
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM admission_fee WHERE school_id = ?", cbse().id());
+                jdbc.update("DELETE FROM ledger_entry WHERE source_id IN (SELECT id FROM payment WHERE "
+                    + "fee_invoice_id IN (SELECT id FROM fee_invoice WHERE admission_application_id = ?))",
+                    applicationId);
+                jdbc.update("DELETE FROM ledger_entry WHERE source_id IN (SELECT id FROM fee_adjustment WHERE "
+                    + "fee_invoice_id IN (SELECT id FROM fee_invoice WHERE admission_application_id = ?))",
+                    applicationId);
+                jdbc.update("DELETE FROM fee_adjustment WHERE fee_invoice_id IN "
+                    + "(SELECT id FROM fee_invoice WHERE admission_application_id = ?)", applicationId);
+                jdbc.update("DELETE FROM payment WHERE fee_invoice_id IN "
+                    + "(SELECT id FROM fee_invoice WHERE admission_application_id = ?)", applicationId);
+                jdbc.update("DELETE FROM fee_invoice_line WHERE fee_invoice_id IN "
+                    + "(SELECT id FROM fee_invoice WHERE admission_application_id = ?)", applicationId);
+                jdbc.update("DELETE FROM fee_invoice WHERE admission_application_id = ?", applicationId);
+                jdbc.update("DELETE FROM fee_head WHERE school_id = ? AND code = 'ADMISSION'", cbse().id());
+                jdbc.update("DELETE FROM user_account WHERE phone = ?", phone);
+                jdbc.update("DELETE FROM guardian_student WHERE student_id IN "
+                    + "(SELECT id FROM student WHERE first_name = ?)", marker);
+                jdbc.update("DELETE FROM guardian WHERE phone = ?", phone);
+                jdbc.update("DELETE FROM enrolment WHERE student_id IN "
+                    + "(SELECT id FROM student WHERE first_name = ?)", marker);
+                jdbc.update("UPDATE admission_application SET converted_student_id = NULL WHERE id = ?",
+                    applicationId);
+                jdbc.update("DELETE FROM student WHERE first_name = ?", marker);
+                jdbc.update("DELETE FROM admission_event WHERE application_id = ?", applicationId);
+                jdbc.update("DELETE FROM admission_application WHERE id = ?", applicationId);
+            });
+        }
     }
 
     @Test @Tag("P2")
@@ -327,13 +578,161 @@ class AdmissionsCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("The working-day denominator (Phase 1) and the fee engine (Phase 4) both exist now, but "
-        + "nothing pro-rates a cycle for a mid-year joiner: generation bills the full structure amount to "
-        + "whoever is enrolled on the run date.")
     void cert_ADM_16_midYearAdmissionProRatesFeesAndAttendance() {
+        String principal = principalToken(cbse());
+        String accountant = accountantToken(cbse());
+        String cycle = "ADM16 cycle";
+        String tag = "ADM16-" + UUID.randomUUID().toString().substring(0, 6);
+        UUID gradeId = gradeOf(cbse(), "6");
+        UUID sectionA = sectionOf(cbse(), cbse().currentAy().code(), "6", "A");
+        UUID sectionB = sectionOf(cbse(), cbse().currentAy().code(), "6", "B");
+        UUID classmate = firstStudentIn(sectionA);
+
+        // Joined on 5 October, into a cycle that runs July to December.
+        UUID joiner = newStudent(tag + "-JOIN");
+        assertThat(post("/v1/enrolment", body(
+            "schoolId", cbse().id(), "studentId", joiner, "sectionId", sectionB,
+            "academicYearId", cbse().currentAy().id(), "startsOn", "2026-10-05"), principal)
+            .getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // There since April, and moved from A to B on 1 October. Their enrolment
+        // in B is as new as the joiner's; they are not.
+        UUID mover = newStudent(tag + "-MOVE");
+        inChainDo(jdbc -> {
+            jdbc.update("INSERT INTO enrolment (id, school_id, student_id, section_id, academic_year_id, "
+                + "starts_on, ends_on, status) VALUES (gen_random_uuid(), ?, ?, ?, ?, '2026-04-01', "
+                + "'2026-09-30', 'transferred')", cbse().id(), mover, sectionA, cbse().currentAy().id());
+            jdbc.update("INSERT INTO enrolment (id, school_id, student_id, section_id, academic_year_id, "
+                + "starts_on, status) VALUES (gen_random_uuid(), ?, ?, ?, ?, '2026-10-01', 'active')",
+                cbse().id(), mover, sectionB, cbse().currentAy().id());
+        });
+
+        // A one-time head on the grade's structure, beside the recurring ones.
+        UUID onceHead = UUID.randomUUID();
+        inChainDo(jdbc -> {
+            jdbc.update("INSERT INTO fee_head (id, school_id, code, name, is_recurring, gst_rate_pct) "
+                + "VALUES (?, ?, ?, 'Annual kit', FALSE, 0)", onceHead, cbse().id(), tag);
+            jdbc.update("INSERT INTO fee_structure_line (id, fee_structure_id, fee_head_id, amount) "
+                + "SELECT gen_random_uuid(), id, ?, 4000 FROM fee_structure "
+                + "WHERE school_id = ? AND grade_id = ? AND academic_year_id = ?",
+                onceHead, cbse().id(), gradeId, cbse().currentAy().id());
+        });
+
+        try {
+            var run = post("/v1/fees/generate", body(
+                "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(), "gradeId", gradeId,
+                "cycleLabel", cycle, "dueOn", "2026-10-20",
+                "periodStart", "2026-07-01", "periodEnd", "2026-12-31"), accountant);
+            assertThat(run.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            // Three of the six months: the recurring heads are halved, and the
+            // line says why.
+            assertThat(billed(classmate, cycle, "TUITION")).isEqualTo(30000.0);
+            assertThat(billed(joiner, cycle, "TUITION")).isEqualTo(15000.0);
+            assertThat(billed(joiner, cycle, "LAB")).isEqualTo(1000.0);
+            assertThat(queryOne("SELECT l.description FROM fee_invoice_line l "
+                + "JOIN fee_invoice i ON i.id = l.fee_invoice_id JOIN fee_head h ON h.id = l.fee_head_id "
+                + "WHERE i.student_id = ? AND i.cycle_label = ? AND h.code = 'TUITION'",
+                String.class, joiner, cycle)).contains("3 of 6 months");
+
+            // A one-time head is owed whole by whoever is billed it.
+            assertThat(billed(joiner, cycle, tag)).isEqualTo(4000.0);
+
+            // And the invoice adds up to its lines.
+            assertThat(queryOne("SELECT total FROM fee_invoice WHERE student_id = ? AND cycle_label = ?",
+                Double.class, joiner, cycle)).isEqualTo(15000.0 + 1000.0 + 750.0 + 4000.0);
+
+            // Changing section is not joining late.
+            assertThat(billed(mover, cycle, "TUITION")).isEqualTo(30000.0);
+
+            // The period is on the run, where "what did October's run cover" is asked.
+            boolean listed = false;
+            for (var row : get("/v1/fees/runs?schoolId=" + cbse().id() + "&academicYearId="
+                    + cbse().currentAy().id(), accountant).getBody()) {
+                if (cycle.equals(row.get("cycleLabel").asText())) {
+                    assertThat(row.get("periodStart").asText()).isEqualTo("2026-07-01");
+                    assertThat(row.get("periodEnd").asText()).isEqualTo("2026-12-31");
+                    listed = true;
+                }
+            }
+            assertThat(listed).isTrue();
+
+            // A cycle that was over before the child arrived bills them nothing.
+            post("/v1/fees/generate", body(
+                "schoolId", cbse().id(), "academicYearId", cbse().currentAy().id(), "gradeId", gradeId,
+                "cycleLabel", cycle + " past", "dueOn", "2026-10-20",
+                "periodStart", "2026-04-01", "periodEnd", "2026-06-30"), accountant);
+            assertThat(count("SELECT count(*) FROM fee_invoice WHERE student_id = ? AND cycle_label = ?",
+                joiner, cycle + " past")).isZero();
+            assertThat(count("SELECT count(*) FROM fee_invoice WHERE student_id = ? AND cycle_label = ?",
+                classmate, cycle + " past")).isEqualTo(1);
+
+            // Attendance is measured from the day they joined: over the same
+            // fortnight the joiner's denominator is the classmate's from the 5th.
+            var joinerDays = get("/v1/attendance/students/" + joiner
+                + "/summary?from=2026-09-21&to=2026-10-16", principal).getBody();
+            assertThat(joinerDays.get("enrolledFrom").asText()).isEqualTo("2026-10-05");
+            int fromTheFifth = get("/v1/attendance/students/" + classmate
+                + "/summary?from=2026-10-05&to=2026-10-16", principal).getBody().get("workingDays").asInt();
+            int wholeWindow = get("/v1/attendance/students/" + classmate
+                + "/summary?from=2026-09-21&to=2026-10-16", principal).getBody().get("workingDays").asInt();
+            assertThat(joinerDays.get("workingDays").asInt()).isEqualTo(fromTheFifth).isLessThan(wholeWindow);
+
+            // And the report card carries that number, not the term's.
+            UUID term2 = termOf(cbse(), cbse().currentAy().code(), "T2");
+            UUID joinerCard = reportCard(joiner, term2, "CERT-ADM16");
+            UUID classmateCard = reportCard(classmate, term2, "CERT-ADM16");
+            int joinerCardDays = get("/v1/assessment/report-cards/" + joinerCard, principal).getBody()
+                .get("card").get("attendanceWorkingDays").asInt();
+            int classmateCardDays = get("/v1/assessment/report-cards/" + classmateCard, principal).getBody()
+                .get("card").get("attendanceWorkingDays").asInt();
+            assertThat(joinerCardDays).isPositive().isLessThan(classmateCardDays);
+        } finally {
+            inChainDo(jdbc -> {
+                jdbc.update("DELETE FROM report_card WHERE template_code = 'CERT-ADM16'");
+                jdbc.update("DELETE FROM fee_invoice_line WHERE fee_invoice_id IN "
+                    + "(SELECT id FROM fee_invoice WHERE cycle_label LIKE 'ADM16 cycle%')");
+                jdbc.update("DELETE FROM fee_invoice WHERE cycle_label LIKE 'ADM16 cycle%'");
+                jdbc.update("DELETE FROM fee_schedule_run WHERE cycle_label LIKE 'ADM16 cycle%'");
+                jdbc.update("DELETE FROM fee_structure_line WHERE fee_head_id = ?", onceHead);
+                jdbc.update("DELETE FROM fee_head WHERE id = ?", onceHead);
+                jdbc.update("DELETE FROM enrolment WHERE student_id IN (?, ?)", joiner, mover);
+                jdbc.update("DELETE FROM student WHERE id IN (?, ?)", joiner, mover);
+            });
+        }
     }
 
     // ---------------------------------------------------------------- helpers
+
+    private String stateOf(UUID applicationId) {
+        return queryOne("SELECT state FROM admission_application WHERE id = ?", String.class, applicationId);
+    }
+
+    private UUID newStudent(String admissionNo) {
+        var created = post("/v1/people/students", Map.of(
+            "schoolId", cbse().id(), "admissionNo", admissionNo,
+            "firstName", "Certification", "lastName", "Candidate",
+            "dob", "2015-05-05", "gender", "male"), principalToken(cbse()));
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return UUID.fromString(created.getBody().get("id").asText());
+    }
+
+    /** What one head came to on a student's generated invoice for a cycle. */
+    private double billed(UUID studentId, String cycle, String headCode) {
+        return queryOne("SELECT l.amount FROM fee_invoice_line l "
+            + "JOIN fee_invoice i ON i.id = l.fee_invoice_id JOIN fee_head h ON h.id = l.fee_head_id "
+            + "WHERE i.student_id = ? AND i.cycle_label = ? AND h.code = ?",
+            Double.class, studentId, cycle, headCode);
+    }
+
+    private UUID reportCard(UUID studentId, UUID termId, String templateCode) {
+        var card = post("/v1/assessment/report-cards", body(
+            "schoolId", cbse().id(), "studentId", studentId, "academicYearId", cbse().currentAy().id(),
+            "termId", termId, "strategyCode", cbse().strategyCode(), "templateCode", templateCode),
+            principalToken(cbse()));
+        assertThat(card.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return UUID.fromString(card.getBody().get("id").asText());
+    }
 
     private org.springframework.http.ResponseEntity<com.fasterxml.jackson.databind.JsonNode> createApplication(
             String source, String applicationNo) {

@@ -3,6 +3,7 @@ package com.schoolsoft.admissions.internal;
 import com.schoolsoft.admissions.api.AdmissionApplicationDto;
 import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.admissions.api.AdmissionEventDto;
+import com.schoolsoft.admissions.api.AdmissionFeeDto;
 import com.schoolsoft.admissions.api.AdmissionFunnelSummaryDto;
 import com.schoolsoft.admissions.api.AdmissionPolicyDto;
 import com.schoolsoft.admissions.api.AdmissionSearchResultDto;
@@ -338,6 +339,43 @@ public class AdmissionsRepository {
             + "  offer_validity_days = EXCLUDED.offer_validity_days, updated_at = now()",
             schoolId, entranceTestRequired, offerValidityDays);
         return policy(schoolId);
+    }
+
+    // ------------------------------------------------------- the admission fee
+
+    private static final RowMapper<AdmissionFeeDto> FEE_MAPPER = (rs, i) -> new AdmissionFeeDto(
+        UUID.fromString(rs.getString("school_id")),
+        UUID.fromString(rs.getString("academic_year_id")),
+        UUID.fromString(rs.getString("grade_id")),
+        rs.getDouble("amount"));
+
+    public List<AdmissionFeeDto> admissionFees(UUID schoolId, UUID academicYearId) {
+        return jdbc.query(
+            "SELECT f.school_id, f.academic_year_id, f.grade_id, f.amount FROM admission_fee f "
+            + "JOIN grade g ON g.id = f.grade_id WHERE f.school_id = ? AND f.academic_year_id = ? "
+            + "ORDER BY g.sort_order", FEE_MAPPER, schoolId, academicYearId);
+    }
+
+    public Optional<AdmissionFeeDto> admissionFee(UUID schoolId, UUID academicYearId, UUID gradeId) {
+        return jdbc.query(
+            "SELECT school_id, academic_year_id, grade_id, amount FROM admission_fee "
+            + "WHERE school_id = ? AND academic_year_id = ? AND grade_id = ?",
+            FEE_MAPPER, schoolId, academicYearId, gradeId).stream().findFirst();
+    }
+
+    /** Zero is how a fee is taken away: the row goes, and with it the gate. */
+    public void saveAdmissionFee(UUID schoolId, UUID academicYearId, UUID gradeId, double amount) {
+        if (amount == 0) {
+            jdbc.update("DELETE FROM admission_fee WHERE school_id = ? AND academic_year_id = ? AND grade_id = ?",
+                schoolId, academicYearId, gradeId);
+            return;
+        }
+        jdbc.update(
+            "INSERT INTO admission_fee (school_id, academic_year_id, grade_id, amount, updated_at) "
+            + "VALUES (?, ?, ?, ?, now()) "
+            + "ON CONFLICT (school_id, academic_year_id, grade_id) DO UPDATE SET amount = EXCLUDED.amount, "
+            + "  updated_at = now()",
+            schoolId, academicYearId, gradeId, amount);
     }
 
     // ------------------------------------------------------- the state machine

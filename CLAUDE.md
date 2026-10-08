@@ -259,7 +259,8 @@ prices the invoice, and `InvoicePricingTest` runs in milliseconds.
 
 Worth knowing before trusting a green build:
 
-- Unit tests cover invoice pricing and the credit-note split only. Everything
+- Unit tests cover invoice pricing, the credit-note split and the mid-year
+  pro-rata share only. Everything
   else runs through HTTP against a real database, so pure logic (grading bands, rollover date maths,
   dunning) has no fast test and cannot be exercised without Postgres.
 - The six frontends have **zero** tests.
@@ -277,6 +278,15 @@ Worth knowing before trusting a green build:
   `advance_amount` — an overpayment leaves it, and so does a credit note or
   waiver that falls on money already paid (`fees/internal/CreditSplit`). A
   credit note may not exceed what the invoice was billed for.
+- An invoice has one of three payers: a student, a family (a combined
+  invoice), or an admission application — the admission fee, raised when the
+  application reaches `fee_pending` and handed to the student at conversion
+  (`fees/api/AdmissionFees`). A read that joins `student` does not see the
+  third kind.
+- A generation run that names its period pro-rates a mid-year joiner by whole
+  months, recurring heads only (`fees/internal/ProRata`). "Joined" is the first
+  day of the child's first enrolment that year, not of the enrolment they hold
+  now — a section change is not a late start.
 - High-risk mutations carry `@Audited(action, targetType, idParam, snapshot)`.
   `requireReason` defaults true. The interceptor is a **web** interceptor, so it
   runs ahead of method security: an audited endpoint called without a reason

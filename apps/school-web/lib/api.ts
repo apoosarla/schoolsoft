@@ -500,6 +500,41 @@ export function saveAdmissionPolicy(req: AdmissionPolicyDto): Promise<AdmissionP
   });
 }
 
+/** What one grade's applications are charged at the fee stage. A grade with no entry charges nothing. */
+export type AdmissionFeeDto = {
+  schoolId: string;
+  academicYearId: string;
+  gradeId: string;
+  amount: number;
+};
+
+export function listAdmissionFees(schoolId: string, academicYearId: string): Promise<AdmissionFeeDto[]> {
+  return apiFetch<AdmissionFeeDto[]>(
+    `/v1/admissions/fees?schoolId=${schoolId}&academicYearId=${academicYearId}`
+  );
+}
+
+/** Zero removes the fee. Answers with the year's whole list, so the screen shows what the server holds. */
+export function saveAdmissionFee(req: AdmissionFeeDto): Promise<AdmissionFeeDto[]> {
+  return apiFetch<AdmissionFeeDto[]>("/v1/admissions/fees", {
+    method: "PUT",
+    body: JSON.stringify(req),
+  });
+}
+
+export type AdmissionFeeStatusDto = {
+  invoiceId: string;
+  invoiceNo: string;
+  total: number;
+  paid: number;
+  status: string;
+};
+
+/** The invoice an application's fee sits on; undefined (204) when it was never billed. */
+export function getAdmissionFeeStatus(applicationId: string): Promise<AdmissionFeeStatusDto | undefined> {
+  return apiFetch<AdmissionFeeStatusDto | undefined>(`/v1/admissions/applications/${applicationId}/fee`);
+}
+
 /** The moves this application may make from where it stands, at this school. */
 export function admissionMoves(id: string): Promise<string[]> {
   return apiFetch<string[]>(`/v1/admissions/applications/${id}/moves`);
@@ -2470,6 +2505,9 @@ export function generateInvoices(req: {
   gradeId?: string;
   cycleLabel: string;
   dueOn: string;
+  /** The months the cycle covers. With both, a mid-year joiner is billed from their joining month. */
+  periodStart?: string;
+  periodEnd?: string;
   runByStaffId?: string;
 }): Promise<FeeRunResultDto> {
   return apiFetch<FeeRunResultDto>("/v1/fees/generate", {
@@ -2486,6 +2524,9 @@ export type FeeScheduleRunDto = {
   gradeId: string | null;
   gradeCode: string | null;
   dueOn: string;
+  /** Absent on a run that named no period and so billed everyone whole. */
+  periodStart?: string;
+  periodEnd?: string;
   state: string;
   invoicesCreated: number;
   studentsSkipped: number;
