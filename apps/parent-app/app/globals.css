@@ -95,6 +95,8 @@ h2 { margin: 0; }
 
 /* ============ App shell (mobile-first: topbar + scrolling content + fixed bottom tab bar) ============ */
 .app { min-height: 100vh; display: flex; flex-direction: column; }
+/* Sign-in, and the moment before the session is read: no chrome, no box. */
+.app-bare { display: contents; }
 
 .topbar {
   height: var(--topbar-h);
