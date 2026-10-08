@@ -955,20 +955,21 @@ are different claims:
 
 ## Open items
 
-- **A credit note or waiver is not bounded, and its ledger legs can disagree
-  with the invoice.** Found 2026-10-08 in a browser check. `FeeAdjustmentService`
-  writes the invoice as `total = GREATEST(total - amount, paid)` but posts the
-  whole `amount` to the ledger and to the invoice line. A ₹99,999,999 credit
-  note on an invoice with ₹3,250 outstanding was accepted: the invoice moved by
-  ₹3,250 and `FEE_INCOME`/`FEE_RECEIVABLE` moved by ₹99,999,999. Each journal
-  still balances, which is why nothing in the suite sees it. Not fixed here
-  because the bound is a decision, not a typo: FEE-11 certifies a credit note
-  against a fully paid invoice (the half of the term a withdrawn child did not
-  use, refunded afterwards), so "no more than is outstanding" is wrong, and the
-  clamp is what hides that case rather than modelling it. The choice is between
-  bounding by what was billed and letting the excess over outstanding become a
-  credit owed to the family, or refusing anything past outstanding and making
-  the withdrawal path refund first.
+- ~~**A credit note or waiver is not bounded, and its ledger legs can disagree
+  with the invoice.**~~ Found and fixed 2026-10-08. `FeeAdjustmentService`
+  wrote the invoice as `total = GREATEST(total - amount, paid)` but posted the
+  whole `amount` to the ledger and the invoice line, so a ₹99,999,999 credit
+  note on an invoice with ₹3,250 outstanding was accepted, the invoice moved by
+  ₹3,250 and the ledger by ₹99,999,999 — each journal balanced, which is why
+  nothing saw it. Now a credit note or waiver may not exceed what the invoice
+  was billed for, and the part that falls on money already paid becomes credit
+  held for the family: `paid` drops, `advance_amount` rises, and the leg goes
+  to `ADVANCE` instead of `FEE_RECEIVABLE` (`CreditSplit`, unit-tested). A
+  refund of the payment then takes that credit back out first. FEE-11 asserts
+  both. Left as it was: FEE-11 still refunds the whole payment after crediting
+  half the term, so its invoice ends `refunded` with the uncredited half
+  showing as owed — whether a withdrawal should refund only the credited part
+  is a policy question the scenario has not asked.
 
 - ~~**Session expiry isn't handled.**~~ Fixed 2026-08-12 as part of Phase 0.
   Two halves. Server: `TenantResolverFilter` answered an expired token with

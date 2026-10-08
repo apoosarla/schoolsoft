@@ -438,6 +438,13 @@ class FeesCertTest extends AbstractCertificationTest {
             "gateway", "cash", "method", "cash", "idempotencyKey", "cert-refund-" + invoiceId), token)
             .getBody().get("id").asText());
 
+        // Nobody is credited more than they were billed.
+        var tooMuch = post("/v1/fees/invoices/" + invoiceId + "/adjustments", body(
+            "schoolId", cbse().id(), "kind", "credit_note", "amount", 12000.01,
+            "reason", "More than the term cost", "approvedByStaffId", cbse().principalStaffId()), token);
+        assertThat(tooMuch.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(tooMuch.getBody().get("message").asText()).contains("billed for");
+
         // Withdrawn halfway through the term: half the fee is credited, the rest
         // refunded, and the invoice ends up owing nothing.
         var creditNote = post("/v1/fees/invoices/" + invoiceId + "/adjustments", body(
@@ -445,6 +452,20 @@ class FeesCertTest extends AbstractCertificationTest {
             "reason", "Withdrawal from 15 Sep — unused half of the term",
             "approvedByStaffId", cbse().principalStaffId()), token);
         assertThat(creditNote.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // The bill was paid in full, so the credit falls on money already
+        // received: it becomes credit held for the family, the invoice never
+        // shows more paid than billed, and the ledger says the same thing.
+        var credited = get("/v1/fees/invoices/" + invoiceId, token).getBody();
+        assertThat(credited.get("total").asDouble()).isEqualTo(6000.0);
+        assertThat(credited.get("paid").asDouble()).isEqualTo(6000.0);
+        assertThat(credited.get("advanceAmount").asDouble()).isEqualTo(6000.0);
+        UUID creditNoteId = UUID.fromString(creditNote.getBody().get("id").asText());
+        assertThat(queryOne("SELECT COALESCE(sum(credit), 0) FROM ledger_entry WHERE source_id = ? "
+            + "AND account_code = 'ADVANCE'", java.math.BigDecimal.class, creditNoteId))
+            .isEqualByComparingTo("6000");
+        assertThat(count("SELECT count(*) FROM ledger_entry WHERE source_id = ? "
+            + "AND account_code = 'FEE_RECEIVABLE'", creditNoteId)).isZero();
 
         var refund = post("/v1/fees/invoices/" + invoiceId + "/adjustments", body(
             "schoolId", cbse().id(), "kind", "refund", "amount", 12000.0,
@@ -455,6 +476,7 @@ class FeesCertTest extends AbstractCertificationTest {
         var invoice = get("/v1/fees/invoices/" + invoiceId, token).getBody();
         assertThat(invoice.get("paid").asDouble()).isEqualTo(0.0);
         assertThat(invoice.get("status").asText()).isEqualTo("refunded");
+        assertThat(invoice.get("advanceAmount").asDouble()).isEqualTo(0.0);
 
         for (String kind : List.of("credit_note", "refund")) {
             assertThat(journalBalances("adjustment", queryOne(

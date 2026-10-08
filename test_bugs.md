@@ -67,7 +67,7 @@ Left open on 2026-09-27, fixed 2026-10-08:
   the API takes ISO 1..7, so a Sunday slot was refused by the database. `V044`
   moves 0 to 7 and makes the check 1..7.
 
-Found on 2026-10-08 while re-running BUG-29, not fixed:
+Found on 2026-10-08 while re-running BUG-29, fixed the same day (bounded by what was billed; the part past the dues becomes credit held):
 - A credit note or waiver has no upper bound and its ledger legs can disagree
   with the invoice — see the first entry under "Open items" in `BACKLOG.md`.
   The probe that found it (a ₹99,999,999 credit note on INV-0002) was removed

@@ -259,8 +259,8 @@ prices the invoice, and `InvoicePricingTest` runs in milliseconds.
 
 Worth knowing before trusting a green build:
 
-- Unit tests cover invoice pricing only. Everything else runs through HTTP
-  against a real database, so pure logic (grading bands, rollover date maths,
+- Unit tests cover invoice pricing and the credit-note split only. Everything
+  else runs through HTTP against a real database, so pure logic (grading bands, rollover date maths,
   dunning) has no fast test and cannot be exercised without Postgres.
 - The six frontends have **zero** tests.
 
@@ -273,6 +273,10 @@ Worth knowing before trusting a green build:
   `ledger_entry` rows and the ledger is append-only in practice.
 - Payments are idempotent on `idempotency_key` so a gateway webhook retry never
   double-posts.
+- An invoice never shows more paid than billed. Money past the bill is
+  `advance_amount` — an overpayment leaves it, and so does a credit note or
+  waiver that falls on money already paid (`fees/internal/CreditSplit`). A
+  credit note may not exceed what the invoice was billed for.
 - High-risk mutations carry `@Audited(action, targetType, idParam, snapshot)`.
   `requireReason` defaults true. The interceptor is a **web** interceptor, so it
   runs ahead of method security: an audited endpoint called without a reason
@@ -375,7 +379,8 @@ Worth knowing before trusting a green build:
 `BACKLOG.md` is the live list. Two structural ones worth knowing up front:
 
 - **Almost no unit tests, and no frontend tests.** See above — beyond invoice
-  pricing, everything runs through HTTP against a real database.
+  pricing and the credit-note split, everything runs through HTTP against a
+  real database.
 - **`mark` is unversioned.** Concurrent mark entry is last-write-wins, but every
   change writes a `mark_revision` row, so an overwrite is recorded and
   recoverable rather than silent. Versioning it would mean a version on every

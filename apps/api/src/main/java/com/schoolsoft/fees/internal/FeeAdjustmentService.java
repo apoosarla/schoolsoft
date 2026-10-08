@@ -24,8 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <pre>
  *   charge / late_fee  raises the amount owed   FEE_RECEIVABLE DR / income CR
- *   credit_note        lowers the amount owed   income DR / FEE_RECEIVABLE CR
- *   waiver             lowers the amount owed   FEE_WAIVER DR / FEE_RECEIVABLE CR
+ *   credit_note        lowers the amount owed   income DR / FEE_RECEIVABLE (+ ADVANCE) CR
+ *   waiver             lowers the amount owed   FEE_WAIVER DR / FEE_RECEIVABLE (+ ADVANCE) CR
  *   reversal           un-does a payment        FEE_RECEIVABLE (+ ADVANCE) DR / BANK or CASH CR
  *   refund             pays money back out      FEE_RECEIVABLE (+ ADVANCE) DR / REFUND CR
  * </pre>
@@ -34,6 +34,12 @@ import org.springframework.transaction.annotation.Transactional;
  * has to be able to show that the money arrived and went away again. A
  * reversal credits whichever account the payment debited, so reversing a
  * cash receipt takes it out of the cash box rather than the bank.
+ *
+ * A credit note or waiver is bounded by what the invoice was billed for, and
+ * the part of it that falls on money already paid becomes credit held for the
+ * family ({@link CreditSplit}). It used to be clamped instead — the invoice
+ * stopped at {@code paid} while the ledger took the whole amount — so the two
+ * views disagreed by whatever the clamp swallowed, and nothing bounded it.
  */
 @Service
 public class FeeAdjustmentService {
@@ -86,17 +92,26 @@ public class FeeAdjustmentService {
             invoiceId);
         if (invoice.isEmpty()) throw new NotFoundException("Invoice not found: " + invoiceId);
         String invoiceNo = (String) invoice.get(0)[0];
+        double total = (Double) invoice.get(0)[1];
+        double paid = (Double) invoice.get(0)[2];
         double advanceHeld = (Double) invoice.get(0)[4];
 
         PaymentUnwind unwind = null;
         if ("reversal".equals(kind) || "refund".equals(kind)) {
-            unwind = planUnwind(invoiceId, invoiceNo, kind, amount, paymentId, advanceHeld);
-            double paid = (Double) invoice.get(0)[2];
+            unwind = planUnwind(invoiceId, invoiceNo, kind, amount, paymentId, advanceHeld, paid);
             if (unwind.receivable() > paid + 0.005) {
                 throw new IllegalArgumentException(
                     "Cannot take back " + amount + " on " + invoiceNo + ": only " + paid
                         + " of it went to the bill");
             }
+        }
+        CreditSplit.Split credit = null;
+        if ("credit_note".equals(kind) || "waiver".equals(kind)) {
+            if (amount > total + 0.005) {
+                throw new IllegalArgumentException(
+                    "Cannot take " + amount + " off " + invoiceNo + ": it was billed for " + total);
+            }
+            credit = CreditSplit.of(total, paid, amount);
         }
 
         UUID id = UUID.randomUUID();
@@ -114,19 +129,17 @@ public class FeeAdjustmentService {
                 post(schoolId, id, "late_fee".equals(kind) ? "LATE_FEE" : "FEE_INCOME", 0, amount,
                     reason, invoiceNo);
             }
-            case "credit_note" -> {
-                jdbc.update("UPDATE fee_invoice SET total = GREATEST(total - ?, paid), updated_at = now() " +
-                    "WHERE id = ?", amount, invoiceId);
+            case "credit_note", "waiver" -> {
+                jdbc.update("UPDATE fee_invoice SET total = total - ?, paid = paid - ?, " +
+                    "advance_amount = advance_amount + ?, updated_at = now() WHERE id = ?",
+                    amount, credit.toAdvance(), credit.toAdvance(), invoiceId);
                 addLine(invoiceId, feeHeadId, schoolId, reason, -amount);
-                post(schoolId, id, "FEE_INCOME", amount, 0, reason, invoiceNo);
-                post(schoolId, id, "FEE_RECEIVABLE", 0, amount, reason, invoiceNo);
-            }
-            case "waiver" -> {
-                jdbc.update("UPDATE fee_invoice SET total = GREATEST(total - ?, paid), updated_at = now() " +
-                    "WHERE id = ?", amount, invoiceId);
-                addLine(invoiceId, feeHeadId, schoolId, reason, -amount);
-                post(schoolId, id, "FEE_WAIVER", amount, 0, reason, invoiceNo);
-                post(schoolId, id, "FEE_RECEIVABLE", 0, amount, reason, invoiceNo);
+                post(schoolId, id, "waiver".equals(kind) ? "FEE_WAIVER" : "FEE_INCOME", amount, 0,
+                    reason, invoiceNo);
+                if (credit.offDues() > 0) {
+                    post(schoolId, id, "FEE_RECEIVABLE", 0, credit.offDues(), reason, invoiceNo);
+                }
+                if (credit.toAdvance() > 0) post(schoolId, id, "ADVANCE", 0, credit.toAdvance(), reason, invoiceNo);
             }
             case "reversal", "refund" -> {
                 // The advance comes back first: it is the part of the payment
@@ -171,7 +184,7 @@ public class FeeAdjustmentService {
      * one payment could be reversed as many times as the invoice had room for.
      */
     private PaymentUnwind planUnwind(UUID invoiceId, String invoiceNo, String kind, double amount,
-                                     UUID paymentId, double advanceHeld) {
+                                     UUID paymentId, double advanceHeld, double paid) {
         if (paymentId == null) {
             throw new IllegalArgumentException("A " + kind + " must name the payment it un-does");
         }
@@ -203,6 +216,12 @@ public class FeeAdjustmentService {
             "WHERE l.account_code = 'ADVANCE' AND l.source_type = 'adjustment' AND a.payment_id = ?",
             Double.class, paymentId);
         double advance = round(Math.min(amount, Math.min(advanceHeld, Math.max(0, paymentAdvance - advanceReturned))));
+        // A credit note may since have turned part of what this payment paid
+        // into credit held. That part is no longer in `paid`, so it comes back
+        // out of the advance too — but only as far as the bill cannot cover it,
+        // so one payment's reversal never draws on another's overpayment.
+        double beyondPaid = round(amount - advance - paid);
+        if (beyondPaid > 0) advance = round(advance + Math.min(beyondPaid, advanceHeld - advance));
         String account = jdbc.query(
             "SELECT account_code FROM ledger_entry WHERE source_type = 'payment' AND source_id = ? AND debit > 0",
             (rs, i) -> rs.getString(1), paymentId).stream().findFirst().orElse("BANK");
