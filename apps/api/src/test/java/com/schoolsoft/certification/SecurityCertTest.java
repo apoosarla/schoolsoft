@@ -8,6 +8,8 @@ import com.schoolsoft.iam.internal.OtpStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Disabled;
@@ -25,6 +27,12 @@ class SecurityCertTest extends AbstractCertificationTest {
     private String guardianPhone(int nth) {
         return queryOne("SELECT phone FROM user_account WHERE subject_type = 'guardian' AND is_active "
             + "AND school_id = ? ORDER BY phone LIMIT 1 OFFSET " + nth, String.class, cbse().id());
+    }
+
+    private List<String> screensOf(String token) {
+        List<String> keys = new ArrayList<>();
+        get("/v1/iam/me/screens", token).getBody().get("screenKeys").forEach(k -> keys.add(k.asText()));
+        return keys;
     }
 
     private ResponseEntity<JsonNode> verifyOtp(String phone, String code) {
@@ -103,10 +111,34 @@ class SecurityCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P1")
-    @Disabled("/v1/iam/me/screens reports the caller's screens, but no endpoint checks them: a "
-        + "hand-crafted call to any module succeeds for any authenticated staff account regardless of "
-        + "role. Screen access is advisory only. New gap found in Phase 0 — security-relevant.")
     void cert_SEC_03_screenAccessIsEnforcedServerSide() {
+        // /me/screens says what the menu shows. What refuses a hand-crafted call is
+        // the permission behind the endpoint, so each role here is sent to a module
+        // its menu does not carry and has to be turned away by the server.
+        String librarian = librarianToken(cbse());
+        assertThat(screensOf(librarian)).contains("library").doesNotContain("fees", "admin");
+        assertThat(get("/v1/library/titles?schoolId=" + cbse().id(), librarian).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/fees/reports/day-book?schoolId=" + cbse().id()
+            + "&from=2026-08-01&to=2026-08-31", librarian).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/v1/iam/roles", librarian).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        String accountant = accountantToken(cbse());
+        assertThat(screensOf(accountant)).contains("fees").doesNotContain("library", "admin");
+        assertThat(get("/v1/fees/reports/day-book?schoolId=" + cbse().id()
+            + "&from=2026-08-01&to=2026-08-31", accountant).getStatusCode())
+            .isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/iam/roles", accountant).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // A write is refused the same way as a read.
+        String teacher = teacherToken(cbse(), 1);
+        assertThat(screensOf(teacher)).doesNotContain("fees", "admin");
+        assertThat(post("/v1/fees/generate", body(
+            "schoolId", cbse().id(),
+            "academicYearId", cbse().currentAy().id(),
+            "cycleLabel", "should-never-run"), teacher).getStatusCode())
+            .isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test @Tag("P1")

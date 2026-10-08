@@ -955,6 +955,21 @@ are different claims:
 
 ## Open items
 
+- **A credit note or waiver is not bounded, and its ledger legs can disagree
+  with the invoice.** Found 2026-10-08 in a browser check. `FeeAdjustmentService`
+  writes the invoice as `total = GREATEST(total - amount, paid)` but posts the
+  whole `amount` to the ledger and to the invoice line. A ₹99,999,999 credit
+  note on an invoice with ₹3,250 outstanding was accepted: the invoice moved by
+  ₹3,250 and `FEE_INCOME`/`FEE_RECEIVABLE` moved by ₹99,999,999. Each journal
+  still balances, which is why nothing in the suite sees it. Not fixed here
+  because the bound is a decision, not a typo: FEE-11 certifies a credit note
+  against a fully paid invoice (the half of the term a withdrawn child did not
+  use, refunded afterwards), so "no more than is outstanding" is wrong, and the
+  clamp is what hides that case rather than modelling it. The choice is between
+  bounding by what was billed and letting the excess over outstanding become a
+  credit owed to the family, or refusing anything past outstanding and making
+  the withdrawal path refund first.
+
 - ~~**Session expiry isn't handled.**~~ Fixed 2026-08-12 as part of Phase 0.
   Two halves. Server: `TenantResolverFilter` answered an expired token with
   **403** (it used `sendError`, which re-dispatches through `/error` and is
@@ -1513,10 +1528,18 @@ several are security-relevant.
     fixture now seeds the driver as a staff account with a `driver.staff_id`
     link, which is what a real driver login looks like.
 
-- **GAP-32 — Screen access is advisory.** `/v1/iam/me/screens` reports what the
-  UI should show, but no endpoint checks it: a hand-crafted call to any module
-  succeeds for any authenticated staff account regardless of role grants
-  (SEC-03).
+- **GAP-32 — Screen access is advisory.** *Closed.* Screens are still
+  advisory, and are meant to be: `/v1/iam/me/screens` drives the menu and
+  nothing else. What refuses a hand-crafted call is the permission on the
+  endpoint — every HTTP-mapped method declares `@PreAuthorize`
+  (`RbacArchitectureTest`), the grants live in `role_perm`, and
+  `RbacEnforcementTest` proves the annotations are live. SEC-03 enabled
+  2026-10-08: a librarian, an accountant and a subject teacher are each sent to
+  a module their menu does not carry and refused 403. Original finding:
+  no endpoint checked anything, so any authenticated staff account could call
+  any module regardless of role grants. The frontend half — no route guard, and
+  no test that a route declares one — is tracked under "Borrowed from
+  healthcare-initiative" above.
 
 - **GAP-33 — OTP has no rate limit and a permanent dev bypass.** *Closed.* The
   bypass is `schoolsoft.iam.dev-otp-code` — blank means none, and
@@ -1720,11 +1743,15 @@ several are security-relevant.
   no source precedence rule exists (ATT-08), and offline teacher marking has no
   conflict surface at all (ATT-09).
 
-- **GAP-40 — Timetable reads ignore effective dates.** Slots carry
-  `effective_from`/`effective_to`; `forSection`/`forTeacher` select every row,
-  so a mid-year revision rewrites history instead of superseding it from a date
-  (TT-05). There is also no day view and no after-hours suppression for the
-  parent/student view (TT-07).
+- **GAP-40 — Timetable reads ignore effective dates.** ⚠️ **Partly closed.**
+  Every read now applies the slot's window (`TimetableRepository.IN_FORCE`), a
+  mid-year revision retires the old slot from a last day and creates its
+  replacement from the next, and TT-05 is enabled and passing. The day view
+  exists too (`GET /v1/timetable/sections/{id}/day`). Still open: nothing
+  suppresses periods after school hours for the parent/student view, so TT-07
+  stays disabled. Original finding: `forSection`/`forTeacher` selected every
+  row, so a mid-year revision rewrote history instead of superseding it from a
+  date.
 
 - **GAP-41 — No admissions state machine on the server.** ⚠️ **Machine half
   closed 2026-09-20:** `V033` seeds the legal moves from design doc §13 into

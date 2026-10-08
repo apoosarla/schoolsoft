@@ -375,9 +375,9 @@ class TimetableCertTest extends AbstractCertificationTest {
     }
 
     @Test @Tag("P2")
-    @Disabled("No day view: the timetable API returns the full week for a section with no date filter and "
-        + "no after-hours suppression, so a parent/student 'today' view cannot be served. New gap found "
-        + "in Phase 0.")
+    @Disabled("GAP-40 — the day view exists (/v1/timetable/sections/{id}/day) but returns the whole day "
+        + "whatever the hour: nothing drops the periods once school is over, which is the half of a "
+        + "parent/student 'today' view this scenario asks for.")
     void cert_TT_07_parentViewShowsTodaysPeriodsOnly() {
     }
 
