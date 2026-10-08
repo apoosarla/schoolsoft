@@ -287,7 +287,7 @@ Worth knowing before trusting a green build:
 - **A record written back whole carries a `version`**, the client sends back
   what it read, and the UPDATE is `... version = version + 1 WHERE id = ? AND
   version = ?`. Zero rows means somebody saved first: 409, never a silent
-  overwrite. `role` and `fee_structure` are versioned; `V028` explains why the
+  overwrite. `role`, `fee_structure` and `staff` are versioned; `V028` explains why the
   other contended tables deliberately are not, and `ArchitectureTest` fails the
   build on an unversioned write to a versioned table.
 - **A state transition is one conditional UPDATE that names the state it moves
@@ -312,6 +312,23 @@ Worth knowing before trusting a green build:
   question really is the status: the two writes, and rollover, which asks who is
   *continuing* rather than who is on the register — and counts seats in next
   year's sections, whose enrolments have not started yet.
+- **"Is this person on the staff?" is a question about a date too.**
+  `staff.left_on` is the last working day, inclusive, and `iam/api/StaffTenure`
+  holds the only copy of the predicate — `left_on IS NULL OR left_on >= d`.
+  Sign-in, token refresh and `PermissionChecker` all read it, so an exit filed
+  on the 1st for the 30th leaves the person working until the 30th and shuts
+  the door on the 1st with no job to run. An exit does not revoke role grants
+  or touch `is_active`; neither says whether somebody still works here. A
+  picker asks `GET /v1/people/staff?current=true`.
+- **A leaver's work is handed over from a date, never rewritten.** An exit is
+  refused while the person would still hold work after their last day. Each
+  module that hangs standing work off a staff id implements
+  `people/api/StaffDutyHandover` (tenancy for `section_subject_teacher`,
+  timetable for slots) — a new kind of duty is a new bean, not an edit to
+  `StaffService`. `section_subject_teacher` carries
+  `effective_from`/`effective_to`; a read that asks *who teaches* applies
+  `tenancy/api/TeachingAssignment.inForce`, and a read that asks *what the
+  section is taught* deliberately does not.
 - **"Today" is the school's today.** A server on UTC and a school on IST
   disagree about the date from midnight to 05:30. Take a date from
   `SchoolClock.today(schoolId)` (or `today()` for the caller's own school),

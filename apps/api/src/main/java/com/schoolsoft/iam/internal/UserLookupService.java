@@ -1,5 +1,6 @@
 package com.schoolsoft.iam.internal;
 
+import com.schoolsoft.iam.api.StaffTenure;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import java.util.List;
 import java.util.Optional;
@@ -33,10 +34,12 @@ public class UserLookupService {
 
     private final JdbcTemplate platformJdbc;
     private final DataSource dataSource;
+    private final StaffTenure tenure;
 
-    public UserLookupService(JdbcTemplate platformJdbc, DataSource dataSource) {
+    public UserLookupService(JdbcTemplate platformJdbc, DataSource dataSource, StaffTenure tenure) {
         this.platformJdbc = platformJdbc;
         this.dataSource = dataSource;
+        this.tenure = tenure;
     }
 
     /**
@@ -116,10 +119,23 @@ public class UserLookupService {
                 ),
                 userAccountId
             );
-            return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+            return rows.stream().filter(this::stillOnTheBooks).findFirst();
         } finally {
             TenantContext.clear();
         }
+    }
+
+    /**
+     * A member of staff past their last working day has no way in — not a new
+     * code, and not a fresh access token off a refresh token they still hold.
+     * Asked here, inside the chain's tenant context, because the answer needs
+     * the school's own today. Answering "no such account" rather than "you
+     * have left" is deliberate: it is the same sentence a deactivated account
+     * gets, and the door says no more than that to anybody.
+     */
+    private boolean stillOnTheBooks(Resolved account) {
+        return !"staff".equals(account.subjectType())
+            || tenure.accountIsOnBooks(account.userAccountId(), account.schoolId());
     }
 
     private Optional<Resolved> lookupInChain(ChainRow chain, String identifier) {
@@ -140,7 +156,7 @@ public class UserLookupService {
                 ),
                 identifier, identifier
             );
-            return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+            return rows.stream().filter(this::stillOnTheBooks).findFirst();
         } finally {
             TenantContext.clear();
         }

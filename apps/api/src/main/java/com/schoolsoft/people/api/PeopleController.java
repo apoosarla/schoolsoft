@@ -4,6 +4,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import com.schoolsoft.iam.api.SelfScope;
 import com.schoolsoft.people.internal.PeopleRepository;
 import com.schoolsoft.platform.security.Perm;
+import com.schoolsoft.platform.time.SchoolClock;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.util.List;
@@ -17,10 +18,12 @@ public class PeopleController {
 
     private final PeopleRepository repo;
     private final SelfScope selfScope;
+    private final SchoolClock clock;
 
-    public PeopleController(PeopleRepository repo, SelfScope selfScope) {
+    public PeopleController(PeopleRepository repo, SelfScope selfScope, SchoolClock clock) {
         this.repo = repo;
         this.selfScope = selfScope;
+        this.clock = clock;
     }
 
     // -------------------------- Students --------------------------
@@ -85,8 +88,10 @@ public class PeopleController {
     // -------------------------- Staff --------------------------
     @PreAuthorize("@perm.can('staff.view')")
     @GetMapping("/staff")
-    public List<StaffDto> staff(@RequestParam UUID schoolId, @RequestParam(required = false) String q) {
-        return repo.listStaff(schoolId, q);
+    public List<StaffDto> staff(@RequestParam UUID schoolId, @RequestParam(required = false) String q,
+                                @RequestParam(defaultValue = "false") boolean current) {
+        // `current` is for pickers: nobody should be offered a colleague who has left.
+        return repo.listStaff(schoolId, q, current ? clock.today(schoolId) : null);
     }
 
     // -------------------------- Directory --------------------------

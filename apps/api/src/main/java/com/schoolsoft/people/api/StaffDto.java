@@ -14,5 +14,16 @@ public record StaffDto(
     String employmentType,
     LocalDate joinedOn,
     boolean isActive,
-    UUID campusId
+    UUID campusId,
+    /**
+     * Last working day, inclusive; null while they are on the books. This, not
+     * {@code isActive}, is what says whether somebody still works here — a
+     * date in the future is a person serving notice.
+     */
+    LocalDate leftOn,
+    String exitReason,
+    /** Who took over their sections and periods, when there were any. */
+    UUID successorStaffId,
+    /** Sent back on an edit or an exit; a stale one is refused with 409. */
+    int version
 ) {}

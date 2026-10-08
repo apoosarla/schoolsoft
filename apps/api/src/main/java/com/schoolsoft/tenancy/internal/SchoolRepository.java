@@ -488,22 +488,40 @@ public class SchoolRepository {
         UUID.fromString(rs.getString("teacher_staff_id")),
         rs.getString("teacher_name"),
         rs.getBoolean("is_primary"),
-        rs.getBoolean("is_elective")
+        rs.getBoolean("is_elective"),
+        rs.getDate("effective_from") == null ? null : rs.getDate("effective_from").toLocalDate(),
+        rs.getDate("effective_to") == null ? null : rs.getDate("effective_to").toLocalDate()
     );
 
-    public List<SectionSubjectTeacherDto> listSectionSubjectTeachers(UUID sectionId) {
+    private static final String SST_SELECT =
+        "SELECT sst.id, sst.section_id, sst.subject_id, sub.name AS subject_name, " +
+        "       sst.teacher_staff_id, (st.first_name || ' ' || COALESCE(st.last_name, '')) AS teacher_name, " +
+        "       sst.is_primary, sst.is_elective, sst.effective_from, sst.effective_to " +
+        "FROM section_subject_teacher sst " +
+        "JOIN subject sub ON sub.id = sst.subject_id " +
+        "JOIN staff st ON st.id = sst.teacher_staff_id ";
+
+    /**
+     * Who teaches what in a section as of {@code onDate}: the assignments in
+     * force that day, and the ones that have not started yet — a successor
+     * named in a handover is on the list before their first day, dated, so the
+     * office can see the section is not about to go teacherless. An assignment
+     * that has ended is history and is not listed.
+     */
+    public List<SectionSubjectTeacherDto> listSectionSubjectTeachers(UUID sectionId, LocalDate onDate) {
         return jdbc.query(
-            "SELECT sst.id, sst.section_id, sst.subject_id, sub.name AS subject_name, " +
-            "       sst.teacher_staff_id, (st.first_name || ' ' || COALESCE(st.last_name, '')) AS teacher_name, " +
-            "       sst.is_primary, sst.is_elective " +
-            "FROM section_subject_teacher sst " +
-            "JOIN subject sub ON sub.id = sst.subject_id " +
-            "JOIN staff st ON st.id = sst.teacher_staff_id " +
-            "WHERE sst.section_id = ? ORDER BY sub.name",
-            SST, sectionId
+            SST_SELECT +
+            "WHERE sst.section_id = ? AND COALESCE(sst.effective_to, 'infinity'::date) >= ? " +
+            "ORDER BY sub.name, sst.effective_from NULLS FIRST",
+            SST, sectionId, Date.valueOf(onDate)
         );
     }
 
+    /**
+     * Assigning a teacher who held this subject here before reopens their row
+     * rather than colliding with it: the unique key is the triple, and a
+     * returning teacher is the same triple.
+     */
     public SectionSubjectTeacherDto assignSectionSubjectTeacher(
         UUID sectionId, UUID subjectId, UUID teacherStaffId, boolean isPrimary, boolean isElective
     ) {
@@ -512,23 +530,64 @@ public class SchoolRepository {
             "INSERT INTO section_subject_teacher (id, section_id, subject_id, teacher_staff_id, is_primary, " +
             "  is_elective) VALUES (?, ?, ?, ?, ?, ?) " +
             "ON CONFLICT (section_id, subject_id, teacher_staff_id) DO UPDATE SET " +
-            "  is_primary = EXCLUDED.is_primary, is_elective = EXCLUDED.is_elective",
+            "  is_primary = EXCLUDED.is_primary, is_elective = EXCLUDED.is_elective, effective_to = NULL",
             id, sectionId, subjectId, teacherStaffId, isPrimary, isElective
         );
-        id = jdbc.queryForObject(
-            "SELECT id FROM section_subject_teacher WHERE section_id = ? AND subject_id = ? " +
-            "  AND teacher_staff_id = ?", UUID.class, sectionId, subjectId, teacherStaffId);
         return jdbc.queryForObject(
-            "SELECT sst.id, sst.section_id, sst.subject_id, sub.name AS subject_name, " +
-            "       sst.teacher_staff_id, (st.first_name || ' ' || COALESCE(st.last_name, '')) AS teacher_name, " +
-            "       sst.is_primary, sst.is_elective " +
-            "FROM section_subject_teacher sst " +
-            "JOIN subject sub ON sub.id = sst.subject_id " +
-            "JOIN staff st ON st.id = sst.teacher_staff_id " +
-            "WHERE sst.id = ?",
-            SST, id
-        );
+            SST_SELECT + "WHERE sst.section_id = ? AND sst.subject_id = ? AND sst.teacher_staff_id = ?",
+            SST, sectionId, subjectId, teacherStaffId);
     }
+
+    /** The school a section belongs to, or empty when the caller cannot see it. */
+    public Optional<UUID> schoolOfSection(UUID sectionId) {
+        return jdbc.query("SELECT school_id FROM section WHERE id = ?",
+            (rs, i) -> UUID.fromString(rs.getString(1)), sectionId).stream().findFirst();
+    }
+
+    // ---- handing a leaver's standing assignments to a successor ----
+
+    /**
+     * The assignments {@code staffId} would still hold the day after
+     * {@code lastDay}, in sections whose academic year is still running then.
+     * A closed year's sections are left out: nobody teaches them, and their
+     * rows are the record of who did.
+     */
+    public List<SectionSubjectTeacherDto> assignmentsHeldAfter(UUID staffId, LocalDate lastDay) {
+        return jdbc.query(
+            SST_SELECT +
+            "JOIN section sec ON sec.id = sst.section_id " +
+            "JOIN academic_year ay ON ay.id = sec.academic_year_id " +
+            "WHERE sst.teacher_staff_id = ? AND COALESCE(sst.effective_to, 'infinity'::date) > ? " +
+            "  AND ay.ends_on > ? " +
+            "ORDER BY sub.name",
+            SST, staffId, Date.valueOf(lastDay), Date.valueOf(lastDay));
+    }
+
+    public String sectionLabel(UUID sectionId) {
+        return jdbc.query(
+            "SELECT g.name || ' ' || s.code FROM section s JOIN grade g ON g.id = s.grade_id WHERE s.id = ?",
+            (rs, i) -> rs.getString(1), sectionId).stream().findFirst().orElse("a section");
+    }
+
+    /**
+     * Ends the leaver's assignment on {@code lastDay} and opens the
+     * successor's the day after. A successor who already teaches that subject
+     * there keeps their own row and its dates, and picks up the class-teacher
+     * flag if the leaver held it.
+     */
+    public void handOverAssignment(SectionSubjectTeacherDto held, UUID successorStaffId, LocalDate lastDay) {
+        jdbc.update(
+            "UPDATE section_subject_teacher SET effective_to = ? WHERE id = ?",
+            Date.valueOf(lastDay), held.id());
+        jdbc.update(
+            "INSERT INTO section_subject_teacher (id, section_id, subject_id, teacher_staff_id, is_primary, " +
+            "  is_elective, effective_from) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+            "ON CONFLICT (section_id, subject_id, teacher_staff_id) DO UPDATE SET " +
+            "  is_primary = section_subject_teacher.is_primary OR EXCLUDED.is_primary, effective_to = NULL",
+            UUID.randomUUID(), held.sectionId(), held.subjectId(), successorStaffId,
+            held.isPrimary(), held.isElective(), Date.valueOf(lastDay.plusDays(1)));
+    }
+
     // -------------------------- Elective groups --------------------------
 
     /**

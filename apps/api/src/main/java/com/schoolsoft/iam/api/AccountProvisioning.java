@@ -38,6 +38,21 @@ public interface AccountProvisioning {
      */
     UUID createChainAdminAccount(String email, String phone);
 
+    /**
+     * Brings a staff member's sign-in identity into line with their record
+     * after the office corrects an address or a number — a typo in the email
+     * at hiring is otherwise somebody who can never sign in. Creates the
+     * account when there is none yet; does nothing when both are blank, since
+     * a person with no way in is a state the school is allowed to keep.
+     */
+    void syncStaffIdentity(UUID schoolId, UUID staffId, String email, String phone);
+
+    /** Whether some other account already signs in with this address or number. */
+    boolean identityTaken(UUID exceptStaffId, String email, String phone);
+
+    /** Whether a role with this code exists in the catalogue. */
+    boolean roleExists(String roleCode);
+
     /** Grants {@code roleCode} over the whole school. */
     void grantSchoolRole(UUID staffId, UUID schoolId, String roleCode);
 

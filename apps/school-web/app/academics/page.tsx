@@ -1,5 +1,6 @@
 "use client";
 
+import { todayIso } from "@/lib/format";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -50,12 +51,6 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "bells", label: "Bell schedules" },
 ];
 
-function todayIso(): string {
-  // The local calendar date. toISOString() is UTC, which in India is still
-  // yesterday until 05:30 — and a register opened early landed on the wrong day.
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 const emptyPeriod = { periodNo: 1, label: "", startsAt: "08:30", endsAt: "09:15", isBreak: false };
 
@@ -151,7 +146,7 @@ export default function AcademicsPage() {
       listGrades(s.schoolId),
       listSections(s.schoolId),
       listSubjects(s.schoolId),
-      listStaff(s.schoolId),
+      listStaff(s.schoolId, undefined, { current: true }),
       listBellSchedules(s.schoolId),
     ])
       .then(([ays, gs, secs, subs, stf, bs]) => {
@@ -472,7 +467,13 @@ export default function AcademicsPage() {
                 {sectionTeachers?.map((t) => (
                   <tr key={t.id}>
                     <td>{t.subjectName}</td>
-                    <td>{t.teacherName}</td>
+                    <td>
+                      {t.teacherName}
+                      {t.effectiveTo && <span className="hint"> · until {t.effectiveTo}</span>}
+                      {t.effectiveFrom && t.effectiveFrom > todayIso() && (
+                        <span className="hint"> · from {t.effectiveFrom}</span>
+                      )}
+                    </td>
                     <td>
                       {t.isElective ? (
                         <span className="badge">elective — electors only</span>

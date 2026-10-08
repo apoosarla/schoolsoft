@@ -103,6 +103,13 @@ const ICON: Record<string, JSX.Element> = {
       <path d="M13 3.6L15.6 4.4L12.8 15L10.2 14.2L13 3.6Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
     </svg>
   ),
+  staff: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <circle cx="9" cy="6" r="2.8" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M3.5 15.2C3.5 12.4 6 10.6 9 10.6C12 10.6 14.5 12.4 14.5 15.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M13.2 3.4V6.2M11.8 4.8H14.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
   transport: (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <path d="M2.5 11.5V6.3C2.5 5.4 3.2 4.7 4.1 4.7H12.4C13.6 4.7 14.6 5.5 14.9 6.6L15.5 8.7V11.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />

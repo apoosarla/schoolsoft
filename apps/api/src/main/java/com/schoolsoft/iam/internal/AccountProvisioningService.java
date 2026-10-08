@@ -64,6 +64,35 @@ public class AccountProvisioningService implements AccountProvisioning {
     }
 
     @Override
+    public void syncStaffIdentity(UUID schoolId, UUID staffId, String email, String phone) {
+        String mail = blankToNull(email);
+        String number = blankToNull(phone);
+        if (mail == null && number == null) return;
+        int updated = jdbc.update(
+            "UPDATE user_account SET email = ?, phone = ? WHERE subject_type = 'staff' AND subject_id = ?",
+            mail, number, staffId);
+        if (updated == 0) createStaffAccount(schoolId, staffId, mail, number);
+    }
+
+    @Override
+    public boolean identityTaken(UUID exceptStaffId, String email, String phone) {
+        String mail = blankToNull(email);
+        String number = blankToNull(phone);
+        if (mail == null && number == null) return false;
+        Integer n = jdbc.queryForObject(
+            "SELECT count(*) FROM user_account ua WHERE (ua.email = ? OR ua.phone = ?) " +
+            "  AND NOT (ua.subject_type = 'staff' AND ua.subject_id IS NOT DISTINCT FROM ?)",
+            Integer.class, mail, number, exceptStaffId);
+        return n != null && n > 0;
+    }
+
+    @Override
+    public boolean roleExists(String roleCode) {
+        Integer n = jdbc.queryForObject("SELECT count(*) FROM role WHERE code = ?", Integer.class, roleCode);
+        return n != null && n > 0;
+    }
+
+    @Override
     public void grantSchoolRole(UUID staffId, UUID schoolId, String roleCode) {
         roles.assignRole(staffId, schoolId, roleCode, "school", schoolId);
     }

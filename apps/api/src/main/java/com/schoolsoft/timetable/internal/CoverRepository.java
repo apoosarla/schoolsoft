@@ -1,5 +1,6 @@
 package com.schoolsoft.timetable.internal;
 
+import com.schoolsoft.tenancy.api.TeachingAssignment;
 import com.schoolsoft.notification.api.NotificationService;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ConflictException;
@@ -207,8 +208,10 @@ public class CoverRepository {
                    "room", cover.room() == null ? "" : cover.room()));
 
         for (UUID primary : jdbc.query(
-            "SELECT DISTINCT teacher_staff_id FROM section_subject_teacher WHERE section_id = ? AND is_primary",
-            (rs, i) -> UUID.fromString(rs.getString("teacher_staff_id")), cover.sectionId())) {
+            "SELECT DISTINCT a.teacher_staff_id FROM section_subject_teacher a " +
+            "WHERE a.section_id = ? AND a.is_primary AND " + TeachingAssignment.inForce("a"),
+            (rs, i) -> UUID.fromString(rs.getString("teacher_staff_id")),
+            cover.sectionId(), java.sql.Date.valueOf(cover.onDate()), java.sql.Date.valueOf(cover.onDate()))) {
             if (primary.equals(cover.substituteStaffId())) continue;
             notifications.notify(cover.schoolId(), "staff", primary, "timetable.cover_assigned",
                 Map.of("section", cover.sectionLabel(), "subject", cover.subjectName(),

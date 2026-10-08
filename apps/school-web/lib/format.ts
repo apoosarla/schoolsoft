@@ -22,3 +22,17 @@ export function humanize(code: string | null | undefined): string {
   const words = code.replace(/_/g, " ").toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/** A date-only API value ("2026-10-31") as "31 Oct 2026", with no zone to slip across. */
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** Today's calendar date where the browser is — not UTC's, which in India is yesterday until 05:30. */
+export function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}

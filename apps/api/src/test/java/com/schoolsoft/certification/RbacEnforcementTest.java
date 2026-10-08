@@ -1088,4 +1088,44 @@ class RbacEnforcementTest extends AbstractCertificationTest {
         return org.assertj.core.api.Assertions.assertThat(
             queryList("SELECT perm_code FROM role_perm WHERE role_code = ?", String.class, roleCode));
     }
+
+    // ===================== hiring and exiting staff =====================
+
+    /**
+     * GAP-44. {@code staff.manage} is the heads' alone. The registrar reads
+     * the staff list and keeps the student register, and neither of those is
+     * putting somebody on the payroll or taking them off it; a family and a
+     * teacher are further away still.
+     */
+    @Test
+    @DisplayName("hiring, editing and exiting staff is staff.manage, held by the heads alone")
+    void staffLifecycleIsTheHeads() {
+        UUID someone = cbse().teacherStaffIds().get(5);
+        UUID child = firstStudentIn(currentFocusSection(cbse()));
+
+        for (String refused : List.of(
+                registrarToken(cbse()), accountantToken(cbse()), teacherToken(cbse(), 0),
+                guardianTokenFor(cbse(), child))) {
+            assertThat(post("/v1/people/staff", body("schoolId", cbse().id(), "firstName", "Should",
+                "email", "should.not.exist@rbac.cert.test"), refused).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(put("/v1/people/staff/" + someone, body("firstName", "Renamed",
+                "email", "renamed@rbac.cert.test", "version", 0), refused).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(get("/v1/people/staff/" + someone + "/duties?lastWorkingDate=2026-12-31", refused)
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(post("/v1/people/staff/" + someone + "/exit", body("lastWorkingDate", "2026-12-31",
+                "reason", "rbac enforcement test", "version", 0), refused).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        }
+        assertThat(count("SELECT count(*) FROM staff WHERE email = 'should.not.exist@rbac.cert.test'")).isZero();
+        assertThat(count("SELECT count(*) FROM staff WHERE id = ? AND left_on IS NULL AND first_name <> 'Renamed'",
+            someone)).isEqualTo(1);
+
+        // The head reads what a colleague holds, and cannot reach the sibling school's staff.
+        assertThat(get("/v1/people/staff/" + someone + "/duties?lastWorkingDate=2026-12-31",
+            principalToken(cbse())).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(get("/v1/people/staff/" + cie().teacherStaffIds().get(0) + "/duties?lastWorkingDate=2026-12-31",
+            principalToken(cbse())).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
 }

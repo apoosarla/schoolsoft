@@ -1300,8 +1300,8 @@ the `GAP-nn` ids and the scenarios that reference them live in that document
   adjustment (waiver included), concession grant, role grant/revoke and both
   attendance decisions now write an entry with actor, the row before and after,
   and a reason the interceptor refuses to proceed without. `audit_log` gained
-  `reason` and `request_payload` columns. STF-04 stays open on the staff-exit
-  path itself, which is Phase 7's. Original finding: Extends the
+  `reason` and `request_payload` columns. The staff-exit path STF-04 was
+  waiting on landed 2026-10-08 with GAP-44. Original finding: Extends the
   existing audit-retrofit item with a certification-scoped priority: before
   release, `AuditService.record` must at minimum cover enrolment status
   changes, mark unlock, fee waiver / concession grants, and role grants —
@@ -1763,9 +1763,46 @@ several are security-relevant.
   (ATT-11), no admissions funnel analytics (ADM-15), and no setup-readiness
   report for sections missing a primary teacher (ACAD-07).
 
-- **GAP-44 — Staff records are read-only.** No staff-creation endpoint, and
-  `assignSectionSubjectTeacher` accepts any staff id without checking for a
-  teaching role (STF-01).
+- **GAP-44 — Staff records are read-only.** ✅ **Closed 2026-10-08.** The office
+  hires, edits and exits its own staff (`POST /v1/people/staff`,
+  `PUT /v1/people/staff/{id}`, `POST /v1/people/staff/{id}/exit`, all
+  `staff.manage`, held by the three heads; V043). Hiring is one act — record,
+  employee number from the school's series, sign-in account, role grants — and
+  granting a role while hiring needs `role.manage` as well. A section can only
+  be assigned to somebody who holds a teaching grant (`mark.enter` or
+  `attendance.mark`, asked of `role_perm`, not of role names) and is still on
+  the books (STF-01).
+
+  Exit closes the staff half of GAP-27 (STF-04). `staff.left_on` is the last
+  working day and the authority on access: `iam/api/StaffTenure` is the one
+  copy of the predicate, read by sign-in, token refresh and
+  `PermissionChecker`, so access ends at the school's midnight with no job to
+  run. Role grants are not revoked — they are the record of what the person
+  held. An exit is refused while the leaver would still hold a section or a
+  timetabled period after their last day; naming a successor ends the leaver's
+  rows on that day and opens the successor's the next
+  (`section_subject_teacher` gained `effective_from`/`effective_to`;
+  timetable slots are retired and reopened the way any mid-year revision is).
+  `people/api/StaffDutyHandover` is the SPI — tenancy and timetable implement
+  it, the way fees, library and transport implement `ClearanceProbe`.
+  school-web has a Staff screen (`/staff`, screen key `staff`).
+
+  Still open, deliberately:
+  - **An exit cannot be cancelled or re-dated.** The handover has already
+    moved rows by then; undoing it needs its own design.
+  - **One successor takes everything.** Splitting a leaver's sections between
+    two people is done by reassigning before filing the exit.
+  - **Only teaching is handed over.** A cover assignment dated after the last
+    day, an invigilation slot, a pending leave approval and a driver link all
+    stay pointing at the leaver. The driver case is caught by the existing
+    route-has-no-driver warning; the others are not surfaced.
+  - **Nothing stops the last person who can manage roles from leaving.** The
+    chain's HQ can appoint a new first administrator, so the school is not
+    locked out for good, but it is not warned either.
+  - **No staff bulk import.** Students have preview-then-commit CSV; staff are
+    keyed one at a time.
+  - **A timetable slot can still be given to somebody with no teaching role.**
+    The check is on the standing assignment only.
 
 - **GAP-45 — Odds and ends surfaced by individual scenarios.** No event/RSVP
   entity (CAL-08); no section-delete endpoint (TT-10); assignment submissions

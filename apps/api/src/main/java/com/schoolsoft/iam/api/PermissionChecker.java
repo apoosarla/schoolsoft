@@ -1,6 +1,7 @@
 package com.schoolsoft.iam.api;
 
 import com.schoolsoft.platform.security.Perm;
+import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import java.util.EnumSet;
 import java.util.List;
@@ -141,8 +142,12 @@ public class PermissionChecker {
     }
 
     private final DataSource dataSource;
+    private final SchoolClock clock;
 
-    public PermissionChecker(DataSource dataSource) { this.dataSource = dataSource; }
+    public PermissionChecker(DataSource dataSource, SchoolClock clock) {
+        this.dataSource = dataSource;
+        this.clock = clock;
+    }
 
     // ===== the SpEL surface =====
 
@@ -211,8 +216,12 @@ public class PermissionChecker {
             "SELECT DISTINCT rp.perm_code FROM role_perm rp " +
             "JOIN staff_role sr ON sr.role_code = rp.role_code " +
             "JOIN user_account ua ON ua.subject_id = sr.staff_id AND ua.subject_type = 'staff' " +
+            // A grant counts only while its holder is on the books: the day
+            // after their last working day a token still in somebody's browser
+            // resolves to nothing, and every gate refuses it (STF-04).
+            "JOIN staff s ON s.id = sr.staff_id AND " + StaffTenure.onBooks("s") + " " +
             "WHERE ua.id = ? AND sr.revoked_at IS NULL",
-            String.class, userAccountId);
+            String.class, java.sql.Date.valueOf(clock.today()), userAccountId);
 
         var out = EnumSet.noneOf(Perm.class);
         // A code the database knows and this build does not is a permission

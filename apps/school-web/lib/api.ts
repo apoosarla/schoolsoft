@@ -644,12 +644,70 @@ export type StaffDto = {
   employmentType: string | null;
   joinedOn: string | null;
   isActive: boolean;
+  campusId: string | null;
+  /** Last working day, inclusive. Unset while they are on the books; a date still to come is somebody serving notice. */
+  leftOn?: string | null;
+  exitReason?: string | null;
+  successorStaffId?: string | null;
+  /** Send this back on an edit or an exit. A stale one is refused with a 409. */
+  version: number;
 };
 
-export function listStaff(schoolId: string, q?: string): Promise<StaffDto[]> {
+/**
+ * `current` leaves out everybody whose last working day has passed — what a
+ * picker wants. Without it the list is everyone who ever worked here, which is
+ * what the staff register wants.
+ */
+export function listStaff(schoolId: string, q?: string, opts?: { current?: boolean }): Promise<StaffDto[]> {
   const params = new URLSearchParams({ schoolId });
   if (q) params.set("q", q);
+  if (opts?.current) params.set("current", "true");
   return apiFetch<StaffDto[]>(`/v1/people/staff?${params.toString()}`);
+}
+
+export function createStaff(req: {
+  schoolId: string;
+  firstName: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  employeeNo?: string;
+  employmentType?: string;
+  joinedOn?: string;
+  campusId?: string;
+  roleCodes?: string[];
+}): Promise<StaffDto> {
+  return apiFetch<StaffDto>("/v1/people/staff", { method: "POST", body: JSON.stringify(req) });
+}
+
+export function updateStaff(
+  id: string,
+  req: {
+    firstName: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+    employmentType?: string;
+    joinedOn?: string;
+    campusId?: string;
+    version: number;
+  },
+): Promise<StaffDto> {
+  return apiFetch<StaffDto>(`/v1/people/staff/${id}`, { method: "PUT", body: JSON.stringify(req) });
+}
+
+export type StaffDutyDto = { area: string; description: string };
+
+/** What somebody would leave without an owner if their last day were `lastWorkingDate`. */
+export function staffDuties(id: string, lastWorkingDate: string): Promise<StaffDutyDto[]> {
+  return apiFetch<StaffDutyDto[]>(`/v1/people/staff/${id}/duties?lastWorkingDate=${lastWorkingDate}`);
+}
+
+export function exitStaff(
+  id: string,
+  req: { lastWorkingDate: string; reason: string; successorStaffId?: string; version: number },
+): Promise<StaffDto> {
+  return apiFetch<StaffDto>(`/v1/people/staff/${id}/exit`, { method: "POST", body: JSON.stringify(req) });
 }
 
 export type TimetableSlotDto = {
@@ -2119,6 +2177,10 @@ export type SectionTeacherDto = {
   teacherName: string;
   isPrimary: boolean;
   isElective: boolean;
+  /** First day the teacher holds the assignment — set when they are taking over from a leaver. */
+  effectiveFrom?: string | null;
+  /** Last day they hold it, inclusive — set when they are leaving. */
+  effectiveTo?: string | null;
 };
 
 export function listSectionTeachers(sectionId: string): Promise<SectionTeacherDto[]> {
@@ -2881,6 +2943,7 @@ export const SCREEN_DEFS = [
   { key: "comms", label: "Comms", path: "/comms" },
   { key: "library", label: "Library", path: "/library" },
   { key: "transport", label: "Transport", path: "/transport" },
+  { key: "staff", label: "Staff", path: "/staff" },
   { key: "admin", label: "Roles & Users", path: "/roles" },
   { key: "settings", label: "Settings", path: "/settings" },
   { key: "setup", label: "Setup", path: "/setup" },

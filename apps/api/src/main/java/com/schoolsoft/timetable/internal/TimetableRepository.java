@@ -413,6 +413,58 @@ public class TimetableRepository {
         return jdbc.queryForObject(SELECT + "WHERE t.id = ?", MAPPER, id);
     }
 
+    // ---- handing a leaver's periods to a successor ----
+
+    /** The periods {@code teacherStaffId} is still timetabled for the day after {@code lastDay}. */
+    public List<TimetableSlotDto> slotsHeldAfter(UUID teacherStaffId, LocalDate lastDay) {
+        return jdbc.query(
+            SELECT +
+            "JOIN section sec ON sec.id = t.section_id " +
+            "JOIN academic_year ay ON ay.id = sec.academic_year_id " +
+            // A finished year's timetable is nobody's to hand over.
+            "WHERE t.teacher_staff_id = ? AND COALESCE(t.effective_to, 'infinity'::date) > ? AND ay.ends_on > ? " +
+            "ORDER BY t.day_of_week, t.period_no",
+            MAPPER, teacherStaffId, Date.valueOf(lastDay), Date.valueOf(lastDay));
+    }
+
+    /**
+     * Gives one period to {@code successorStaffId} from the day after
+     * {@code lastDay}, the way any mid-year revision is made: the leaver's slot
+     * is retired on their last day and a copy opens for the successor the next
+     * morning, so the registers and lesson plans already hung off the old row
+     * still resolve to the person who taught them. A slot that has not started
+     * yet has no history to keep and simply changes hands.
+     *
+     * <p>The successor must be free at that time. The section and the room
+     * cannot clash — it is the same period in the same room — so those checks
+     * are not repeated.</p>
+     */
+    public void handOverSlot(TimetableSlotDto slot, UUID successorStaffId, LocalDate lastDay) {
+        LocalDate from = slot.effectiveFrom().isAfter(lastDay) ? slot.effectiveFrom() : lastDay.plusDays(1);
+        requireNoTeacherClash(successorStaffId, slot.dayOfWeek(), slot.startsAt(), slot.endsAt(),
+            from, slot.effectiveTo(), null);
+
+        if (slot.effectiveFrom().isAfter(lastDay)) {
+            jdbc.update("UPDATE timetable_slot SET teacher_staff_id = ? WHERE id = ?", successorStaffId, slot.id());
+            return;
+        }
+        jdbc.update(
+            "INSERT INTO timetable_slot (id, section_id, subject_id, teacher_staff_id, day_of_week, period_no, " +
+            "  starts_at, ends_at, room, effective_from, effective_to, campus_id, period_id) " +
+            "SELECT ?, section_id, subject_id, ?, day_of_week, period_no, starts_at, ends_at, room, ?, " +
+            "       effective_to, campus_id, period_id FROM timetable_slot WHERE id = ?",
+            UUID.randomUUID(), successorStaffId, Date.valueOf(from), slot.id());
+        jdbc.update("UPDATE timetable_slot SET effective_to = ? WHERE id = ?", Date.valueOf(lastDay), slot.id());
+    }
+
+    public String describe(TimetableSlotDto slot) {
+        String section = jdbc.query(
+            "SELECT g.name || ' ' || s.code FROM section s JOIN grade g ON g.id = s.grade_id WHERE s.id = ?",
+            (rs, i) -> rs.getString(1), slot.sectionId()).stream().findFirst().orElse("a section");
+        return slot.subjectName() + " with " + section + ", " + dayName(slot.dayOfWeek())
+            + " period " + slot.periodNo();
+    }
+
     public void deleteSlot(UUID id) {
         jdbc.update("DELETE FROM timetable_slot WHERE id = ?", id);
     }

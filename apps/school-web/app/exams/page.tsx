@@ -92,7 +92,7 @@ export default function ExamsPage() {
       return;
     }
     setSessionState(s);
-    Promise.all([listAcademicYears(s.schoolId), listGrades(s.schoolId), listSubjects(s.schoolId), listStaff(s.schoolId)])
+    Promise.all([listAcademicYears(s.schoolId), listGrades(s.schoolId), listSubjects(s.schoolId), listStaff(s.schoolId, undefined, { current: true })])
       .then(([ays, gs, subs, st]) => {
         setYears(ays);
         setGrades(gs);

@@ -1,5 +1,6 @@
 package com.schoolsoft.timetable.api;
 
+import com.schoolsoft.tenancy.api.TeachingAssignment;
 import com.schoolsoft.timetable.internal.CoverRepository;
 import java.sql.Date;
 import java.time.LocalDate;
@@ -47,12 +48,13 @@ public class TeachingDuties {
         return covers.isCovering(staffId, sectionId, onDate, periodNo);
     }
 
-    /** Whether they are the section's primary (class) teacher. */
-    public boolean isPrimaryTeacherOf(UUID staffId, UUID sectionId) {
+    /** Whether they are the section's primary (class) teacher on that date. */
+    public boolean isPrimaryTeacherOf(UUID staffId, UUID sectionId, LocalDate onDate) {
         Integer n = jdbc.queryForObject(
-            "SELECT count(*) FROM section_subject_teacher " +
-            "WHERE section_id = ? AND teacher_staff_id = ? AND is_primary",
-            Integer.class, sectionId, staffId);
+            "SELECT count(*) FROM section_subject_teacher a " +
+            "WHERE a.section_id = ? AND a.teacher_staff_id = ? AND a.is_primary AND " +
+            TeachingAssignment.inForce("a"),
+            Integer.class, sectionId, staffId, Date.valueOf(onDate), Date.valueOf(onDate));
         return n != null && n > 0;
     }
 }

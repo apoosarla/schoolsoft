@@ -114,7 +114,7 @@ export default function TimetablePage() {
       return;
     }
     setSessionState(s);
-    Promise.all([listSections(s.schoolId), listSubjects(s.schoolId), listStaff(s.schoolId)])
+    Promise.all([listSections(s.schoolId), listSubjects(s.schoolId), listStaff(s.schoolId, undefined, { current: true })])
       .then(([secs, subs, stf]) => {
         setSections(secs);
         setSubjects(subs);

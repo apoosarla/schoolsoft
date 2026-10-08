@@ -2,6 +2,7 @@ package com.schoolsoft.iam.api;
 
 import com.schoolsoft.enrolment.api.EnrolmentActivity;
 import com.schoolsoft.platform.time.SchoolClock;
+import com.schoolsoft.tenancy.api.TeachingAssignment;
 import com.schoolsoft.platform.security.Perm;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import java.sql.Date;
@@ -116,7 +117,7 @@ public class DirectoryScope {
         String placeholders = String.join(",", Collections.nCopies(mine.size(), "?"));
         List<UUID> teachers = jdbc.query(
             "SELECT DISTINCT sst.teacher_staff_id FROM section_subject_teacher sst " +
-            "WHERE sst.section_id IN (SELECT e.section_id FROM enrolment e " +
+            "WHERE " + TeachingAssignment.inForceOn("sst", today) + " AND sst.section_id IN (SELECT e.section_id FROM enrolment e " +
             "  WHERE " + enrolledToday + " AND e.student_id IN (" + placeholders + ")) " +
             "UNION " +
             "SELECT DISTINCT t.teacher_staff_id FROM timetable_slot t " +

@@ -152,14 +152,58 @@ public class PeopleRepository {
             rs.getString("employment_type"),
             rs.getDate("joined_on") == null ? null : rs.getDate("joined_on").toLocalDate(),
             rs.getBoolean("is_active"),
-            rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id"))
+            rs.getString("campus_id") == null ? null : UUID.fromString(rs.getString("campus_id")),
+            rs.getDate("left_on") == null ? null : rs.getDate("left_on").toLocalDate(),
+            rs.getString("exit_reason"),
+            rs.getString("successor_staff_id") == null ? null : UUID.fromString(rs.getString("successor_staff_id")),
+            rs.getInt("version")
         );
+    }
+
+    private static final String STAFF_SELECT =
+        "SELECT id, school_id, employee_no, first_name, last_name, email, phone, employment_type, joined_on, " +
+        "       is_active, campus_id, left_on, exit_reason, successor_staff_id, version FROM staff ";
+
+    public Optional<UUID> primaryCampusOf(UUID schoolId) {
+        return jdbc.query(
+            "SELECT id FROM campus WHERE school_id = ? ORDER BY is_primary DESC, name LIMIT 1",
+            (rs, i) -> UUID.fromString(rs.getString(1)), schoolId).stream().findFirst();
+    }
+
+    public boolean employeeNoTaken(UUID schoolId, String employeeNo) {
+        Integer n = jdbc.queryForObject(
+            "SELECT count(*) FROM staff WHERE school_id = ? AND employee_no = ?", Integer.class, schoolId, employeeNo);
+        return n != null && n > 0;
+    }
+
+    /** False when somebody saved first — the caller turns that into a 409. */
+    public boolean updateStaff(UUID id, String firstName, String lastName, String email, String phone,
+                               String employmentType, LocalDate joinedOn, UUID campusId, int expectedVersion) {
+        return jdbc.update(
+            "UPDATE staff SET first_name = ?, last_name = ?, email = ?, phone = ?, employment_type = ?, " +
+            "  joined_on = ?, campus_id = ?, version = version + 1 " +
+            "WHERE id = ? AND version = ?",
+            firstName, lastName, email, phone, employmentType,
+            joinedOn == null ? null : Date.valueOf(joinedOn), campusId, id, expectedVersion) == 1;
+    }
+
+    /**
+     * Records the exit. One conditional UPDATE naming the state it moves out
+     * of — still on the books — so two people filing the same exit cannot both
+     * succeed with different dates.
+     */
+    public boolean recordStaffExit(UUID id, LocalDate lastWorkingDate, String reason, UUID successorStaffId,
+                                   int expectedVersion) {
+        return jdbc.update(
+            "UPDATE staff SET left_on = ?, exit_reason = ?, successor_staff_id = ?, exit_recorded_at = now(), " +
+            "  version = version + 1 " +
+            "WHERE id = ? AND left_on IS NULL AND version = ?",
+            Date.valueOf(lastWorkingDate), reason, successorStaffId, id, expectedVersion) == 1;
     }
 
     public Optional<StaffDto> findStaff(UUID id) {
         return jdbc.query(
-            "SELECT id, school_id, employee_no, first_name, last_name, email, phone, " +
-            "       employment_type, joined_on, is_active, campus_id FROM staff WHERE id = ?",
+            STAFF_SELECT + "WHERE id = ?",
             staffMapper(), id).stream().findFirst();
     }
 
@@ -214,13 +258,19 @@ public class PeopleRepository {
         return jdbc.query(sql, guardianMapper(), schoolId, q, like, like);
     }
 
-    public List<StaffDto> listStaff(UUID schoolId, String q) {
+    /**
+     * {@code onBooksOn} narrows the list to the people still working at the
+     * school that day — what a picker wants. Null lists everybody who ever
+     * did, which is what the staff register wants.
+     */
+    public List<StaffDto> listStaff(UUID schoolId, String q, LocalDate onBooksOn) {
         List<Object> args = new java.util.ArrayList<>();
         args.add(schoolId);
-        StringBuilder sql = new StringBuilder(
-            "SELECT id, school_id, employee_no, first_name, last_name, email, phone, " +
-            "       employment_type, joined_on, is_active, campus_id " +
-            "FROM staff WHERE school_id = ?");
+        StringBuilder sql = new StringBuilder(STAFF_SELECT + "WHERE school_id = ?");
+        if (onBooksOn != null) {
+            sql.append(" AND (left_on IS NULL OR left_on >= ?)");
+            args.add(Date.valueOf(onBooksOn));
+        }
         if (q != null && !q.isBlank()) {
             sql.append(" AND (email ILIKE ? OR first_name ILIKE ? OR employee_no = ?)");
             args.add("%" + q + "%");

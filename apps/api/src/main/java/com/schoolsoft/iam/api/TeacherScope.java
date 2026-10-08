@@ -1,6 +1,7 @@
 package com.schoolsoft.iam.api;
 
 import com.schoolsoft.platform.security.Perm;
+import com.schoolsoft.tenancy.api.TeachingAssignment;
 import com.schoolsoft.platform.time.SchoolClock;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ForbiddenException;
@@ -139,7 +140,8 @@ public class TeacherScope {
         var today = java.sql.Date.valueOf(clock.today());
         Integer n = jdbc.queryForObject(
             "SELECT count(*) FROM (" +
-            "  SELECT 1 FROM section_subject_teacher WHERE teacher_staff_id = ? AND section_id = ? AND subject_id = ? " +
+            "  SELECT 1 FROM section_subject_teacher a WHERE a.teacher_staff_id = ? AND a.section_id = ? " +
+            "    AND a.subject_id = ? AND " + TeachingAssignment.inForce("a") + " " +
             "  UNION ALL " +
             "  SELECT 1 FROM timetable_slot WHERE teacher_staff_id = ? AND section_id = ? AND subject_id = ? " +
             "    AND effective_from <= ? AND COALESCE(effective_to, 'infinity'::date) >= ? " +
@@ -149,7 +151,7 @@ public class TeacherScope {
             "      AND c.on_date = ? AND c.cancelled_at IS NULL" +
             ") claims",
             Integer.class,
-            staffId, sectionId, subjectId,
+            staffId, sectionId, subjectId, today, today,
             staffId, sectionId, subjectId, today, today,
             staffId, sectionId, subjectId, today);
         if (n == null || n == 0) throw new ForbiddenException("You do not teach this subject in this section");
@@ -231,7 +233,8 @@ public class TeacherScope {
         var jdbc = new JdbcTemplate(dataSource);
         var today = java.sql.Date.valueOf(clock.today());
         return jdbc.query(
-            "SELECT section_id FROM section_subject_teacher WHERE teacher_staff_id = ? " +
+            "SELECT a.section_id FROM section_subject_teacher a WHERE a.teacher_staff_id = ? " +
+            "  AND " + TeachingAssignment.inForce("a") + " " +
             "UNION " +
             "SELECT section_id FROM timetable_slot " +
             "  WHERE teacher_staff_id = ? " +
@@ -240,6 +243,6 @@ public class TeacherScope {
             "SELECT t.section_id FROM timetable_cover c JOIN timetable_slot t ON t.id = c.slot_id " +
             "  WHERE c.substitute_staff_id = ? AND c.on_date = ? AND c.cancelled_at IS NULL",
             (rs, i) -> UUID.fromString(rs.getString(1)),
-            staffId, staffId, today, today, staffId, today);
+            staffId, today, today, staffId, today, today, staffId, today);
     }
 }

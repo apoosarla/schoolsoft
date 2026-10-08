@@ -53,7 +53,7 @@ public class AttendanceAuthorizer {
 
         UUID staffId = authz.currentStaffId();
         if (staffId == null) throw new ForbiddenException("No staff record behind this login");
-        if (duties.isPrimaryTeacherOf(staffId, sectionId)) return;
+        if (duties.isPrimaryTeacherOf(staffId, sectionId, onDate)) return;
         if (duties.teachesOn(staffId, sectionId, onDate, periodNo)) return;
         if (duties.isCovering(staffId, sectionId, onDate, periodNo)) return;
 

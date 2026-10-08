@@ -283,7 +283,7 @@ class ArchitectureTest {
         // Kept in step with V028__optimistic_locking.sql by hand; the list is
         // short because the column is deliberately rare (see that migration for
         // why invoice arithmetic and status columns are not on it).
-        List<String> versioned = List.of("role", "fee_structure");
+        List<String> versioned = List.of("role", "fee_structure", "staff");
 
         var offenders = new TreeSet<String>();
         var main = java.nio.file.Path.of("src/main/java");

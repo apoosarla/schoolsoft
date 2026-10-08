@@ -53,6 +53,7 @@ public enum Perm {
     STUDENT_IMPORT("student.import", "Bulk-import students, their families and their enrolments"),
     GUARDIAN_VIEW("guardian.view", "Read guardian records and their student links"),
     STAFF_VIEW("staff.view", "Read staff records"),
+    STAFF_MANAGE("staff.manage", "Add, edit and exit staff"),
     DIRECTORY_VIEW("directory.view", "Read the school directory"),
 
     // ===== enrolment =====

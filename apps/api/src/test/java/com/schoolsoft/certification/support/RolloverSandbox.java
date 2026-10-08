@@ -134,6 +134,12 @@ public class RolloverSandbox {
             "INSERT INTO staff (id, school_id, employee_no, first_name, last_name, employment_type, joined_on) " +
             "VALUES (?, ?, ?, 'Sandbox', 'Teacher', 'permanent', ?)",
             teacherStaffId, schoolId, "EMPT-" + slug, AY1_START.minusYears(1));
+        // A teacher is somebody who holds a teaching role; without one a section
+        // cannot be assigned to them (STF-01).
+        jdbc.update(
+            "INSERT INTO staff_role (id, staff_id, role_code, scope_type, scope_id) " +
+            "VALUES (?, ?, 'class_teacher', 'school', ?)",
+            id("role:teacher"), teacherStaffId, schoolId);
 
         Map<String, UUID> grades = new LinkedHashMap<>();
         for (int i = 0; i < GRADES.size(); i++) {

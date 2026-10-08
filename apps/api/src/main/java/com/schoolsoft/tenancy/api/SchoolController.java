@@ -5,6 +5,7 @@ import com.schoolsoft.audit.api.AuditService;
 import com.schoolsoft.platform.tenancy.TenantContext;
 import com.schoolsoft.platform.web.ForbiddenException;
 import com.schoolsoft.tenancy.internal.SchoolRepository;
+import com.schoolsoft.tenancy.internal.TeacherAssignmentService;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
@@ -20,11 +21,14 @@ public class SchoolController {
     private final SchoolRepository repo;
     private final AuditService audit;
     private final AcademicYearLifecycle years;
+    private final TeacherAssignmentService teacherAssignments;
 
-    public SchoolController(SchoolRepository repo, AuditService audit, AcademicYearLifecycle years) {
+    public SchoolController(SchoolRepository repo, AuditService audit, AcademicYearLifecycle years,
+                            TeacherAssignmentService teacherAssignments) {
         this.repo = repo;
         this.audit = audit;
         this.years = years;
+        this.teacherAssignments = teacherAssignments;
     }
 
     @PreAuthorize("@perm.can('structure.view')")
@@ -241,7 +245,7 @@ public class SchoolController {
     @PreAuthorize("@perm.can('structure.view')")
     @GetMapping("/sections/{sectionId}/teachers")
     public List<SectionSubjectTeacherDto> sectionTeachers(@PathVariable UUID sectionId) {
-        return repo.listSectionSubjectTeachers(sectionId);
+        return teacherAssignments.forSection(sectionId);
     }
 
     /**
@@ -256,7 +260,7 @@ public class SchoolController {
     @PreAuthorize("@perm.can('teacher.assign')")
     @PostMapping("/sections/{sectionId}/teachers")
     public SectionSubjectTeacherDto assignTeacher(@PathVariable UUID sectionId, @RequestBody AssignTeacherRequest req) {
-        return repo.assignSectionSubjectTeacher(
+        return teacherAssignments.assign(
             sectionId, req.subjectId(), req.teacherStaffId(), req.isPrimary(), req.isElective());
     }
 
